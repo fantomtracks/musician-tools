@@ -1,0 +1,49 @@
+services:
+  db:
+    image: postgres:15
+    restart: always
+    user: postgres
+    environment:
+      POSTGRES_PASSWORD: musician_pass
+      POSTGRES_USER: musician_user
+      POSTGRES_DB: musician_tools
+      PGDATA: /var/lib/postgresql/data/pgdata
+    ports:
+      - 5433:5432
+    volumes:
+      - musician-pg-data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U musician_user -d musician_tools"]
+      interval: 10s
+      timeout: 5s
+      retries: 3
+
+  adminer:
+    image: adminer
+    restart: always
+    ports:
+      - 8080:8080
+    depends_on:
+      - db
+
+  backend:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+      target: ${MODE:-dev}
+    env_file:
+      - ./backend/.env
+    environment:
+      - DATABASE_URL_DEV=postgres://musician_user:musician_pass@db/musician_tools?sslmode=disable
+      - NODE_ENV=development
+    ports:
+      - 3001:3001
+    volumes:
+      - ./backend:/app
+      - /app/node_modules
+    depends_on:
+      db:
+        condition: service_healthy
+
+volumes:
+  musician-pg-data:
