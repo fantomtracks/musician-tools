@@ -58,6 +58,14 @@ function SongDetailPage() {
     setForm({ ...form, [name]: name === 'bpm' ? Number(value) : value });
   };
 
+  const toggleFormInstrument = (instrument: string) => {
+    const current = Array.isArray(form.instrument) ? form.instrument : (form.instrument ? [form.instrument] : []);
+    const updated = current.includes(instrument)
+      ? current.filter(i => i !== instrument)
+      : [...current, instrument];
+    setForm({ ...form, instrument: updated as any });
+  };
+
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!song) return;
@@ -199,22 +207,24 @@ function SongDetailPage() {
             </div>
           </div>
           <div>
-            <label className="block text-sm font-medium text-gray-700">Instrument</label>
-            <select
-              className="mt-1 block w-full rounded-md border border-gray-300 p-2 focus:outline-none focus:ring-2 focus:ring-brand-500"
-              name="instrument"
-              value={form.instrument}
-              onChange={handleChange}
-              disabled={loading}
-            >
-              <option value="">-- Select --</option>
-              <option value="Guitar">Guitar</option>
-              <option value="Piano">Piano</option>
-              <option value="Bass">Bass</option>
-              <option value="Drums">Drums</option>
-              <option value="Vocals">Vocals</option>
-              <option value="Other">Other</option>
-            </select>
+            <label className="block text-sm font-medium text-gray-700 mb-2">Instruments</label>
+            <div className="flex flex-col gap-2">
+              {['Guitar', 'Piano', 'Bass', 'Drums', 'Vocals', 'Other'].map(inst => {
+                const current = Array.isArray(form.instrument) ? form.instrument : [];
+                return (
+                  <label key={inst} className="inline-flex items-center gap-2">
+                    <input
+                      type="checkbox"
+                      className="h-4 w-4"
+                      checked={current.includes(inst)}
+                      onChange={() => toggleFormInstrument(inst)}
+                      disabled={loading}
+                    />
+                    <span className="text-sm">{inst}</span>
+                  </label>
+                );
+              })}
+            </div>
           </div>
           <div>
             <label className="block text-sm font-medium text-gray-700">Chord chart</label>

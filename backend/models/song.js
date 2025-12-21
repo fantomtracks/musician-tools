@@ -40,8 +40,9 @@ module.exports = (sequelize, DataTypes) => {
       allowNull: true
     },
     instrument: {
-      type: DataTypes.STRING,
-      allowNull: true
+      type: DataTypes.JSON,
+      allowNull: true,
+      defaultValue: null
     },
     artist: {
       type: DataTypes.STRING,

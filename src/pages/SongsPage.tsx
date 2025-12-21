@@ -32,11 +32,42 @@ function SongsPage() {
   const [deleteDialogOpen, setDeleteDialogOpen] = useState(false);
   const [deleteMode, setDeleteMode] = useState<'single' | 'multiple' | null>(null);
   const [deleteUid, setDeleteUid] = useState<string | null>(null);
+  const [sidebarExpanded, setSidebarExpanded] = useState<boolean>(() => {
+    const saved = typeof window !== 'undefined' ? window.localStorage.getItem('songsSidebarExpanded') : null;
+    return saved === 'false' ? false : true; // default to expanded unless persisted false
+  });
+  const [instrumentFilters, setInstrumentFilters] = useState<Set<string>>(new Set());
+  const [instrumentMatchMode, setInstrumentMatchMode] = useState<'any' | 'all'>(() => {
+    const saved = typeof window !== 'undefined' ? window.localStorage.getItem('songsInstrumentMatchMode') : null;
+    return saved === 'any' ? 'any' : 'all'; // default to 'all' for exclusive filtering
+  });
+  const [filtersAccordionOpen, setFiltersAccordionOpen] = useState<boolean>(true);
   const { user, logout } = useAuth();
+
+  const toggleInstrumentFilter = (instrument: string) => {
+    setInstrumentFilters(prev => {
+      const next = new Set(prev);
+      if (next.has(instrument)) next.delete(instrument);
+      else next.add(instrument);
+      return next;
+    });
+  };
 
   useEffect(() => {
     loadSongs();
   }, []);
+
+  useEffect(() => {
+    try {
+      window.localStorage.setItem('songsSidebarExpanded', sidebarExpanded ? 'true' : 'false');
+    } catch {}
+  }, [sidebarExpanded]);
+
+  useEffect(() => {
+    try {
+      window.localStorage.setItem('songsInstrumentMatchMode', instrumentMatchMode);
+    } catch {}
+  }, [instrumentMatchMode]);
 
   const loadSongs = async () => {
     try {
@@ -92,6 +123,14 @@ function SongsPage() {
   const handleChange = (e: React.ChangeEvent<HTMLInputElement | HTMLTextAreaElement | HTMLSelectElement>) => {
     const { name, value } = e.target;
     setForm({ ...form, [name]: name === 'bpm' ? Number(value) : value });
+  };
+
+  const toggleFormInstrument = (instrument: string) => {
+    const current = Array.isArray(form.instrument) ? form.instrument : (form.instrument ? [form.instrument] : []);
+    const updated = current.includes(instrument)
+      ? current.filter(i => i !== instrument)
+      : [...current, instrument];
+    setForm({ ...form, instrument: updated as any });
   };
 
   const handleSubmit = async (e: React.FormEvent) => {
@@ -214,10 +253,20 @@ function SongsPage() {
 
   const filteredSongs = sortedSongs.filter(song => {
     const query = searchQuery.toLowerCase();
-    return (
+    const passesSearch = (
       song.title.toLowerCase().includes(query) ||
       (song.artist && song.artist.toLowerCase().includes(query))
     );
+    const selected = Array.from(instrumentFilters);
+    const songInstruments = Array.isArray(song.instrument)
+      ? song.instrument
+      : (song.instrument ? [song.instrument] : []);
+    const passesInstrument =
+      selected.length === 0 ||
+      (instrumentMatchMode === 'all'
+        ? selected.every(inst => songInstruments.includes(inst))
+        : selected.some(inst => songInstruments.includes(inst)));
+    return passesSearch && passesInstrument;
   });
 
   const handleSort = (column: string) => {
@@ -353,104 +402,204 @@ function SongsPage() {
                 </button>
               </div>
             </div>
-            <div className="mb-4">
-              <input
-                type="text"
-                placeholder="Search by song title or artist..."
-                value={searchQuery}
-                onChange={e => setSearchQuery(e.target.value)}
-                className="w-full rounded-md border border-gray-300 p-2 text-sm focus:outline-none focus:ring-2 focus:ring-brand-500"
-              />
-            </div>
-            {selectedSongs.size > 0 && (
-              <div className="mb-4 p-3 bg-blue-50 border border-blue-200 rounded-md">
-                <div className="flex items-center justify-between">
-                  <span className="text-sm font-medium text-blue-900">{selectedSongs.size} song(s) selected</span>
-                  <div className="flex gap-2">
+            <div className="flex gap-4">
+              <aside
+                id="songs-sidebar"
+                className={`${sidebarExpanded ? 'w-64' : 'w-10'} shrink-0 min-w-[40px] overflow-hidden transition-all duration-200 border border-gray-200 bg-white rounded-md`}
+                aria-hidden={false}
+              >
+                {/* Collapsed rail shows only toggle button */}
+                {!sidebarExpanded ? (
+                  <div className="p-2 flex items-center justify-center">
                     <button
                       type="button"
-                      className="inline-flex items-center rounded-md bg-green-600 text-white px-3 py-1.5 text-sm hover:bg-green-700 disabled:opacity-50"
-                      onClick={handleMarkSelectedAsPlayedNow}
-                      disabled={loading}
+                      className="inline-flex items-center rounded-md bg-gray-100 text-gray-800 px-2 py-1 hover:bg-gray-200"
+                      aria-label="Expand sidebar"
+                      onClick={() => setSidebarExpanded(true)}
                     >
-                      Mark as played now
-                    </button>
-                    <button
-                      type="button"
-                      className="inline-flex items-center rounded-md bg-red-600 text-white px-3 py-1.5 text-sm hover:bg-red-700 disabled:opacity-50"
-                      onClick={handleDeleteSelected}
-                      disabled={loading}
-                    >
-                      Delete selected
+                      »
                     </button>
                   </div>
-                </div>
-              </div>
-            )}
-            <h2 className="text-lg font-medium mb-2">Song list</h2>
-            {loading ? (
-              <p>Loading...</p>
-            ) : filteredSongs.length === 0 ? (
-              <p>{searchQuery ? 'No songs match your search.' : 'No songs saved.'}</p>
-            ) : (
-              <table className="w-full border-collapse text-sm">
-                <thead>
-                  <tr>
-                    <th className="text-left p-2 border-b w-10">
+                ) : (
+                  <div className="p-3">
+                    <div className="flex items-center justify-between mb-3">
+                      <h3 className="text-sm font-semibold">Filters</h3>
                       <button
                         type="button"
-                        className="text-xs rounded px-1.5 py-0.5 bg-blue-500 text-white hover:bg-blue-600 disabled:opacity-50"
-                        onClick={toggleSelectAll}
-                        disabled={loading}
-                        title={allDisplayedSelected ? "Deselect all" : "Select all"}
+                        className="inline-flex items-center rounded-md bg-gray-100 text-gray-800 px-2 py-1 hover:bg-gray-200"
+                        aria-label="Collapse sidebar"
+                        onClick={() => setSidebarExpanded(false)}
                       >
-                        {allDisplayedSelected ? 'None' : 'All'}
+                        «
                       </button>
-                    </th>
-                    <SortHeader column="artist" label="Artist" />
-                    <SortHeader column="title" label="Title" />
-                    <SortHeader column="bpm" label="BPM" />
-                    <SortHeader column="key" label="Key" />
-                    <SortHeader column="instrument" label="Instrument" />
-                    <SortHeader column="lastPlayed" label="Last played" />
-                    <th className="text-left p-2 border-b">Actions</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {displayedSongs.map(song => (
-                    <tr key={song.uid} className={`border-b cursor-pointer ${selectedSongs.has(song.uid) ? 'bg-blue-100 hover:bg-blue-200' : 'hover:bg-gray-100'}`} onClick={() => toggleSelectSong(song.uid)}>
-                      <td className="p-2 align-top w-10" onClick={e => e.stopPropagation()}>
-                        <input
-                          className="h-4 w-4 cursor-pointer"
-                          type="checkbox"
-                          checked={selectedSongs.has(song.uid)}
-                          onChange={() => toggleSelectSong(song.uid)}
-                          disabled={loading}
-                        />
-                      </td>
-                      <td className="p-2 align-top max-w-xs truncate" title={song.artist}>{song.artist}</td>
-                      <td className="p-2 align-top max-w-sm truncate" title={song.title}>{song.title}</td>
-                      <td className="p-2 align-top max-w-16">{song.bpm}</td>
-                      <td className="p-2 align-top max-w-20 truncate" title={song.key}>{song.key}</td>
-                      <td className="p-2 align-top max-w-24 truncate" title={song.instrument}>{song.instrument}</td>
-                      <td className="p-2 align-top max-w-32">{formatLastPlayed(song.lastPlayed)}</td>
-                      <td className="p-2 align-top">
+                    </div>
+                    <div className="border border-gray-200 rounded-md">
+                      <button
+                        type="button"
+                        className="w-full flex items-center justify-between p-2 text-sm font-medium hover:bg-gray-50"
+                        aria-expanded={filtersAccordionOpen}
+                        onClick={() => setFiltersAccordionOpen(prev => !prev)}
+                      >
+                        <span>Instrument filters</span>
+                        <span>{filtersAccordionOpen ? '▾' : '▸'}</span>
+                      </button>
+                      {filtersAccordionOpen && (
+                        <div className="p-3 border-t">
+                          <div className="text-xs font-semibold text-gray-700 mb-2">Filter by instrument</div>
+                          <div className="flex flex-col gap-2">
+                            {['Guitar','Piano','Bass','Drums','Vocals','Other'].map(inst => (
+                              <label key={inst} className="inline-flex items-center gap-2 text-sm cursor-pointer">
+                                <input
+                                  type="checkbox"
+                                  className="h-4 w-4"
+                                  checked={instrumentFilters.has(inst)}
+                                  onChange={() => toggleInstrumentFilter(inst)}
+                                />
+                                <span className="cursor-pointer">{inst}</span>
+                              </label>
+                            ))}
+                          </div>
+                          <div className="mt-3">
+                            <div className="text-xs font-semibold text-gray-700 mb-1">Match mode</div>
+                            <div className="flex items-center gap-3">
+                              <label className="inline-flex items-center gap-1 text-xs cursor-pointer">
+                                <input
+                                  type="radio"
+                                  name="instrument-match-mode"
+                                  value="all"
+                                  className="h-3 w-3"
+                                  checked={instrumentMatchMode === 'all'}
+                                  onChange={() => setInstrumentMatchMode('all')}
+                                />
+                                <span>All</span>
+                              </label>
+                              <label className="inline-flex items-center gap-1 text-xs cursor-pointer">
+                                <input
+                                  type="radio"
+                                  name="instrument-match-mode"
+                                  value="any"
+                                  className="h-3 w-3"
+                                  checked={instrumentMatchMode === 'any'}
+                                  onChange={() => setInstrumentMatchMode('any')}
+                                />
+                                <span>Any</span>
+                              </label>
+                            </div>
+                          </div>
+                          <div className="mt-3">
+                            <button
+                              type="button"
+                              className="inline-flex items-center rounded-md bg-gray-100 text-gray-800 px-2 py-1 hover:bg-gray-200"
+                              onClick={() => setInstrumentFilters(new Set())}
+                            >
+                              Clear filters
+                            </button>
+                          </div>
+                        </div>
+                      )}
+                    </div>
+                  </div>
+                )}
+              </aside>
+              <div className="flex-1">
+                <div className="mb-4">
+                  <input
+                    type="text"
+                    placeholder="Search by song title or artist..."
+                    value={searchQuery}
+                    onChange={e => setSearchQuery(e.target.value)}
+                    className="w-full rounded-md border border-gray-300 p-2 text-sm focus:outline-none focus:ring-2 focus:ring-brand-500"
+                  />
+                </div>
+                {selectedSongs.size > 0 && (
+                  <div className="mb-4 p-3 bg-blue-50 border border-blue-200 rounded-md">
+                    <div className="flex items-center justify-between">
+                      <span className="text-sm font-medium text-blue-900">{selectedSongs.size} song(s) selected</span>
+                      <div className="flex gap-2">
                         <button
                           type="button"
-                          className="inline-flex items-center rounded-md bg-blue-600 text-white px-2 py-1 hover:bg-blue-700 disabled:opacity-50"
-                          onClick={() => {
-                            navigate(`/song/${toSlug(song.artist)}/${toSlug(song.title)}`);
-                          }}
+                          className="inline-flex items-center rounded-md bg-green-600 text-white px-3 py-1.5 text-sm hover:bg-green-700 disabled:opacity-50"
+                          onClick={handleMarkSelectedAsPlayedNow}
                           disabled={loading}
                         >
-                          Edit
+                          Mark as played now
                         </button>
-                      </td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            )}
+                        <button
+                          type="button"
+                          className="inline-flex items-center rounded-md bg-red-600 text-white px-3 py-1.5 text-sm hover:bg-red-700 disabled:opacity-50"
+                          onClick={handleDeleteSelected}
+                          disabled={loading}
+                        >
+                          Delete selected
+                        </button>
+                      </div>
+                    </div>
+                  </div>
+                )}
+                <h2 className="text-lg font-medium mb-2">Song list</h2>
+                {loading ? (
+                  <p>Loading...</p>
+                ) : filteredSongs.length === 0 ? (
+                  <p>{searchQuery ? 'No songs match your search.' : 'No songs saved.'}</p>
+                ) : (
+                  <table className="w-full border-collapse text-sm">
+                    <thead>
+                      <tr>
+                        <th className="text-left p-2 border-b w-10">
+                          <button
+                            type="button"
+                            className="text-xs rounded px-1.5 py-0.5 bg-blue-500 text-white hover:bg-blue-600 disabled:opacity-50"
+                            onClick={toggleSelectAll}
+                            disabled={loading}
+                            title={allDisplayedSelected ? "Deselect all" : "Select all"}
+                          >
+                            {allDisplayedSelected ? 'None' : 'All'}
+                          </button>
+                        </th>
+                        <SortHeader column="artist" label="Artist" />
+                        <SortHeader column="title" label="Title" />
+                        <SortHeader column="bpm" label="BPM" />
+                        <SortHeader column="key" label="Key" />
+                        <SortHeader column="lastPlayed" label="Last played" />
+                        <th className="text-left p-2 border-b">Actions</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {displayedSongs.map(song => (
+                        <tr key={song.uid} className={`border-b cursor-pointer ${selectedSongs.has(song.uid) ? 'bg-blue-100 hover:bg-blue-200' : 'hover:bg-gray-100'}`} onClick={() => toggleSelectSong(song.uid)}>
+                          <td className="p-2 align-top w-10" onClick={e => e.stopPropagation()}>
+                            <input
+                              className="h-4 w-4 cursor-pointer"
+                              type="checkbox"
+                              checked={selectedSongs.has(song.uid)}
+                              onChange={() => toggleSelectSong(song.uid)}
+                              disabled={loading}
+                            />
+                          </td>
+                          <td className="p-2 align-top max-w-xs truncate" title={song.artist}>{song.artist}</td>
+                          <td className="p-2 align-top max-w-sm truncate" title={song.title}>{song.title}</td>
+                          <td className="p-2 align-top max-w-16">{song.bpm}</td>
+                          <td className="p-2 align-top max-w-20 truncate" title={song.key}>{song.key}</td>
+                          <td className="p-2 align-top max-w-32">{formatLastPlayed(song.lastPlayed)}</td>
+                          <td className="p-2 align-top">
+                            <button
+                              type="button"
+                              className="inline-flex items-center rounded-md bg-blue-600 text-white px-2 py-1 hover:bg-blue-700 disabled:opacity-50"
+                              onClick={() => {
+                                navigate(`/song/${toSlug(song.artist)}/${toSlug(song.title)}`);
+                              }}
+                              disabled={loading}
+                            >
+                              Edit
+                            </button>
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                )}
+              </div>
+            </div>
           </div>
         </>
       ) : (
@@ -507,22 +656,24 @@ function SongsPage() {
               </div>
             </div>
             <div>
-              <label className="block text-sm font-medium text-gray-700">Instrument</label>
-              <select
-                className="mt-1 block w-full rounded-md border border-gray-300 p-2 focus:outline-none focus:ring-2 focus:ring-brand-500"
-                name="instrument"
-                value={form.instrument}
-                onChange={handleChange}
-                disabled={loading}
-              >
-                <option value="">-- Select --</option>
-                <option value="Guitar">Guitar</option>
-                <option value="Piano">Piano</option>
-                <option value="Bass">Bass</option>
-                <option value="Drums">Drums</option>
-                <option value="Vocals">Vocals</option>
-                <option value="Other">Other</option>
-              </select>
+              <label className="block text-sm font-medium text-gray-700 mb-2">Instruments</label>
+              <div className="flex flex-col gap-2">
+                {['Guitar', 'Piano', 'Bass', 'Drums', 'Vocals', 'Other'].map(inst => {
+                  const current = Array.isArray(form.instrument) ? form.instrument : [];
+                  return (
+                    <label key={inst} className="inline-flex items-center gap-2 cursor-pointer">
+                      <input
+                        type="checkbox"
+                        className="h-4 w-4"
+                        checked={current.includes(inst)}
+                        onChange={() => toggleFormInstrument(inst)}
+                        disabled={loading}
+                      />
+                      <span className="text-sm cursor-pointer">{inst}</span>
+                    </label>
+                  );
+                })}
+              </div>
             </div>
             <div>
               <label className="block text-sm font-medium text-gray-700">Chord chart</label>
