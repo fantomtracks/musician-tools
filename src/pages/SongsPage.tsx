@@ -13,6 +13,8 @@ const initialSong: CreateSongDTO = {
   tabs: '',
   instrument: '',
   artist: '',
+  album: '',
+  tunning: '',
   lastPlayed: undefined,
 };
 
@@ -41,7 +43,9 @@ function SongsPage() {
     const saved = typeof window !== 'undefined' ? window.localStorage.getItem('songsInstrumentMatchMode') : null;
     return saved === 'any' ? 'any' : 'all'; // default to 'all' for exclusive filtering
   });
+  const [tunningFilter, setTunningFilter] = useState<string>('');
   const [filtersAccordionOpen, setFiltersAccordionOpen] = useState<boolean>(true);
+  const [tunningAccordionOpen, setTunningAccordionOpen] = useState<boolean>(true);
   const { user, logout } = useAuth();
 
   const toggleInstrumentFilter = (instrument: string) => {
@@ -52,6 +56,8 @@ function SongsPage() {
       return next;
     });
   };
+
+  const clearTunningFilter = () => setTunningFilter('');
 
   useEffect(() => {
     loadSongs();
@@ -255,7 +261,8 @@ function SongsPage() {
     const query = searchQuery.toLowerCase();
     const passesSearch = (
       song.title.toLowerCase().includes(query) ||
-      (song.artist && song.artist.toLowerCase().includes(query))
+      song.artist?.toLowerCase().includes(query) ||
+      song.album?.toLowerCase().includes(query)
     );
     const selected = Array.from(instrumentFilters);
     const songInstruments = Array.isArray(song.instrument)
@@ -266,7 +273,8 @@ function SongsPage() {
       (instrumentMatchMode === 'all'
         ? selected.every(inst => songInstruments.includes(inst))
         : selected.some(inst => songInstruments.includes(inst)));
-    return passesSearch && passesInstrument;
+    const passesTunning = !tunningFilter || song.tunning === tunningFilter;
+    return passesSearch && passesInstrument && passesTunning;
   });
 
   const handleSort = (column: string) => {
@@ -498,6 +506,35 @@ function SongsPage() {
                         </div>
                       )}
                     </div>
+                    <div className="border border-gray-200 rounded-md mt-3">
+                      <button
+                        type="button"
+                        className="w-full flex items-center justify-between p-2 text-sm font-medium hover:bg-gray-50"
+                        aria-expanded={tunningAccordionOpen}
+                        onClick={() => setTunningAccordionOpen(prev => !prev)}
+                      >
+                        <span>Tunning filters</span>
+                        <span>{tunningAccordionOpen ? '▾' : '▸'}</span>
+                      </button>
+                      {tunningAccordionOpen && (
+                        <div className="p-3 border-t">
+                          <div className="text-xs font-semibold text-gray-700 mb-2">Filter by tunning</div>
+                          <select
+                            className="w-full rounded-md border border-gray-300 p-2 text-sm focus:outline-none focus:ring-2 focus:ring-brand-500"
+                            value={tunningFilter}
+                            onChange={e => setTunningFilter(e.target.value)}
+                          >
+                            <option value="">All tunings</option>
+                            <option value="EADGBE">EADGBE (Standard)</option>
+                            <option value="DADGBE">DADGBE (Drop D)</option>
+                            <option value="EbAbDbGbBbEb">EbAbDbGbBbEb (Half-step down)</option>
+                            <option value="DADGAD">DADGAD</option>
+                            <option value="DGDGBD">DGDGBD (Open G)</option>
+                            <option value="Other">Other</option>
+                          </select>
+                        </div>
+                      )}
+                    </div>
                   </div>
                 )}
               </aside>
@@ -505,7 +542,7 @@ function SongsPage() {
                 <div className="mb-4">
                   <input
                     type="text"
-                    placeholder="Search by song title or artist..."
+                    placeholder="Search by title, artist, or album..."
                     value={searchQuery}
                     onChange={e => setSearchQuery(e.target.value)}
                     className="w-full rounded-md border border-gray-300 p-2 text-sm focus:outline-none focus:ring-2 focus:ring-brand-500"
@@ -620,6 +657,16 @@ function SongsPage() {
               />
             </div>
             <div>
+              <label className="block text-sm font-medium text-gray-700">Album</label>
+              <input
+                className="mt-1 block w-full rounded-md border border-gray-300 p-2 focus:outline-none focus:ring-2 focus:ring-brand-500"
+                name="album"
+                value={typeof form.album === 'string' ? form.album : ''}
+                onChange={handleChange}
+                disabled={loading}
+              />
+            </div>
+            <div>
               <label className="block text-sm font-medium text-gray-700">Title</label>
               <input
                 className="mt-1 block w-full rounded-md border border-gray-300 p-2 focus:outline-none focus:ring-2 focus:ring-brand-500"
@@ -654,6 +701,24 @@ function SongsPage() {
                   disabled={loading}
                 />
               </div>
+            </div>
+            <div>
+              <label className="block text-sm font-medium text-gray-700">Tunning</label>
+              <select
+                className="mt-1 block w-full rounded-md border border-gray-300 p-2 focus:outline-none focus:ring-2 focus:ring-brand-500"
+                name="tunning"
+                value={typeof form.tunning === 'string' ? form.tunning : ''}
+                onChange={handleChange}
+                disabled={loading}
+              >
+                <option value="">Select a tunning</option>
+                <option value="EADGBE">EADGBE (Standard)</option>
+                <option value="DADGBE">DADGBE (Drop D)</option>
+                <option value="EbAbDbGbBbEb">EbAbDbGbBbEb (Half-step down)</option>
+                <option value="DADGAD">DADGAD</option>
+                <option value="DGDGBD">DGDGBD (Open G)</option>
+                <option value="Other">Other</option>
+              </select>
             </div>
             <div>
               <label className="block text-sm font-medium text-gray-700 mb-2">Instruments</label>

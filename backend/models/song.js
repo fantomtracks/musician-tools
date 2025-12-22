@@ -39,6 +39,14 @@ module.exports = (sequelize, DataTypes) => {
       type: DataTypes.TEXT,
       allowNull: true
     },
+    album: {
+      type: DataTypes.STRING,
+      allowNull: true
+    },
+    tunning: {
+      type: DataTypes.STRING,
+      allowNull: true
+    },
     instrument: {
       type: DataTypes.JSON,
       allowNull: true,

@@ -7,6 +7,8 @@ export type Song = {
   tabs: string;
   instrument: string;
   artist: string;
+  album?: string;
+  tunning?: string;
   lastPlayed?: string;
   createdAt?: string;
   updatedAt?: string;

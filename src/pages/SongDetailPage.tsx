@@ -16,6 +16,8 @@ function SongDetailPage() {
     tabs: '',
     instrument: '',
     artist: '',
+    album: '',
+    tunning: '',
     lastPlayed: undefined,
   });
   const [loading, setLoading] = useState(false);
@@ -171,6 +173,16 @@ function SongDetailPage() {
             />
           </div>
           <div>
+            <label className="block text-sm font-medium text-gray-700">Album</label>
+            <input
+              className="mt-1 block w-full rounded-md border border-gray-300 p-2 focus:outline-none focus:ring-2 focus:ring-brand-500"
+              name="album"
+              value={typeof form.album === 'string' ? form.album : ''}
+              onChange={handleChange}
+              disabled={loading}
+            />
+          </div>
+          <div>
             <label className="block text-sm font-medium text-gray-700">Title</label>
             <input
               className="mt-1 block w-full rounded-md border border-gray-300 p-2 focus:outline-none focus:ring-2 focus:ring-brand-500"
@@ -207,12 +219,30 @@ function SongDetailPage() {
             </div>
           </div>
           <div>
+            <label className="block text-sm font-medium text-gray-700">Tunning</label>
+            <select
+              className="mt-1 block w-full rounded-md border border-gray-300 p-2 focus:outline-none focus:ring-2 focus:ring-brand-500"
+              name="tunning"
+              value={typeof form.tunning === 'string' ? form.tunning : ''}
+              onChange={handleChange}
+              disabled={loading}
+            >
+              <option value="">Select a tunning</option>
+              <option value="EADGBE">EADGBE (Standard)</option>
+              <option value="DADGBE">DADGBE (Drop D)</option>
+              <option value="EbAbDbGbBbEb">EbAbDbGbBbEb (Half-step down)</option>
+              <option value="DADGAD">DADGAD</option>
+              <option value="DGDGBD">DGDGBD (Open G)</option>
+              <option value="Other">Other</option>
+            </select>
+          </div>
+          <div>
             <label className="block text-sm font-medium text-gray-700 mb-2">Instruments</label>
-            <div className="flex flex-col gap-2">
+            <div className="grid grid-cols-2 gap-2 sm:grid-cols-3">
               {['Guitar', 'Piano', 'Bass', 'Drums', 'Vocals', 'Other'].map(inst => {
                 const current = Array.isArray(form.instrument) ? form.instrument : [];
                 return (
-                  <label key={inst} className="inline-flex items-center gap-2">
+                  <label key={inst} className="inline-flex items-center gap-2 cursor-pointer">
                     <input
                       type="checkbox"
                       className="h-4 w-4"
@@ -220,7 +250,7 @@ function SongDetailPage() {
                       onChange={() => toggleFormInstrument(inst)}
                       disabled={loading}
                     />
-                    <span className="text-sm">{inst}</span>
+                    <span className="text-sm cursor-pointer">{inst}</span>
                   </label>
                 );
               })}
