@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
+import { SongForm } from '../components/SongForm';
 import { songService, type CreateSongDTO, type Song } from '../services/songService';
 import { useAuth } from '../contexts/AuthContext';
 import { toSlug } from '../utils/slug';
@@ -44,8 +45,12 @@ function SongsPage() {
     return saved === 'any' ? 'any' : 'all'; // default to 'all' for exclusive filtering
   });
   const [tunningFilter, setTunningFilter] = useState<string>('');
+  const [keyFilter, setKeyFilter] = useState<string>('');
   const [filtersAccordionOpen, setFiltersAccordionOpen] = useState<boolean>(true);
   const [tunningAccordionOpen, setTunningAccordionOpen] = useState<boolean>(true);
+  const [keyAccordionOpen, setKeyAccordionOpen] = useState<boolean>(true);
+  const [bpmMinFilter, setBpmMinFilter] = useState<string>('');
+  const [bpmMaxFilter, setBpmMaxFilter] = useState<string>('');
   const { user, logout } = useAuth();
 
   const toggleInstrumentFilter = (instrument: string) => {
@@ -274,7 +279,15 @@ function SongsPage() {
         ? selected.every(inst => songInstruments.includes(inst))
         : selected.some(inst => songInstruments.includes(inst)));
     const passesTunning = !tunningFilter || song.tunning === tunningFilter;
-    return passesSearch && passesInstrument && passesTunning;
+    const passesKey = !keyFilter || song.key === keyFilter;
+    const min = bpmMinFilter ? parseInt(bpmMinFilter, 10) : undefined;
+    const max = bpmMaxFilter ? parseInt(bpmMaxFilter, 10) : undefined;
+    const bpm = song.bpm;
+    const passesBpm = (
+      (min === undefined || (typeof bpm === 'number' && bpm >= min)) &&
+      (max === undefined || (typeof bpm === 'number' && bpm <= max))
+    );
+    return passesSearch && passesInstrument && passesTunning && passesKey && passesBpm;
   });
 
   const handleSort = (column: string) => {
@@ -410,10 +423,10 @@ function SongsPage() {
                 </button>
               </div>
             </div>
-            <div className="flex gap-4">
+            <div className="flex gap-4 items-stretch">
               <aside
                 id="songs-sidebar"
-                className={`${sidebarExpanded ? 'w-64' : 'w-10'} shrink-0 min-w-[40px] overflow-hidden transition-all duration-200 border border-gray-200 bg-white rounded-md`}
+                className={`${sidebarExpanded ? 'w-full md:w-64 fixed md:static inset-0 z-40' : 'w-10 md:w-10 relative'} shrink-0 min-w-[40px] overflow-hidden transition-all duration-200 border border-gray-200 bg-white rounded-md min-h-screen`}
                 aria-hidden={false}
               >
                 {/* Collapsed rail shows only toggle button */}
@@ -535,6 +548,83 @@ function SongsPage() {
                         </div>
                       )}
                     </div>
+                    <div className="border border-gray-200 rounded-md mt-3">
+                      <button
+                        type="button"
+                        className="w-full flex items-center justify-between p-2 text-sm font-medium hover:bg-gray-50"
+                        aria-expanded={keyAccordionOpen}
+                        onClick={() => setKeyAccordionOpen(prev => !prev)}
+                      >
+                        <span>Key filters</span>
+                        <span>{keyAccordionOpen ? '▾' : '▸'}</span>
+                      </button>
+                      {keyAccordionOpen && (
+                        <div className="p-3 border-t">
+                          <div className="text-xs font-semibold text-gray-700 mb-2">Filter by key</div>
+                          <select
+                            className="w-full rounded-md border border-gray-300 p-2 text-sm focus:outline-none focus:ring-2 focus:ring-brand-500"
+                            value={keyFilter}
+                            onChange={e => setKeyFilter(e.target.value)}
+                          >
+                            <option value="">All keys</option>
+                            <option value="C">C</option>
+                            <option value="C#">C#</option>
+                            <option value="Db">Db</option>
+                            <option value="D">D</option>
+                            <option value="Eb">Eb</option>
+                            <option value="E">E</option>
+                            <option value="F">F</option>
+                            <option value="F#">F#</option>
+                            <option value="Gb">Gb</option>
+                            <option value="G">G</option>
+                            <option value="Ab">Ab</option>
+                            <option value="A">A</option>
+                            <option value="Bb">Bb</option>
+                            <option value="B">B</option>
+                          </select>
+                        </div>
+                      )}
+                    </div>
+                    <div className="border border-gray-200 rounded-md mt-3">
+                      <button
+                        type="button"
+                        className="w-full flex items-center justify-between p-2 text-sm font-medium hover:bg-gray-50"
+                        aria-expanded={true}
+                        onClick={() => {}}
+                      >
+                        <span>BPM filters</span>
+                        <span>▾</span>
+                      </button>
+                      <div className="p-3 border-t">
+                        <div className="text-xs font-semibold text-gray-700 mb-2">Filter by BPM</div>
+                        <div className="grid grid-cols-2 gap-2">
+                          <div>
+                            <label htmlFor="bpm-min" className="block text-xs text-gray-700">Min</label>
+                            <input
+                              id="bpm-min"
+                              type="number"
+                              min={1}
+                              placeholder="e.g. 90"
+                              className="mt-1 block w-full rounded-md border border-gray-300 p-2 text-sm focus:outline-none focus:ring-2 focus:ring-brand-500"
+                              value={bpmMinFilter}
+                              onChange={e => setBpmMinFilter(e.target.value)}
+                            />
+                          </div>
+                          <div>
+                            <label htmlFor="bpm-max" className="block text-xs text-gray-700">Max</label>
+                            <input
+                              id="bpm-max"
+                              type="number"
+                              min={1}
+                              placeholder="e.g. 140"
+                              className="mt-1 block w-full rounded-md border border-gray-300 p-2 text-sm focus:outline-none focus:ring-2 focus:ring-brand-500"
+                              value={bpmMaxFilter}
+                              onChange={e => setBpmMaxFilter(e.target.value)}
+                            />
+                          </div>
+                        </div>
+                      </div>
+                    </div>
                   </div>
                 )}
               </aside>
@@ -595,8 +685,6 @@ function SongsPage() {
                         </th>
                         <SortHeader column="artist" label="Artist" />
                         <SortHeader column="title" label="Title" />
-                        <SortHeader column="bpm" label="BPM" />
-                        <SortHeader column="key" label="Key" />
                         <SortHeader column="lastPlayed" label="Last played" />
                         <th className="text-left p-2 border-b">Actions</th>
                       </tr>
@@ -615,8 +703,6 @@ function SongsPage() {
                           </td>
                           <td className="p-2 align-top max-w-xs truncate" title={song.artist}>{song.artist}</td>
                           <td className="p-2 align-top max-w-sm truncate" title={song.title}>{song.title}</td>
-                          <td className="p-2 align-top max-w-16">{song.bpm}</td>
-                          <td className="p-2 align-top max-w-20 truncate" title={song.key}>{song.key}</td>
                           <td className="p-2 align-top max-w-32">{formatLastPlayed(song.lastPlayed)}</td>
                           <td className="p-2 align-top">
                             <button
@@ -645,170 +731,20 @@ function SongsPage() {
             <Link to="/" className="text-2xl font-semibold text-gray-900 hover:text-brand-500 transition">Musician Tools</Link>
             <p className="text-sm text-gray-600">{editingUid ? 'Edit a song' : 'Add a song'}</p>
           </div>
-          <form onSubmit={handleSubmit} className="space-y-4">
-            <div>
-              <label className="block text-sm font-medium text-gray-700">Artist</label>
-              <input
-                className="mt-1 block w-full rounded-md border border-gray-300 p-2 focus:outline-none focus:ring-2 focus:ring-brand-500"
-                name="artist"
-                value={form.artist}
-                onChange={handleChange}
-                disabled={loading}
-              />
-            </div>
-            <div>
-              <label className="block text-sm font-medium text-gray-700">Album</label>
-              <input
-                className="mt-1 block w-full rounded-md border border-gray-300 p-2 focus:outline-none focus:ring-2 focus:ring-brand-500"
-                name="album"
-                value={typeof form.album === 'string' ? form.album : ''}
-                onChange={handleChange}
-                disabled={loading}
-              />
-            </div>
-            <div>
-              <label className="block text-sm font-medium text-gray-700">Title</label>
-              <input
-                className="mt-1 block w-full rounded-md border border-gray-300 p-2 focus:outline-none focus:ring-2 focus:ring-brand-500"
-                name="title"
-                value={form.title}
-                onChange={handleChange}
-                required
-                disabled={loading}
-              />
-            </div>
-            <div className="grid grid-cols-2 gap-4">
-              <div>
-                <label className="block text-sm font-medium text-gray-700">BPM</label>
-                <input
-                  className="mt-1 block w-full rounded-md border border-gray-300 p-2 focus:outline-none focus:ring-2 focus:ring-brand-500"
-                  name="bpm"
-                  type="number"
-                  value={form.bpm}
-                  onChange={handleChange}
-                  required
-                  min={1}
-                  disabled={loading}
-                />
-              </div>
-              <div>
-                <label className="block text-sm font-medium text-gray-700">Key</label>
-                <input
-                  className="mt-1 block w-full rounded-md border border-gray-300 p-2 focus:outline-none focus:ring-2 focus:ring-brand-500"
-                  name="key"
-                  value={form.key}
-                  onChange={handleChange}
-                  disabled={loading}
-                />
-              </div>
-            </div>
-            <div>
-              <label className="block text-sm font-medium text-gray-700">Tunning</label>
-              <select
-                className="mt-1 block w-full rounded-md border border-gray-300 p-2 focus:outline-none focus:ring-2 focus:ring-brand-500"
-                name="tunning"
-                value={typeof form.tunning === 'string' ? form.tunning : ''}
-                onChange={handleChange}
-                disabled={loading}
-              >
-                <option value="">Select a tunning</option>
-                <option value="EADGBE">EADGBE (Standard)</option>
-                <option value="DADGBE">DADGBE (Drop D)</option>
-                <option value="EbAbDbGbBbEb">EbAbDbGbBbEb (Half-step down)</option>
-                <option value="DADGAD">DADGAD</option>
-                <option value="DGDGBD">DGDGBD (Open G)</option>
-                <option value="Other">Other</option>
-              </select>
-            </div>
-            <div>
-              <label className="block text-sm font-medium text-gray-700 mb-2">Instruments</label>
-              <div className="flex flex-col gap-2">
-                {['Guitar', 'Piano', 'Bass', 'Drums', 'Vocals', 'Other'].map(inst => {
-                  const current = Array.isArray(form.instrument) ? form.instrument : [];
-                  return (
-                    <label key={inst} className="inline-flex items-center gap-2 cursor-pointer">
-                      <input
-                        type="checkbox"
-                        className="h-4 w-4"
-                        checked={current.includes(inst)}
-                        onChange={() => toggleFormInstrument(inst)}
-                        disabled={loading}
-                      />
-                      <span className="text-sm cursor-pointer">{inst}</span>
-                    </label>
-                  );
-                })}
-              </div>
-            </div>
-            <div>
-              <label className="block text-sm font-medium text-gray-700">Chord chart</label>
-              <textarea
-                className="mt-1 block w-full rounded-md border border-gray-300 p-2 focus:outline-none focus:ring-2 focus:ring-brand-500"
-                name="chords"
-                value={form.chords}
-                onChange={handleChange}
-                rows={2}
-                disabled={loading}
-              />
-            </div>
-            <div>
-              <label className="block text-sm font-medium text-gray-700">Tabs</label>
-              <div className="mt-1 flex gap-2">
-                <input
-                  className="block flex-1 rounded-md border border-gray-300 p-2 focus:outline-none focus:ring-2 focus:ring-brand-500"
-                  type="url"
-                  name="tabs"
-                  placeholder="https://example.com/tabs"
-                  value={form.tabs}
-                  onChange={handleChange}
-                  disabled={loading}
-                />
-                <button
-                  type="button"
-                  className="inline-flex items-center rounded-md bg-brand-500 text-white px-3 py-2 hover:bg-brand-600 disabled:opacity-50"
-                  onClick={() => {
-                    if (form.tabs && (form.tabs.startsWith('http://') || form.tabs.startsWith('https://'))) {
-                      window.open(form.tabs, '_blank');
-                    }
-                  }}
-                  disabled={loading || !form.tabs || (!form.tabs.startsWith('http://') && !form.tabs.startsWith('https://'))}
-                >
-                  Visit
-                </button>
-              </div>
-            </div>
-            <div className="flex items-center gap-2">
-              <button
-                type="submit"
-                className="inline-flex items-center rounded-md bg-brand-500 text-white px-3 py-2 hover:bg-brand-600 disabled:opacity-50"
-                disabled={loading}
-              >
-                {loading ? 'Loading...' : editingUid ? 'Save' : 'Add'}
-              </button>
-              <button
-                type="button"
-                className="inline-flex items-center rounded-md bg-gray-100 text-gray-800 px-3 py-2 hover:bg-gray-200 disabled:opacity-50"
-                onClick={() => {
-                  setEditingUid(null);
-                  setForm(initialSong);
-                  setPage('list');
-                }}
-                disabled={loading}
-              >
-                Cancel
-              </button>
-              {editingUid && (
-                <button
-                  type="button"
-                  className="inline-flex items-center rounded-md bg-red-600 text-white px-3 py-2 hover:bg-red-700 disabled:opacity-50"
-                  onClick={() => handleDelete(editingUid)}
-                  disabled={loading}
-                >
-                  Delete
-                </button>
-              )}
-            </div>
-          </form>
+          <SongForm
+            mode={editingUid ? 'edit' : 'add'}
+            form={form}
+            loading={loading}
+            onChange={handleChange}
+            onToggleInstrument={toggleFormInstrument}
+            onSubmit={handleSubmit}
+            onCancel={() => {
+              setEditingUid(null);
+              setForm(initialSong);
+              setPage('list');
+            }}
+            onDelete={editingUid ? () => handleDelete(editingUid) : undefined}
+          />
         </div>
       )}
     </div>
