@@ -25,7 +25,7 @@ module.exports = (sequelize, DataTypes) => {
     bpm: {
       type: DataTypes.INTEGER,
       allowNull: true,
-      defaultValue: 120
+      defaultValue: null
     },
     key: {
       type: DataTypes.STRING,

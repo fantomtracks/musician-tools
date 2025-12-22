@@ -1,7 +1,7 @@
 export type Song = {
   uid: string;
   title: string;
-  bpm: number;
+  bpm: number | null;
   key: string;
   chords: string;
   tabs: string;

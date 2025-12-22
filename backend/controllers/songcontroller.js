@@ -52,7 +52,7 @@ const createSong = async (req, res, next) => {
     const song = await Song.create({
       userUid: userId,
       title,
-      bpm: bpm || 120,
+      bpm: bpm !== undefined ? bpm : null,
       key,
       chords,
       tabs,

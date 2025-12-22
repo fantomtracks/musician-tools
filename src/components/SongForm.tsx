@@ -74,10 +74,9 @@ export function SongForm({ mode, form, loading, onChange, onToggleInstrument, on
             className="mt-1 block w-full rounded-md border border-gray-300 p-2 focus:outline-none focus:ring-2 focus:ring-brand-500"
             name="bpm"
             type="number"
-            value={form.bpm}
+            value={form.bpm ?? ''}
             onChange={onChange}
-            required
-            min={1}
+            min={0}
             disabled={loading}
           />
         </div>

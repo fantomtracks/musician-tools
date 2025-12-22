@@ -11,7 +11,7 @@ function SongDetailPage() {
   const [song, setSong] = useState<Song | null>(null);
   const [form, setForm] = useState<CreateSongDTO>({
     title: '',
-    bpm: 120,
+    bpm: null,
     key: '',
     chords: '',
     tabs: '',
@@ -58,7 +58,11 @@ function SongDetailPage() {
 
   const handleChange = (e: React.ChangeEvent<HTMLInputElement | HTMLTextAreaElement | HTMLSelectElement>) => {
     const { name, value } = e.target;
-    setForm({ ...form, [name]: name === 'bpm' ? Number(value) : value });
+    if (name === 'bpm') {
+      setForm({ ...form, bpm: value === '' ? null : Number(value) });
+    } else {
+      setForm({ ...form, [name]: value });
+    }
   };
 
   const toggleFormInstrument = (instrument: string) => {
