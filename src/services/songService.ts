@@ -8,6 +8,7 @@ export type Song = {
   instrument: string;
   artist: string;
   album?: string;
+  technique?: string[];
   pitchStandard?: number;
   tunning?: string;
   lastPlayed?: string;

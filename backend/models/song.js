@@ -53,6 +53,11 @@ module.exports = (sequelize, DataTypes) => {
       type: DataTypes.STRING,
       allowNull: true
     },
+    technique: {
+      type: DataTypes.JSON,
+      allowNull: true,
+      defaultValue: null
+    },
     instrument: {
       type: DataTypes.JSON,
       allowNull: true,

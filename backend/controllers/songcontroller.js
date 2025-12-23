@@ -43,7 +43,7 @@ const createSong = async (req, res, next) => {
       return next(createError(401, 'Unauthorized'));
     }
 
-    const { title, bpm, key, chords, tabs, instrument, artist, album, pitchStandard, tunning, lastPlayed } = req.body;
+    const { title, bpm, key, chords, tabs, instrument, artist, album, pitchStandard, tunning, technique, lastPlayed } = req.body;
 
     if (!title) {
       return next(createError(400, 'Title is required'));
@@ -61,6 +61,7 @@ const createSong = async (req, res, next) => {
       album,
       pitchStandard,
       tunning,
+      technique,
       lastPlayed: lastPlayed ? new Date(lastPlayed) : null
     });
 
@@ -89,7 +90,7 @@ const updateSong = async (req, res, next) => {
       return next(createError(403, 'Forbidden'));
     }
 
-    const { title, bpm, key, chords, tabs, instrument, artist, album, pitchStandard, tunning, lastPlayed } = req.body;
+    const { title, bpm, key, chords, tabs, instrument, artist, album, pitchStandard, tunning, technique, lastPlayed } = req.body;
 
     await song.update({
       title: title || song.title,
@@ -102,6 +103,7 @@ const updateSong = async (req, res, next) => {
       album: album !== undefined ? album : song.album,
       pitchStandard: pitchStandard !== undefined ? pitchStandard : song.pitchStandard,
       tunning: tunning !== undefined ? tunning : song.tunning,
+      technique: technique !== undefined ? technique : song.technique,
       lastPlayed: lastPlayed ? new Date(lastPlayed) : song.lastPlayed
     });
 

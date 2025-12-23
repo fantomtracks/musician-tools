@@ -15,6 +15,7 @@ const initialSong: CreateSongDTO = {
   instrument: '',
   artist: '',
   album: '',
+  technique: [],
   pitchStandard: 440,
   tunning: '',
   lastPlayed: undefined,
@@ -26,12 +27,21 @@ function SongsPage() {
   const [form, setForm] = useState<CreateSongDTO>(initialSong);
   const [editingUid, setEditingUid] = useState<string | null>(null);
   const [sortByLastPlayed, setSortByLastPlayed] = useState(false);
-  const [sortColumn, setSortColumn] = useState<string | null>(null);
-  const [sortDirection, setSortDirection] = useState<'asc' | 'desc'>('asc');
+  const [sortColumn, setSortColumn] = useState<string | null>(() => {
+    const saved = typeof window !== 'undefined' ? window.localStorage.getItem('songsSortColumn') : null;
+    return saved ? saved : null;
+  });
+  const [sortDirection, setSortDirection] = useState<'asc' | 'desc'>(() => {
+    const saved = typeof window !== 'undefined' ? window.localStorage.getItem('songsSortDirection') : null;
+    return saved === 'desc' ? 'desc' : 'asc';
+  });
   const [page, setPage] = useState<'list' | 'form'>('list');
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const [selectedSongs, setSelectedSongs] = useState<Set<string>>(new Set());
+  const [selectedSongs, setSelectedSongs] = useState<Set<string>>(() => {
+    const saved = typeof window !== 'undefined' ? window.localStorage.getItem('songsSelectedUids') : null;
+    return saved ? new Set(JSON.parse(saved)) : new Set();
+  });
   const [deleteDialogOpen, setDeleteDialogOpen] = useState(false);
   const [deleteMode, setDeleteMode] = useState<'single' | 'multiple' | null>(null);
   const [deleteUid, setDeleteUid] = useState<string | null>(null);
@@ -46,6 +56,14 @@ function SongsPage() {
   const [instrumentMatchMode, setInstrumentMatchMode] = useState<'any' | 'all'>(() => {
     const saved = typeof window !== 'undefined' ? window.localStorage.getItem('songsInstrumentMatchMode') : null;
     return saved === 'any' ? 'any' : 'all'; // default to 'all' for exclusive filtering
+  });
+  const [techniqueFilters, setTechniqueFilters] = useState<Set<string>>(() => {
+    const saved = typeof window !== 'undefined' ? window.localStorage.getItem('songsTechniqueFilters') : null;
+    return saved ? new Set(JSON.parse(saved)) : new Set();
+  });
+  const [techniqueMatchMode, setTechniqueMatchMode] = useState<'any' | 'all'>(() => {
+    const saved = typeof window !== 'undefined' ? window.localStorage.getItem('songsTechniqueMatchMode') : null;
+    return saved === 'any' ? 'any' : 'all';
   });
   const [searchQuery, setSearchQuery] = useState<string>(() => {
     const saved = typeof window !== 'undefined' ? window.localStorage.getItem('songsSearchQuery') : null;
@@ -75,9 +93,22 @@ function SongsPage() {
     const saved = typeof window !== 'undefined' ? window.localStorage.getItem('songsPitchStandardMaxFilter') : null;
     return saved || '';
   });
-  const [filtersAccordionOpen, setFiltersAccordionOpen] = useState<boolean>(true);
-  const [tunningAccordionOpen, setTunningAccordionOpen] = useState<boolean>(true);
-  const [keyAccordionOpen, setKeyAccordionOpen] = useState<boolean>(true);
+  const [filtersAccordionOpen, setFiltersAccordionOpen] = useState<boolean>(() => {
+    const saved = typeof window !== 'undefined' ? window.localStorage.getItem('songsFiltersAccordionOpen') : null;
+    return saved === 'false' ? false : true;
+  });
+  const [tunningAccordionOpen, setTunningAccordionOpen] = useState<boolean>(() => {
+    const saved = typeof window !== 'undefined' ? window.localStorage.getItem('songsTunningAccordionOpen') : null;
+    return saved === 'false' ? false : true;
+  });
+  const [keyAccordionOpen, setKeyAccordionOpen] = useState<boolean>(() => {
+    const saved = typeof window !== 'undefined' ? window.localStorage.getItem('songsKeyAccordionOpen') : null;
+    return saved === 'false' ? false : true;
+  });
+  const [techniqueAccordionOpen, setTechniqueAccordionOpen] = useState<boolean>(() => {
+    const saved = typeof window !== 'undefined' ? window.localStorage.getItem('songsTechniqueAccordionOpen') : null;
+    return saved === 'false' ? false : true;
+  });
   const { user, logout } = useAuth();
 
   const toggleInstrumentFilter = (instrument: string) => {
@@ -85,6 +116,15 @@ function SongsPage() {
       const next = new Set(prev);
       if (next.has(instrument)) next.delete(instrument);
       else next.add(instrument);
+      return next;
+    });
+  };
+
+  const toggleTechniqueFilter = (technique: string) => {
+    setTechniqueFilters(prev => {
+      const next = new Set(prev);
+      if (next.has(technique)) next.delete(technique);
+      else next.add(technique);
       return next;
     });
   };
@@ -112,6 +152,54 @@ function SongsPage() {
       window.localStorage.setItem('songsInstrumentFilters', JSON.stringify(Array.from(instrumentFilters)));
     } catch {}
   }, [instrumentFilters]);
+
+  useEffect(() => {
+    try {
+      window.localStorage.setItem('songsFiltersAccordionOpen', filtersAccordionOpen ? 'true' : 'false');
+    } catch {}
+  }, [filtersAccordionOpen]);
+
+  useEffect(() => {
+    try {
+      window.localStorage.setItem('songsTunningAccordionOpen', tunningAccordionOpen ? 'true' : 'false');
+    } catch {}
+  }, [tunningAccordionOpen]);
+
+  useEffect(() => {
+    try {
+      window.localStorage.setItem('songsKeyAccordionOpen', keyAccordionOpen ? 'true' : 'false');
+    } catch {}
+  }, [keyAccordionOpen]);
+
+  useEffect(() => {
+    try {
+      window.localStorage.setItem('songsTechniqueFilters', JSON.stringify(Array.from(techniqueFilters)));
+    } catch {}
+  }, [techniqueFilters]);
+
+  useEffect(() => {
+    try {
+      window.localStorage.setItem('songsTechniqueMatchMode', techniqueMatchMode);
+    } catch {}
+  }, [techniqueMatchMode]);
+
+  useEffect(() => {
+    try {
+      window.localStorage.setItem('songsTechniqueAccordionOpen', techniqueAccordionOpen ? 'true' : 'false');
+    } catch {}
+  }, [techniqueAccordionOpen]);
+
+  useEffect(() => {
+    try {
+      window.localStorage.setItem('songsSortColumn', sortColumn ?? '');
+    } catch {}
+  }, [sortColumn]);
+
+  useEffect(() => {
+    try {
+      window.localStorage.setItem('songsSortDirection', sortDirection);
+    } catch {}
+  }, [sortDirection]);
 
   useEffect(() => {
     try {
@@ -154,6 +242,12 @@ function SongsPage() {
       window.localStorage.setItem('songsPitchStandardMaxFilter', pitchStandardMaxFilter);
     } catch {}
   }, [pitchStandardMaxFilter]);
+
+  useEffect(() => {
+    try {
+      window.localStorage.setItem('songsSelectedUids', JSON.stringify(Array.from(selectedSongs)));
+    } catch {}
+  }, [selectedSongs]);
 
   const loadSongs = async () => {
     try {
@@ -221,6 +315,14 @@ function SongsPage() {
       ? current.filter(i => i !== instrument)
       : [...current, instrument];
     setForm({ ...form, instrument: updated as any });
+  };
+
+  const toggleFormTechnique = (technique: string) => {
+    const current = Array.isArray(form.technique) ? form.technique : (form.technique ? [form.technique] : []);
+    const updated = current.includes(technique)
+      ? current.filter(t => t !== technique)
+      : [...current, technique];
+    setForm({ ...form, technique: updated as any });
   };
 
   const handleSubmit = async (e: React.FormEvent) => {
@@ -358,6 +460,15 @@ function SongsPage() {
         ? selected.every(inst => songInstruments.includes(inst))
         : selected.some(inst => songInstruments.includes(inst)));
     const passesTunning = !tunningFilter || song.tunning === tunningFilter;
+    const selectedTech = Array.from(techniqueFilters);
+    const songTechniques = Array.isArray(song.technique)
+      ? song.technique
+      : (song.technique ? [song.technique] : []);
+    const passesTechnique =
+      selectedTech.length === 0 ||
+      (techniqueMatchMode === 'all'
+        ? selectedTech.every(t => songTechniques.includes(t))
+        : selectedTech.some(t => songTechniques.includes(t)));
     const passesKey = !keyFilter || song.key === keyFilter;
     const min = bpmMinFilter ? parseInt(bpmMinFilter, 10) : undefined;
     const max = bpmMaxFilter ? parseInt(bpmMaxFilter, 10) : undefined;
@@ -373,7 +484,7 @@ function SongsPage() {
       (pitchMin === undefined || (typeof pitch === 'number' && pitch >= pitchMin)) &&
       (pitchMax === undefined || (typeof pitch === 'number' && pitch <= pitchMax))
     );
-    return passesSearch && passesInstrument && passesTunning && passesKey && passesBpm && passesPitch;
+    return passesSearch && passesInstrument && passesTechnique && passesTunning && passesKey && passesBpm && passesPitch;
   });
 
   const handleSort = (column: string) => {
@@ -609,6 +720,71 @@ function SongsPage() {
                       <button
                         type="button"
                         className="w-full flex items-center justify-between p-2 text-sm font-medium hover:bg-gray-50"
+                        aria-expanded={techniqueAccordionOpen}
+                        onClick={() => setTechniqueAccordionOpen(prev => !prev)}
+                      >
+                        <span>Technique filters</span>
+                        <span>{techniqueAccordionOpen ? '▾' : '▸'}</span>
+                      </button>
+                      {techniqueAccordionOpen && (
+                      <div className="p-3 border-t">
+                        <div className="text-xs font-semibold text-gray-700 mb-2">Filter by technique</div>
+                        <div className="flex flex-col gap-2">
+                          {['Slap','Pick','Tapping','Fingerstyle','Strumming','Palm Mute','Harmonics','Other'].map(tech => (
+                            <label key={tech} className="inline-flex items-center gap-2 text-sm cursor-pointer">
+                              <input
+                                type="checkbox"
+                                className="h-4 w-4"
+                                checked={techniqueFilters.has(tech)}
+                                onChange={() => toggleTechniqueFilter(tech)}
+                              />
+                              <span className="cursor-pointer">{tech}</span>
+                            </label>
+                          ))}
+                        </div>
+                        <div className="mt-3">
+                          <div className="text-xs font-semibold text-gray-700 mb-1">Match mode</div>
+                          <div className="flex items-center gap-3">
+                            <label className="inline-flex items-center gap-1 text-xs cursor-pointer">
+                              <input
+                                type="radio"
+                                name="technique-match-mode"
+                                value="all"
+                                className="h-3 w-3"
+                                checked={techniqueMatchMode === 'all'}
+                                onChange={() => setTechniqueMatchMode('all')}
+                              />
+                              <span>All</span>
+                            </label>
+                            <label className="inline-flex items-center gap-1 text-xs cursor-pointer">
+                              <input
+                                type="radio"
+                                name="technique-match-mode"
+                                value="any"
+                                className="h-3 w-3"
+                                checked={techniqueMatchMode === 'any'}
+                                onChange={() => setTechniqueMatchMode('any')}
+                              />
+                              <span>Any</span>
+                            </label>
+                          </div>
+                        </div>
+                        <div className="mt-3">
+                          <button
+                            type="button"
+                            className="inline-flex items-center rounded-md bg-gray-100 text-gray-800 px-2 py-1 hover:bg-gray-200"
+                            onClick={() => setTechniqueFilters(new Set())}
+                          >
+                            Clear filters
+                          </button>
+                        </div>
+                      </div>
+                      )}
+                    </div>
+                    <div className="border border-gray-200 rounded-md mt-3">
+                      <button
+                        type="button"
+                        className="w-full flex items-center justify-between p-2 text-sm font-medium hover:bg-gray-50"
                         aria-expanded={tunningAccordionOpen}
                         onClick={() => setTunningAccordionOpen(prev => !prev)}
                       >
@@ -757,14 +933,24 @@ function SongsPage() {
                 )}
               </aside>
               <div className="flex-1">
-                <div className="mb-4">
+                <div className="mb-4 relative">
                   <input
                     type="text"
                     placeholder="Search by title, artist, or album..."
                     value={searchQuery}
                     onChange={e => setSearchQuery(e.target.value)}
-                    className="w-full rounded-md border border-gray-300 p-2 text-sm focus:outline-none focus:ring-2 focus:ring-brand-500"
+                    className="w-full rounded-md border border-gray-300 p-2 pr-8 text-sm focus:outline-none focus:ring-2 focus:ring-brand-500"
                   />
+                  {searchQuery && (
+                    <button
+                      type="button"
+                      onClick={() => setSearchQuery('')}
+                      className="absolute right-2 top-1/2 -translate-y-1/2 text-gray-400 hover:text-gray-600 focus:outline-none"
+                      aria-label="Clear search"
+                    >
+                      ✕
+                    </button>
+                  )}
                 </div>
                 {selectedSongs.size > 0 && (
                   <div className="mb-4 p-3 bg-blue-50 border border-blue-200 rounded-md">
@@ -865,6 +1051,7 @@ function SongsPage() {
             loading={loading}
             onChange={handleChange}
             onToggleInstrument={toggleFormInstrument}
+            onToggleTechnique={toggleFormTechnique}
             onSubmit={handleSubmit}
             onCancel={() => {
               setEditingUid(null);

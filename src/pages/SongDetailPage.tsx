@@ -18,6 +18,7 @@ function SongDetailPage() {
     instrument: '',
     artist: '',
     album: '',
+    technique: [],
     pitchStandard: 440,
     tunning: '',
     lastPlayed: undefined,
@@ -72,6 +73,14 @@ function SongDetailPage() {
       ? current.filter(i => i !== instrument)
       : [...current, instrument];
     setForm({ ...form, instrument: updated as any });
+  };
+
+  const toggleFormTechnique = (technique: string) => {
+    const current = Array.isArray(form.technique) ? form.technique : (form.technique ? [form.technique] : []);
+    const updated = current.includes(technique)
+      ? current.filter(t => t !== technique)
+      : [...current, technique];
+    setForm({ ...form, technique: updated as any });
   };
 
   const handleSubmit = async (e: React.FormEvent) => {
@@ -228,9 +237,11 @@ function SongDetailPage() {
           loading={loading}
           onChange={handleChange}
           onToggleInstrument={toggleFormInstrument}
+          onToggleTechnique={toggleFormTechnique}
           onSubmit={handleSubmit}
           onCancel={() => navigate('/songs')}
           onDelete={() => setDeleteDialogOpen(true)}
+          tabsFirst
         />
       </div>
     </div>

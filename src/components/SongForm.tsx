@@ -9,9 +9,11 @@ type SongFormProps = {
   loading: boolean;
   onChange: (e: React.ChangeEvent<HTMLInputElement | HTMLTextAreaElement | HTMLSelectElement>) => void;
   onToggleInstrument: (instrument: string) => void;
+  onToggleTechnique: (technique: string) => void;
   onSubmit: (e: React.FormEvent) => void;
   onCancel: () => void;
   onDelete?: () => void;
+  tabsFirst?: boolean;
 };
 
 const instrumentOptions = ['Guitar', 'Piano', 'Bass', 'Drums', 'Vocals', 'Other'];
@@ -26,12 +28,43 @@ const tuningOptions = [
 ];
 
 const keyOptions = ['C','C#','Db','D','Eb','E','F','F#','Gb','G','Ab','A','Bb','B'];
+const techniqueOptions = ['Slap','Pick','Tapping','Fingerstyle','Strumming','Palm Mute','Harmonics','Solo','Other'];
 
-export function SongForm({ mode, form, loading, onChange, onToggleInstrument, onSubmit, onCancel, onDelete }: SongFormProps) {
+export function SongForm({ mode, form, loading, onChange, onToggleInstrument, onToggleTechnique, onSubmit, onCancel, onDelete, tabsFirst }: SongFormProps) {
   const currentInstruments = Array.isArray(form.instrument) ? form.instrument : [];
+  const currentTechniques = Array.isArray(form.technique) ? form.technique : [];
 
   return (
     <form onSubmit={onSubmit} className="space-y-4">
+      {tabsFirst && (
+        <div>
+          <label htmlFor="song-tabs" className="block text-sm font-medium text-gray-700">Tabs</label>
+          <div className="mt-1 flex gap-2">
+            <input
+              id="song-tabs"
+              className="block flex-1 rounded-md border border-gray-300 p-2 focus:outline-none focus:ring-2 focus:ring-brand-500"
+              type="url"
+              name="tabs"
+              placeholder="https://example.com/tabs"
+              value={form.tabs}
+              onChange={onChange}
+              disabled={loading}
+            />
+            <button
+              type="button"
+              className="inline-flex items-center rounded-md bg-brand-500 text-white px-3 py-2 hover:bg-brand-600 disabled:opacity-50"
+              onClick={() => {
+                if (form.tabs && (form.tabs.startsWith('http://') || form.tabs.startsWith('https://'))) {
+                  window.open(form.tabs, '_blank');
+                }
+              }}
+              disabled={loading || !form.tabs || (!form.tabs.startsWith('http://') && !form.tabs.startsWith('https://'))}
+            >
+              Visit
+            </button>
+          </div>
+        </div>
+      )}
       <div>
         <label htmlFor="song-artist" className="block text-sm font-medium text-gray-700">Artist</label>
         <input
@@ -39,17 +72,6 @@ export function SongForm({ mode, form, loading, onChange, onToggleInstrument, on
           className="mt-1 block w-full rounded-md border border-gray-300 p-2 focus:outline-none focus:ring-2 focus:ring-brand-500"
           name="artist"
           value={form.artist}
-          onChange={onChange}
-          disabled={loading}
-        />
-      </div>
-      <div>
-        <label htmlFor="song-album" className="block text-sm font-medium text-gray-700">Album</label>
-        <input
-          id="song-album"
-          className="mt-1 block w-full rounded-md border border-gray-300 p-2 focus:outline-none focus:ring-2 focus:ring-brand-500"
-          name="album"
-          value={typeof form.album === 'string' ? form.album : ''}
           onChange={onChange}
           disabled={loading}
         />
@@ -63,6 +85,17 @@ export function SongForm({ mode, form, loading, onChange, onToggleInstrument, on
           value={form.title}
           onChange={onChange}
           required
+          disabled={loading}
+        />
+      </div>
+      <div>
+        <label htmlFor="song-album" className="block text-sm font-medium text-gray-700">Album</label>
+        <input
+          id="song-album"
+          className="mt-1 block w-full rounded-md border border-gray-300 p-2 focus:outline-none focus:ring-2 focus:ring-brand-500"
+          name="album"
+          value={typeof form.album === 'string' ? form.album : ''}
+          onChange={onChange}
           disabled={loading}
         />
       </div>
@@ -146,6 +179,24 @@ export function SongForm({ mode, form, loading, onChange, onToggleInstrument, on
         </div>
       </div>
       <div>
+        <label className="block text-sm font-medium text-gray-700 mb-2">Techniques</label>
+        <div className="grid grid-cols-2 gap-2 sm:grid-cols-3">
+          {techniqueOptions.map(t => (
+            <label key={t} className="inline-flex items-center gap-2 cursor-pointer">
+              <input
+                type="checkbox"
+                className="h-4 w-4"
+                checked={currentTechniques.includes(t)}
+                onChange={() => onToggleTechnique(t)}
+                disabled={loading}
+              />
+              <span className="text-sm cursor-pointer">{t}</span>
+            </label>
+          ))}
+        </div>
+      </div>
+      
+      <div>
         <label htmlFor="song-chords" className="block text-sm font-medium text-gray-700">Chord chart</label>
         <textarea
           id="song-chords"
@@ -158,31 +209,35 @@ export function SongForm({ mode, form, loading, onChange, onToggleInstrument, on
         />
       </div>
       <div>
-        <label htmlFor="song-tabs" className="block text-sm font-medium text-gray-700">Tabs</label>
-        <div className="mt-1 flex gap-2">
-          <input
-            id="song-tabs"
-            className="block flex-1 rounded-md border border-gray-300 p-2 focus:outline-none focus:ring-2 focus:ring-brand-500"
-            type="url"
-            name="tabs"
-            placeholder="https://example.com/tabs"
-            value={form.tabs}
-            onChange={onChange}
-            disabled={loading}
-          />
-          <button
-            type="button"
-            className="inline-flex items-center rounded-md bg-brand-500 text-white px-3 py-2 hover:bg-brand-600 disabled:opacity-50"
-            onClick={() => {
-              if (form.tabs && (form.tabs.startsWith('http://') || form.tabs.startsWith('https://'))) {
-                window.open(form.tabs, '_blank');
-              }
-            }}
-            disabled={loading || !form.tabs || (!form.tabs.startsWith('http://') && !form.tabs.startsWith('https://'))}
-          >
-            Visit
-          </button>
-        </div>
+        {!tabsFirst && (
+          <>
+            <label htmlFor="song-tabs" className="block text-sm font-medium text-gray-700">Tabs</label>
+            <div className="mt-1 flex gap-2">
+              <input
+                id="song-tabs"
+                className="block flex-1 rounded-md border border-gray-300 p-2 focus:outline-none focus:ring-2 focus:ring-brand-500"
+                type="url"
+                name="tabs"
+                placeholder="https://example.com/tabs"
+                value={form.tabs}
+                onChange={onChange}
+                disabled={loading}
+              />
+              <button
+                type="button"
+                className="inline-flex items-center rounded-md bg-brand-500 text-white px-3 py-2 hover:bg-brand-600 disabled:opacity-50"
+                onClick={() => {
+                  if (form.tabs && (form.tabs.startsWith('http://') || form.tabs.startsWith('https://'))) {
+                    window.open(form.tabs, '_blank');
+                  }
+                }}
+                disabled={loading || !form.tabs || (!form.tabs.startsWith('http://') && !form.tabs.startsWith('https://'))}
+              >
+                Visit
+              </button>
+            </div>
+          </>
+        )}
       </div>
       <div className="flex items-center gap-2">
         <button
