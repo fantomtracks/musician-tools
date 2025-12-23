@@ -239,32 +239,36 @@ export function SongForm({ mode, form, loading, onChange, onToggleInstrument, on
           </>
         )}
       </div>
-      <div className="flex items-center gap-2">
-        <button
-          type="submit"
-          className="inline-flex items-center rounded-md bg-brand-500 text-white px-3 py-2 hover:bg-brand-600 disabled:opacity-50"
-          disabled={loading}
-        >
-          {loading ? 'Loading...' : mode === 'edit' ? 'Save' : 'Add'}
-        </button>
-        <button
-          type="button"
-          className="inline-flex items-center rounded-md bg-gray-100 text-gray-800 px-3 py-2 hover:bg-gray-200 disabled:opacity-50"
-          onClick={onCancel}
-          disabled={loading}
-        >
-          Cancel
-        </button>
-        {mode === 'edit' && onDelete && (
+      <div className="flex items-center justify-between gap-2">
+        <div>
+          {mode === 'edit' && onDelete && (
+            <button
+              type="button"
+              className="inline-flex items-center rounded-md bg-red-600 text-white px-3 py-2 hover:bg-red-700 disabled:opacity-50"
+              onClick={onDelete}
+              disabled={loading}
+            >
+              Delete
+            </button>
+          )}
+        </div>
+        <div className="flex items-center gap-2">
           <button
             type="button"
-            className="inline-flex items-center rounded-md bg-red-600 text-white px-3 py-2 hover:bg-red-700 disabled:opacity-50"
-            onClick={onDelete}
+            className="inline-flex items-center rounded-md bg-gray-100 text-gray-800 px-3 py-2 hover:bg-gray-200 disabled:opacity-50"
+            onClick={onCancel}
             disabled={loading}
           >
-            Delete
+            Cancel
           </button>
-        )}
+          <button
+            type="submit"
+            className="inline-flex items-center rounded-md bg-brand-500 text-white px-3 py-2 hover:bg-brand-600 disabled:opacity-50"
+            disabled={loading}
+          >
+            {loading ? 'Loading...' : mode === 'edit' ? 'Save' : 'Add'}
+          </button>
+        </div>
       </div>
     </form>
   );

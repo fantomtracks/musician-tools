@@ -598,17 +598,6 @@ function SongsPage() {
               <div className="flex items-center gap-3">
                 {user && <span className="text-sm text-gray-600">Hello, {user.name}</span>}
                 <button
-                  className="inline-flex items-center rounded-md bg-brand-500 text-white px-3 py-2 hover:bg-brand-600 disabled:opacity-50"
-                  onClick={() => {
-                    setForm(initialSong);
-                    setEditingUid(null);
-                    setPage('form');
-                  }}
-                  disabled={loading}
-                >
-                  Add a song
-                </button>
-                <button
                   className="inline-flex items-center rounded-md bg-gray-300 text-gray-800 px-3 py-2 hover:bg-gray-400 disabled:opacity-50"
                   onClick={async () => {
                     await logout();
@@ -933,6 +922,20 @@ function SongsPage() {
                 )}
               </aside>
               <div className="flex-1">
+                <h2 className="text-lg font-medium mb-2">Song list</h2>
+                <div className="mb-4 flex gap-2">
+                  <button
+                    className="w-full inline-flex items-center justify-center rounded-md bg-brand-500 text-white px-3 py-2 hover:bg-brand-600 disabled:opacity-50"
+                    onClick={() => {
+                      setForm(initialSong);
+                      setEditingUid(null);
+                      setPage('form');
+                    }}
+                    disabled={loading}
+                  >
+                    Add a song
+                  </button>
+                </div>
                 <div className="mb-4 relative">
                   <input
                     type="text"
@@ -977,7 +980,6 @@ function SongsPage() {
                     </div>
                   </div>
                 )}
-                <h2 className="text-lg font-medium mb-2">Song list</h2>
                 {loading ? (
                   <p>Loading...</p>
                 ) : filteredSongs.length === 0 ? (
