@@ -1,9 +1,11 @@
 import { useEffect, useState } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
 import { SongForm } from '../components/SongForm';
+import { PageHeader } from '../components/PageHeader';
 import { songService, type CreateSongDTO, type Song } from '../services/songService';
 import { instrumentService, type Instrument } from '../services/instrumentService';
 import { songPlayService, type SongPlay } from '../services/songPlayService';
+import { playlistService, type Playlist } from '../services/playlistService';
 import { useAuth } from '../contexts/AuthContext';
 import { toSlug } from '../utils/slug';
 import { ConfirmDialog } from '../components/ConfirmDialog';
@@ -16,6 +18,7 @@ const initialSong: CreateSongDTO = {
   chords: '',
   tabs: '',
   instrument: [],
+  instrumentDifficulty: {},
   artist: '',
   album: '',
   technique: [],
@@ -45,6 +48,9 @@ function SongsPage() {
     const saved = typeof window !== 'undefined' ? window.localStorage.getItem('songsSelectedUids') : null;
     return saved ? new Set(JSON.parse(saved)) : new Set();
   });
+  const [bulkPlaylistOpen, setBulkPlaylistOpen] = useState(false);
+  const [bulkPlaylistSelection, setBulkPlaylistSelection] = useState<Set<string>>(new Set());
+  const [toastMessage, setToastMessage] = useState<string | null>(null);
   const [deleteDialogOpen, setDeleteDialogOpen] = useState(false);
   const [deleteMode, setDeleteMode] = useState<'single' | 'multiple' | null>(null);
   const [deleteUid, setDeleteUid] = useState<string | null>(null);
@@ -55,6 +61,10 @@ function SongsPage() {
   const [instrumentFilter, setInstrumentFilter] = useState<string>(() => {
     const saved = typeof window !== 'undefined' ? window.localStorage.getItem('songsInstrumentFilter') : null;
     return saved ? saved : '';
+  });
+  const [instrumentDifficultyFilter, setInstrumentDifficultyFilter] = useState<number | ''>(() => {
+    const saved = typeof window !== 'undefined' ? window.localStorage.getItem('songsInstrumentDifficultyFilter') : null;
+    return saved ? Number(saved) : '';
   });
   const [myInstrumentFilter, setMyInstrumentFilter] = useState<string>(() => {
     const saved = typeof window !== 'undefined' ? window.localStorage.getItem('songsMyInstrumentFilter') : null;
@@ -118,6 +128,15 @@ function SongsPage() {
     return saved === 'false' ? false : true;
   });
   const [songPlays, setSongPlays] = useState<Map<string, SongPlay[]>>(new Map());
+  const [playlists, setPlaylists] = useState<Playlist[]>([]);
+  const [playlistFilter, setPlaylistFilter] = useState<string>(() => {
+    const saved = typeof window !== 'undefined' ? window.localStorage.getItem('songsPlaylistFilter') : null;
+    return saved ? saved : '';
+  });
+  const [playlistAccordionOpen, setPlaylistAccordionOpen] = useState<boolean>(() => {
+    const saved = typeof window !== 'undefined' ? window.localStorage.getItem('songsPlaylistAccordionOpen') : null;
+    return saved === 'false' ? false : true;
+  });
   const { user, logout } = useAuth();
 
 
@@ -133,8 +152,18 @@ function SongsPage() {
 
   const clearTunningFilter = () => setTunningFilter('');
 
+  const loadPlaylists = async () => {
+    try {
+      const list = await playlistService.getAllPlaylists();
+      setPlaylists(list);
+    } catch (err) {
+      console.error('Error loading playlists:', err);
+    }
+  };
+
   useEffect(() => {
     loadSongs();
+    loadPlaylists();
     (async () => {
       try {
         const list = await instrumentService.getAll();
@@ -162,6 +191,16 @@ function SongsPage() {
       window.localStorage.setItem('songsInstrumentFilter', instrumentFilter);
     } catch {}
   }, [instrumentFilter]);
+
+  useEffect(() => {
+    try {
+      if (instrumentDifficultyFilter === '') {
+        window.localStorage.removeItem('songsInstrumentDifficultyFilter');
+      } else {
+        window.localStorage.setItem('songsInstrumentDifficultyFilter', String(instrumentDifficultyFilter));
+      }
+    } catch {}
+  }, [instrumentDifficultyFilter]);
 
   useEffect(() => {
     if (!instrumentFilter) {
@@ -279,6 +318,18 @@ function SongsPage() {
 
   useEffect(() => {
     try {
+      window.localStorage.setItem('songsPlaylistFilter', playlistFilter);
+    } catch {}
+  }, [playlistFilter]);
+
+  useEffect(() => {
+    try {
+      window.localStorage.setItem('songsPlaylistAccordionOpen', playlistAccordionOpen ? 'true' : 'false');
+    } catch {}
+  }, [playlistAccordionOpen]);
+
+  useEffect(() => {
+    try {
       window.localStorage.setItem('songsSelectedUids', JSON.stringify(Array.from(selectedSongs)));
     } catch {}
   }, [selectedSongs]);
@@ -314,11 +365,19 @@ function SongsPage() {
 
   const markPlayedNow = async (uid: string) => {
     try {
-      await songPlayService.markPlayed(uid, { instrumentUid: myInstrumentFilter || undefined });
+      const instrumentTypeForPlay = instrumentFilter || undefined;
+      const newPlay = await songPlayService.markPlayed(uid, { instrumentType: instrumentTypeForPlay });
       const updatedSong = await songService.updateSong(uid, {
         lastPlayed: new Date().toISOString(),
       });
+
       setSongs(songs.map(song => (song.uid === uid ? updatedSong : song)));
+      setSongPlays(prev => {
+        const next = new Map(prev);
+        const existing = next.get(uid) || [];
+        next.set(uid, [newPlay, ...existing]);
+        return next;
+      });
     } catch (err) {
       setError('Error while updating');
       console.error(err);
@@ -330,11 +389,13 @@ function SongsPage() {
       setLoading(true);
       setError(null);
       const now = new Date().toISOString();
+      const instrumentTypeForPlay = instrumentFilter || undefined;
       
-      await Promise.all(
+      const newPlays = await Promise.all(
         Array.from(selectedSongs).map(async uid => {
-          await songPlayService.markPlayed(uid, { instrumentUid: myInstrumentFilter || undefined });
-          return songService.updateSong(uid, { lastPlayed: now });
+          const play = await songPlayService.markPlayed(uid, { instrumentType: instrumentTypeForPlay });
+          await songService.updateSong(uid, { lastPlayed: now });
+          return { songUid: uid, play };
         })
       );
       
@@ -342,9 +403,61 @@ function SongsPage() {
         selectedSongs.has(song.uid) ? { ...song, lastPlayed: now } : song
       );
       setSongs(updatedSongs);
+      setSongPlays(prev => {
+        const next = new Map(prev);
+        newPlays.forEach(({ songUid, play }) => {
+          const existing = next.get(songUid) || [];
+          next.set(songUid, [play, ...existing]);
+        });
+        return next;
+      });
       setSelectedSongs(new Set());
     } catch (err) {
       setError('Error while updating songs');
+      console.error(err);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const toggleBulkPlaylistSelection = (playlistUid: string) => {
+    setBulkPlaylistSelection(prev => {
+      const next = new Set(prev);
+      if (next.has(playlistUid)) next.delete(playlistUid);
+      else next.add(playlistUid);
+      return next;
+    });
+  };
+
+  const handleApplySelectedToPlaylists = async () => {
+    if (bulkPlaylistSelection.size === 0 || selectedSongs.size === 0) {
+      setBulkPlaylistOpen(false);
+      return;
+    }
+
+    try {
+      setLoading(true);
+      setError(null);
+
+      const selectedSongArray = Array.from(selectedSongs);
+
+      // Use addSongToPlaylist to reuse server logic and avoid partial updates
+      await Promise.all(
+        Array.from(bulkPlaylistSelection).flatMap(playlistUid =>
+          selectedSongArray.map(songUid => playlistService.addSongToPlaylist(playlistUid, songUid))
+        )
+      );
+
+      // Refresh playlists locally so counts reflect the change
+      const refreshed = await playlistService.getAllPlaylists();
+      setPlaylists(refreshed);
+
+      setBulkPlaylistOpen(false);
+      setBulkPlaylistSelection(new Set());
+      setToastMessage('Added to playlist');
+      setTimeout(() => setToastMessage(null), 2500);
+    } catch (err) {
+      setError('Error while adding to playlists');
       console.error(err);
     } finally {
       setLoading(false);
@@ -380,6 +493,31 @@ function SongsPage() {
     });
   };
 
+  const setFormInstruments = (instruments: string[]) => {
+    setForm(prevForm => {
+      const nextDifficulty = { ...(prevForm.instrumentDifficulty || {}) } as Record<string, number | null>;
+      Object.keys(nextDifficulty).forEach(key => {
+        if (!instruments.includes(key)) {
+          delete nextDifficulty[key];
+        }
+      });
+
+      return { ...prevForm, instrument: instruments, instrumentDifficulty: nextDifficulty };
+    });
+  };
+
+  const setInstrumentDifficulty = (instrumentType: string, difficulty: number | null) => {
+    setForm(prevForm => {
+      const next = { ...(prevForm.instrumentDifficulty || {}) } as Record<string, number | null>;
+      if (difficulty === null || Number.isNaN(difficulty)) {
+        delete next[instrumentType];
+      } else {
+        next[instrumentType] = difficulty;
+      }
+      return { ...prevForm, instrumentDifficulty: next };
+    });
+  };
+
   const setFormMyInstrumentUid = (uid: string | undefined) => {
     setForm(prevForm => ({ ...prevForm, myInstrumentUid: uid }));
   };
@@ -400,6 +538,7 @@ function SongsPage() {
       instrument: form.instrument && form.instrument.length > 0 ? form.instrument : null,
       technique: form.technique && form.technique.length > 0 ? form.technique : [],
       myInstrumentUid: form.myInstrumentUid ? form.myInstrumentUid : undefined,
+      instrumentDifficulty: form.instrumentDifficulty || {},
     };
 
     try {
@@ -442,6 +581,7 @@ function SongsPage() {
             ? [rest.technique as unknown as string]
             : [],
         myInstrumentUid: rest.myInstrumentUid || undefined,
+        instrumentDifficulty: rest.instrumentDifficulty || {},
       };
       setForm(normalized);
       setEditingUid(uid);
@@ -550,6 +690,12 @@ function SongsPage() {
         : selected.some(inst => songInstruments.includes(inst)));
     const passesMyInstrument = !myInstrumentFilter || song.myInstrumentUid === myInstrumentFilter;
     const passesTunning = !tunningFilter || song.tunning === tunningFilter;
+    const songDifficulty = instrumentFilter && song.instrumentDifficulty ? song.instrumentDifficulty[instrumentFilter] : undefined;
+    const passesDifficulty = !instrumentDifficultyFilter || (
+      instrumentFilter
+        ? (songDifficulty !== undefined && songDifficulty !== null && songDifficulty <= instrumentDifficultyFilter)
+        : false
+    );
     const selectedTech = Array.from(techniqueFilters);
     const songTechniques = Array.isArray(song.technique)
       ? song.technique
@@ -574,7 +720,8 @@ function SongsPage() {
       (pitchMin === undefined || (typeof pitch === 'number' && pitch >= pitchMin)) &&
       (pitchMax === undefined || (typeof pitch === 'number' && pitch <= pitchMax))
     );
-    return passesSearch && passesInstrument && passesMyInstrument && passesTechnique && passesTunning && passesKey && passesBpm && passesPitch;
+    const passesPlaylist = !playlistFilter || (playlists.find(p => p.uid === playlistFilter)?.songUids || []).includes(song.uid);
+    return passesSearch && passesInstrument && passesMyInstrument && passesTechnique && passesTunning && passesDifficulty && passesKey && passesBpm && passesPitch && passesPlaylist;
   });
 
   const handleSort = (column: string) => {
@@ -699,25 +846,16 @@ function SongsPage() {
         </div>
       )}
 
+      {toastMessage && (
+        <div className="fixed bottom-6 right-6 z-30 rounded-lg bg-green-600 text-white px-5 py-3 shadow-xl text-base min-w-[240px]">
+          {toastMessage}
+        </div>
+      )}
+
       {page === 'list' ? (
         <>
           <div className="container mx-auto px-4 py-8">
-            <div className="flex items-center justify-between mb-6">
-              <Link to="/" className="text-2xl font-semibold text-gray-900 hover:text-brand-500 transition">Musician Tools</Link>
-              <div className="flex items-center gap-3">
-                {user && <span className="text-sm text-gray-600">Hello, {user.name}</span>}
-                <button
-                  className="inline-flex items-center rounded-md bg-gray-300 text-gray-800 px-3 py-2 hover:bg-gray-400 disabled:opacity-50"
-                  onClick={async () => {
-                    await logout();
-                    window.location.href = '/';
-                  }}
-                  disabled={loading}
-                >
-                  Logout
-                </button>
-              </div>
-            </div>
+            <PageHeader loading={loading} />
             <div className="flex gap-4 items-stretch">
               <aside
                 id="songs-sidebar"
@@ -772,7 +910,7 @@ function SongsPage() {
                               <option key={inst} value={inst}>{inst}</option>
                             ))}
                           </select>
-                          
+
                           <div className="text-xs font-semibold text-gray-700 mb-2">Filter by my instrument</div>
                           <select
                             value={myInstrumentFilter}
@@ -792,6 +930,7 @@ function SongsPage() {
                               onClick={() => {
                                 setInstrumentFilter('');
                                 setMyInstrumentFilter('');
+                                setInstrumentDifficultyFilter('');
                               }}
                             >
                               Clear filters
@@ -799,6 +938,61 @@ function SongsPage() {
                           </div>
                         </div>
                       )}
+                    </div>
+                    <div className="border border-gray-200 rounded-md mt-3">
+                      <button
+                        type="button"
+                        className="w-full flex items-center justify-between p-2 text-sm font-medium hover:bg-gray-50"
+                        aria-expanded={playlistAccordionOpen}
+                        onClick={() => setPlaylistAccordionOpen(prev => !prev)}
+                      >
+                        <span>Playlist filters</span>
+                        <span>{playlistAccordionOpen ? '▾' : '▸'}</span>
+                      </button>
+                      {playlistAccordionOpen && (
+                        <div className="p-3 border-t">
+                          <div className="text-xs font-semibold text-gray-700 mb-2">Filter by playlist</div>
+                          <select
+                            className="w-full rounded-md border border-gray-300 p-2 text-sm focus:outline-none focus:ring-2 focus:ring-brand-500"
+                            value={playlistFilter}
+                            onChange={e => setPlaylistFilter(e.target.value)}
+                          >
+                            <option value="">All playlists</option>
+                            {playlists.map(playlist => (
+                              <option key={playlist.uid} value={playlist.uid}>{playlist.name}</option>
+                            ))}
+                          </select>
+                          {playlistFilter && (
+                            <div className="mt-3">
+                              <button
+                                type="button"
+                                className="inline-flex items-center rounded-md bg-gray-100 text-gray-800 px-2 py-1 hover:bg-gray-200"
+                                onClick={() => setPlaylistFilter('')}
+                              >
+                                Clear filter
+                              </button>
+                            </div>
+                          )}
+                        </div>
+                      )}
+                    </div>
+
+                    <div className="border border-gray-200 rounded-md mt-3 p-3 bg-white">
+                      <div className="text-xs font-semibold text-gray-700 mb-2">Filter by difficulty (max)</div>
+                      <select
+                        value={instrumentDifficultyFilter === '' ? '' : instrumentDifficultyFilter}
+                        onChange={(e) => {
+                          const val = e.target.value === '' ? '' : Number(e.target.value);
+                          setInstrumentDifficultyFilter(val as number | '');
+                        }}
+                        className="w-full rounded-md border border-gray-300 p-2 text-sm focus:outline-none focus:ring-2 focus:ring-brand-500"
+                        disabled={!instrumentFilter}
+                      >
+                        <option value="">All difficulties</option>
+                        {[1,2,3,4,5].map(n => (
+                          <option key={n} value={n}>{`Up to ${n} ★`}</option>
+                        ))}
+                      </select>
                     </div>
                     {instrumentFilter && (
                       <div className="border border-gray-200 rounded-md mt-3">
@@ -1066,14 +1260,83 @@ function SongsPage() {
                     <div className="flex items-center justify-between">
                       <span className="text-sm font-medium text-blue-900">{selectedSongs.size} song(s) selected</span>
                       <div className="flex gap-2">
-                        <button
-                          type="button"
-                          className="inline-flex items-center rounded-md bg-green-600 text-white px-3 py-1.5 text-sm hover:bg-green-700 disabled:opacity-50"
-                          onClick={handleMarkSelectedAsPlayedNow}
-                          disabled={loading}
-                        >
-                          Mark as played now
-                        </button>
+                        <div className="relative">
+                          <button
+                            type="button"
+                            className="inline-flex items-center rounded-md bg-brand-500 text-white px-3 py-1.5 text-sm hover:bg-brand-600 disabled:opacity-50"
+                            onClick={() => setBulkPlaylistOpen(prev => !prev)}
+                            disabled={loading || playlists.length === 0}
+                          >
+                            Add to playlist
+                          </button>
+                          {bulkPlaylistOpen && (
+                            <div className="absolute right-0 mt-2 w-72 rounded-md border border-gray-200 bg-white shadow-lg z-20 p-3">
+                              <div className="flex items-center justify-between mb-2">
+                                <p className="text-sm text-gray-700">Select playlists</p>
+                                <button
+                                  type="button"
+                                  className="text-xs text-gray-500 hover:text-gray-700"
+                                  onClick={() => setBulkPlaylistOpen(false)}
+                                >
+                                  ✕
+                                </button>
+                              </div>
+                              {playlists.length === 0 ? (
+                                <p className="text-sm text-gray-500">
+                                  No playlists found.{' '}
+                                  <Link to="/my-playlists" className="text-brand-500 hover:text-brand-600">Create one</Link>
+                                </p>
+                              ) : (
+                                <>
+                                  <div className="max-h-48 overflow-y-auto space-y-1 mb-3">
+                                    {playlists.map(pl => (
+                                      <label
+                                        key={pl.uid}
+                                        className="flex items-center space-x-3 cursor-pointer hover:bg-gray-50 p-1 rounded"
+                                      >
+                                        <input
+                                          type="checkbox"
+                                          checked={bulkPlaylistSelection.has(pl.uid)}
+                                          onChange={() => toggleBulkPlaylistSelection(pl.uid)}
+                                          className="rounded border-gray-300"
+                                        />
+                                        <span className="text-sm text-gray-900">{pl.name}</span>
+                                        <span className="text-xs text-gray-500">{(pl.songUids || []).length}</span>
+                                      </label>
+                                    ))}
+                                  </div>
+                                  <div className="flex justify-end gap-2">
+                                    <button
+                                      type="button"
+                                      className="text-sm px-3 py-1 rounded-md border border-gray-200 text-gray-700 hover:bg-gray-100"
+                                      onClick={() => setBulkPlaylistOpen(false)}
+                                    >
+                                      Cancel
+                                    </button>
+                                    <button
+                                      type="button"
+                                      className="text-sm px-3 py-1 rounded-md bg-brand-500 text-white hover:bg-brand-600 disabled:opacity-50"
+                                      onClick={handleApplySelectedToPlaylists}
+                                      disabled={bulkPlaylistSelection.size === 0 || loading}
+                                    >
+                                      Add
+                                    </button>
+                                  </div>
+                                </>
+                              )}
+                            </div>
+                          )}
+                        </div>
+                        {instrumentFilter && (
+                          <button
+                            type="button"
+                            className="inline-flex items-center rounded-md bg-green-600 text-white px-3 py-1.5 text-sm hover:bg-green-700 disabled:opacity-50"
+                            onClick={handleMarkSelectedAsPlayedNow}
+                            disabled={loading}
+                          >
+                            {`Mark as played on ${instrumentFilter}`}
+                          </button>
+                        )}
                         <button
                           type="button"
                           className="inline-flex items-center rounded-md bg-red-600 text-white px-3 py-1.5 text-sm hover:bg-red-700 disabled:opacity-50"
@@ -1160,10 +1423,11 @@ function SongsPage() {
             form={form}
             loading={loading}
             onChange={handleChange}
-            onChangeInstruments={(instruments) => setForm(prevForm => ({ ...prevForm, instrument: instruments }))}
+            onChangeInstruments={setFormInstruments}
             onSetMyInstrumentUid={setFormMyInstrumentUid}
             onSetTechniques={setFormTechniques}
             onSetTunning={setFormTunning}
+            onSetInstrumentDifficulty={setInstrumentDifficulty}
             onToggleTechnique={toggleFormTechnique}
             onSubmit={handleSubmit}
             onCancel={() => {

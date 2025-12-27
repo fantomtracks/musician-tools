@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react';
 import { Link } from 'react-router-dom';
 import { useAuth } from '../contexts/AuthContext';
+import { PageHeader } from '../components/PageHeader';
 import { instrumentService, type Instrument, type CreateInstrumentDTO, type UpdateInstrumentDTO } from '../services/instrumentService';
 import { ConfirmDialog } from '../components/ConfirmDialog';
 import { instrumentTypeOptions } from '../constants/instrumentTypes';
@@ -121,20 +122,7 @@ function MyInstrumentsPage() {
         </div>
       )}
       <div className="container mx-auto px-4 py-8">
-        <div className="flex items-center justify-between mb-6">
-          <Link to="/" className="text-2xl font-semibold text-gray-900 hover:text-brand-500 transition">Musician Tools</Link>
-          <div className="flex items-center gap-3">
-            <Link to="/songs" className="inline-flex items-center rounded-md bg-gray-200 text-gray-800 px-3 py-2 hover:bg-gray-300">Back to songs</Link>
-            <button
-              type="button"
-              className="inline-flex items-center rounded-md bg-gray-300 text-gray-800 px-3 py-2 hover:bg-gray-400 disabled:opacity-50"
-              onClick={async () => { await logout(); window.location.href = '/'; }}
-              disabled={loading}
-            >
-              Logout
-            </button>
-          </div>
-        </div>
+        <PageHeader loading={loading} />
 
         <h2 className="text-lg font-medium mb-2">My instruments</h2>
 

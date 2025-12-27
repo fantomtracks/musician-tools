@@ -5,6 +5,7 @@ import SongDetailPage from './pages/SongDetailPage';
 import LoginPage from './pages/LoginPage';
 import RegisterPage from './pages/RegisterPage';
 import MyInstrumentsPage from './pages/MyInstrumentsPage';
+import MyPlaylistsPage from './pages/MyPlaylistsPage';
 
 function HomePage() {
   const { isAuthenticated, logout } = useAuth();
@@ -30,6 +31,12 @@ function HomePage() {
                 className="inline-flex items-center rounded-md bg-blue-500 text-white px-4 py-2 hover:bg-blue-600"
               >
                 My instruments
+              </Link>
+              <Link
+                to="/my-playlists"
+                className="inline-flex items-center rounded-md bg-purple-500 text-white px-4 py-2 hover:bg-purple-600"
+              >
+                My playlists
               </Link>
               <button
                 onClick={async () => {
@@ -84,6 +91,10 @@ function App() {
       <Route
         path="/my-instruments"
         element={isAuthenticated ? <MyInstrumentsPage /> : <Navigate to="/login" replace />}
+      />
+      <Route
+        path="/my-playlists"
+        element={isAuthenticated ? <MyPlaylistsPage /> : <Navigate to="/login" replace />}
       />
       <Route
         path="/song/:artist/:title"

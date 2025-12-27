@@ -1,4 +1,5 @@
 import { useEffect, useState } from 'react';
+import type React from 'react';
 import type { CreateSongDTO } from '../services/songService';
 import type { SongPlay } from '../services/songPlayService';
 import { instrumentTypeOptions, instrumentTechniquesMap, instrumentTuningsMap } from '../constants/instrumentTypes';
@@ -12,6 +13,7 @@ type SongFormProps = {
   onChange: (e: React.ChangeEvent<HTMLInputElement | HTMLTextAreaElement | HTMLSelectElement>) => void;
   onChangeInstruments: (instruments: string[]) => void;
   onSetTechniques: (techniques: string[]) => void;
+  onSetInstrumentDifficulty?: (instrumentType: string, difficulty: number | null) => void;
   onSetMyInstrumentUid: (uid: string | undefined) => void;
   onSetTunning: (tunning: string | null) => void;
   onToggleTechnique: (technique: string) => void;
@@ -24,6 +26,7 @@ type SongFormProps = {
   formatLastPlayed?: (dateString: string | undefined) => string;
   tabsFirst?: boolean;
   myInstruments?: Array<{ uid: string; name: string; type?: string | null }>;
+  playlistSlot?: React.ReactNode;
 };
 
 const keyOptions = ['C','C#','Db','D','Eb','E','F','F#','Gb','G','Ab','A','Bb','B'];
@@ -38,6 +41,7 @@ const getAvailableTunings = (instrumentType: string) => {
   return instrumentTuningsMap[instrumentType] || [];
 };
 
+
 const getLastPlayedForInstrument = (instrumentType: string, plays: SongPlay[] = [], formatter: (date: string | undefined) => string = (d) => d || '-'): string => {
   if (!plays || plays.length === 0) return '-';
   const instrumentPlays = plays.filter(p => p.instrumentType === instrumentType);
@@ -45,7 +49,7 @@ const getLastPlayedForInstrument = (instrumentType: string, plays: SongPlay[] = 
   return formatter(instrumentPlays[0].playedAt);
 };
 
-export function SongForm({ mode, form, loading, onChange, onChangeInstruments, onSetTechniques, onSetMyInstrumentUid, onSetTunning, onToggleTechnique, onSetInstrumentLinksForInstrument, onSubmit, onCancel, onDelete, onMarkAsPlayedNow, songPlays, formatLastPlayed, tabsFirst, myInstruments }: SongFormProps) {
+export function SongForm({ mode, form, loading, onChange, onChangeInstruments, onSetTechniques, onSetInstrumentDifficulty, onSetMyInstrumentUid, onSetTunning, onToggleTechnique, onSetInstrumentLinksForInstrument, onSubmit, onCancel, onDelete, onMarkAsPlayedNow, songPlays, formatLastPlayed, tabsFirst, myInstruments, playlistSlot }: SongFormProps) {
   const currentInstruments = Array.isArray(form.instrument) ? form.instrument : (form.instrument ? [form.instrument] : []);
   const currentTechniques = Array.isArray(form.technique) ? form.technique : [];
   const [selectedInstrumentType, setSelectedInstrumentType] = useState('');
@@ -315,6 +319,34 @@ export function SongForm({ mode, form, loading, onChange, onChangeInstruments, o
                       </div>
                     )}
 
+                    <div>
+                      <div className="flex items-center justify-between">
+                        <label className="block text-sm font-medium text-gray-700">Difficulty (1-5)</label>
+                        <div className="flex items-center gap-1" role="radiogroup" aria-label="Difficulty" aria-live="polite">
+                          {[1,2,3,4,5].map(n => {
+                            const current = form.instrumentDifficulty ? form.instrumentDifficulty[instrumentType] : null;
+                            const active = typeof current === 'number' && n <= current;
+                            return (
+                              <button
+                                key={n}
+                                type="button"
+                                className={`text-lg leading-none ${active ? 'text-yellow-500' : 'text-gray-300'} hover:text-yellow-500 focus:outline-none`}
+                                onClick={() => {
+                                  const next = current === n ? null : n;
+                                  onSetInstrumentDifficulty?.(instrumentType, next);
+                                }}
+                                disabled={loading}
+                                aria-pressed={active}
+                                aria-label={`${n} star${n > 1 ? 's' : ''}`}
+                              >
+                                ★
+                              </button>
+                            );
+                          })}
+                        </div>
+                      </div>
+                    </div>
+
                     {instrumentTechniques && instrumentTechniques.length > 0 && (
                       <div>
                         <label className="block text-sm font-medium text-gray-700 mb-2">Techniques</label>
@@ -458,6 +490,8 @@ export function SongForm({ mode, form, loading, onChange, onChangeInstruments, o
         </div>
       )}
       
+      {playlistSlot}
+
       <div>
         <label htmlFor="song-notes" className="block text-sm font-medium text-gray-700">Notes</label>
         <textarea

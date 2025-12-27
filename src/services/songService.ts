@@ -7,6 +7,7 @@ export type Song = {
   tabs: string;
   instrument: string[] | null;
   instrumentLinks?: Record<string, Array<{ label?: string; url: string }>>;
+  instrumentDifficulty?: Record<string, number | null>;
   artist: string;
   album?: string;
   technique?: string[];

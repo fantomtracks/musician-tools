@@ -63,6 +63,11 @@ module.exports = (sequelize, DataTypes) => {
       allowNull: true,
       defaultValue: null
     },
+    instrumentDifficulty: {
+      type: DataTypes.JSONB,
+      allowNull: true,
+      defaultValue: null
+    },
     instrument: {
       type: DataTypes.JSON,
       allowNull: true,

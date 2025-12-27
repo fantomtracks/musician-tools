@@ -3,6 +3,7 @@ var router = express.Router();
 var songsRouter = require('./songs');
 var authRouter = require('./auth');
 var instrumentsRouter = require('./instruments');
+var playlistsRouter = require('./playlists');
 
 /* GET home page. */
 router.get('/', function(req, res, next) {
@@ -21,5 +22,8 @@ router.use('/songs', songsRouter);
 
 // Instruments routes
 router.use('/instruments', instrumentsRouter);
+
+// Playlists routes
+router.use('/playlists', playlistsRouter);
 
 module.exports = router;
