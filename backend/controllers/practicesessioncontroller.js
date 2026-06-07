@@ -1,4 +1,5 @@
 const { PracticeSession, SessionItem, Song, Topic, sequelize } = require('../models');
+const { fn, col, Op } = require('sequelize');
 const createError = require('http-errors');
 const logger = require('../logger');
 
@@ -55,6 +56,49 @@ const getAllPracticeSessions = async (req, res, next) => {
   } catch (error) {
     logger.error('Error fetching practice sessions:', error);
     next(createError(500, 'Error fetching practice sessions'));
+  }
+};
+
+// GET heatmap aggregates: total minutes and session count per day for one
+// year. One GROUP BY query over the (user_uid, date) index (NFR2). The date
+// is the client-entered DATEONLY, grouped verbatim — no server timezone
+// conversion (FR19). Only active days are returned; empty days are derived
+// client-side.
+const getHeatmap = async (req, res, next) => {
+  try {
+    const userId = req.session.user;
+    if (!userId) {
+      return next(createError(401, 'Unauthorized'));
+    }
+
+    const yearRaw = req.query?.year;
+    const year = Number(yearRaw);
+    if (yearRaw === undefined || yearRaw === '' || !Number.isInteger(year) || year < 1900 || year > 2100) {
+      return next(createError(400, 'Year must be a valid year'));
+    }
+
+    const rows = await PracticeSession.findAll({
+      attributes: [
+        'date',
+        [fn('SUM', col('duration_minutes')), 'totalMinutes'],
+        [fn('COUNT', col('uid')), 'sessionCount']
+      ],
+      where: { userUid: userId, date: { [Op.between]: [`${year}-01-01`, `${year}-12-31`] } },
+      group: ['date'],
+      order: [['date', 'ASC']],
+      raw: true
+    });
+
+    // pg returns SUM (numeric) and COUNT (bigint) as STRINGS in raw mode;
+    // a SUM over all-NULL durations is NULL
+    res.json(rows.map(row => ({
+      date: row.date,
+      totalMinutes: Number(row.totalMinutes ?? 0),
+      sessionCount: Number(row.sessionCount)
+    })));
+  } catch (error) {
+    logger.error('Error fetching heatmap:', error);
+    next(createError(500, 'Error fetching heatmap'));
   }
 };
 
@@ -519,6 +563,7 @@ const deletePracticeSession = async (req, res, next) => {
 
 module.exports = {
   getAllPracticeSessions,
+  getHeatmap,
   createPracticeSession,
   updatePracticeSession,
   deletePracticeSession,

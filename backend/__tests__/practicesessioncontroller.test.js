@@ -24,6 +24,7 @@ jest.mock('../models', () => {
 });
 
 const { PracticeSession, SessionItem, Song, Topic, sequelize } = require('../models');
+const { fn, col, Op } = require('sequelize');
 const controller = require('../controllers/practicesessioncontroller');
 
 function mockRes() {
@@ -331,6 +332,68 @@ describe('practicesessioncontroller', () => {
       await controller.getAllPracticeSessions(req, mockRes(), next);
 
       expect(next.mock.calls[0][0].status).toBe(500);
+    });
+  });
+
+  describe('getHeatmap', () => {
+    test('aggregates by client-entered date with the exact query shape (FR19, NFR2)', async () => {
+      PracticeSession.findAll.mockResolvedValueOnce([]);
+
+      const req = { session: { user: 'user-1' }, query: { year: '2026' } };
+      const res = mockRes();
+      const next = mockNext();
+
+      await controller.getHeatmap(req, res, next);
+
+      expect(PracticeSession.findAll).toHaveBeenCalledWith({
+        attributes: [
+          'date',
+          [fn('SUM', col('duration_minutes')), 'totalMinutes'],
+          [fn('COUNT', col('uid')), 'sessionCount'],
+        ],
+        where: { userUid: 'user-1', date: { [Op.between]: ['2026-01-01', '2026-12-31'] } },
+        group: ['date'],
+        order: [['date', 'ASC']],
+        raw: true,
+      });
+      expect(res.json).toHaveBeenCalledWith([]);
+      expect(next).not.toHaveBeenCalled();
+    });
+
+    test('casts pg string aggregates to numbers and nulls SUM to 0', async () => {
+      PracticeSession.findAll.mockResolvedValueOnce([
+        { date: '2026-03-10', totalMinutes: '120', sessionCount: '3' },
+        { date: '2026-03-11', totalMinutes: null, sessionCount: '1' },
+      ]);
+
+      const res = mockRes();
+      await controller.getHeatmap({ session: { user: 'user-1' }, query: { year: 2026 } }, res, mockNext());
+
+      expect(res.json).toHaveBeenCalledWith([
+        { date: '2026-03-10', totalMinutes: 120, sessionCount: 3 },
+        { date: '2026-03-11', totalMinutes: 0, sessionCount: 1 },
+      ]);
+    });
+
+    test('rejects invalid years with 400', async () => {
+      for (const year of [undefined, 'abc', '1800', '2200', '2026.5']) {
+        const next = mockNext();
+        await controller.getHeatmap({ session: { user: 'user-1' }, query: { year } }, mockRes(), next);
+
+        expect(PracticeSession.findAll).not.toHaveBeenCalled();
+        expect(next.mock.calls[0][0].status).toBe(400);
+      }
+    });
+
+    test('rejects unauthenticated requests with 401 and maps failures to 500', async () => {
+      const anonNext = mockNext();
+      await controller.getHeatmap({ session: {}, query: { year: '2026' } }, mockRes(), anonNext);
+      expect(anonNext.mock.calls[0][0].status).toBe(401);
+
+      PracticeSession.findAll.mockRejectedValueOnce(new Error('db down'));
+      const failNext = mockNext();
+      await controller.getHeatmap({ session: { user: 'user-1' }, query: { year: '2026' } }, mockRes(), failNext);
+      expect(failNext.mock.calls[0][0].status).toBe(500);
     });
   });
 

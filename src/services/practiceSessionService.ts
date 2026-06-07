@@ -44,9 +44,26 @@ export type UpdatePracticeSessionDTO = Partial<Omit<CreatePracticeSessionDTO, 'i
   items?: UpdateSessionItemDTO[];
 };
 
+export type HeatmapDay = {
+  date: string; // YYYY-MM-DD, client-local day (FR19)
+  totalMinutes: number;
+  sessionCount: number;
+};
+
 const API_BASE = '/api';
 
 export const practiceSessionService = {
+  async getHeatmap(year: number): Promise<HeatmapDay[]> {
+    const res = await fetch(`${API_BASE}/sessions/heatmap?year=${year}`, {
+      credentials: 'include'
+    });
+    if (res.status === 400) {
+      const body = await res.json().catch(() => null);
+      throw new Error(body?.message || 'Failed to fetch heatmap');
+    }
+    if (!res.ok) throw new Error('Failed to fetch heatmap');
+    return res.json();
+  },
   async getAll(): Promise<PracticeSession[]> {
     const res = await fetch(`${API_BASE}/sessions`, {
       credentials: 'include'
