@@ -55,7 +55,7 @@ development_status:
   2-3-consulter-mon-historique-de-sessions: done
   2-4-corriger-mon-journal-a-posteriori: done
   2-5-logger-en-moins-de-30-secondes: done
-  epic-2-retrospective: optional
+  epic-2-retrospective: done
 
   # Epic 3: Ma pratique en un coup d'œil (heatmap)
   epic-3: backlog
