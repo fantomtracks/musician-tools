@@ -350,6 +350,14 @@ So that la grille devienne la porte d'entrée de mon journal.
 **When** je choisis « Log a session for this day »
 **Then** le formulaire de session s'ouvre avec la date de ce jour pré-remplie — une affordance choisie par l'utilisateur, pas une relance (FR18 préservé)
 
+**Given** le détail d'un jour affichant une session _(ajout northwood, 2026-06-07, après test terrain)_
+**When** je choisis « Delete » sur cette session
+**Then** un dialogue de confirmation s'affiche (FR11), et après confirmation la session disparaît du détail ET la grille se met à jour
+
+**Given** le formulaire en mode édition _(ajout northwood, 2026-06-07, après test terrain)_
+**When** j'édite une session
+**Then** l'historique sous le formulaire est masqué (éviter la confusion), And un bouton « Delete session » est disponible dans le bandeau d'édition (avec confirmation FR11)
+
 ### Story 3.3: Ma grille a déjà une histoire (rétro-import)
 
 As a musicien qui utilise l'app depuis des mois,
