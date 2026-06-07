@@ -25,3 +25,7 @@
 - Session serveur expirée → page morte : `isAuthenticated` vient du localStorage (AuthContext), pas du cookie ; un 401 sur les fetchs affiche un bandeau d'erreur sans chemin de re-login. Pré-existant et transverse (Songs, Instruments, Playlists, Topics, Sessions, Heatmap). Piste : intercepter `res.status === 401` dans les services → redirect /login. **PRIORITÉ EN HAUSSE (2026-06-07)** : vécu en réel par northwood sur la heatmap (« Heatmap could not be loaded. » alors que c'était un simple 401 après un restart nodemon qui vide le MemoryStore) — 3ᵉ manifestation. Candidat sérieux pour une mini-story dédiée avant ou pendant l'Epic 4.
 - `loading` partagé entre chargement initial et create : la table disparaît pendant un POST lent. Pattern maison hérité de MyInstrumentsPage — à corriger globalement si on touche à ces pages.
 - Aucune navigation mobile : la nav du Header est `hidden md:flex` sans menu hamburger — sur mobile, aucun lien vers /songs, /my-instruments, /my-playlists, /my-topics. Pré-existant ; pertinent pour NFR3 de l'epic 2/3 (responsive complet).
+
+## Deferred from: code review of 3-3-ma-grille-a-deja-une-histoire-retro-import (2026-06-07)
+
+- Suppression d'une chanson → CASCADE sur ses SongPlays → la heatmap déjà chargée garde une case allumée (playCount > 0) dont le panneau dit « No practice » jusqu'au prochain refetch (changement d'année ou delete de session). Rare, auto-guéri au refresh. Piste si ça mord : bump de heatmapVersion à l'ouverture d'un panneau vide inattendu, ou refetch au focus de l'onglet.

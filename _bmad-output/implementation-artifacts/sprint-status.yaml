@@ -58,10 +58,10 @@ development_status:
   epic-2-retrospective: done
 
   # Epic 3: Ma pratique en un coup d'œil (heatmap)
-  epic-3: in-progress
+  epic-3: done
   3-1-ma-grille-annuelle-de-pratique: done
   3-2-explorer-ma-pratique-depuis-la-grille: done
-  3-3-ma-grille-a-deja-une-histoire-retro-import: backlog
+  3-3-ma-grille-a-deja-une-histoire-retro-import: done
   epic-3-retrospective: optional
 
   # Epic 4: La capture sans effort (pont avec l'existant)
