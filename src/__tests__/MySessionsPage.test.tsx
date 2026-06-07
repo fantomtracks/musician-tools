@@ -698,6 +698,168 @@ test('cancelling the session delete dialog keeps the session', async () => {
   expect(screen.getByText('2026-06-05')).toBeInTheDocument();
 });
 
+test('FR12: the most recently logged instrument is pre-filled', async () => {
+  mockedService.getAll.mockResolvedValue([
+    // Higher in the date sort, but logged a while ago
+    { uid: 's-retro', date: todayLocalDate(), instrumentType: 'Bass', createdAt: '2026-06-01T10:00:00Z', items: [] },
+    // Lower in the date sort, but the most recent ENTRY (max createdAt)
+    { uid: 's-recent', date: '2026-01-15', instrumentType: 'Guitar', createdAt: '2026-06-07T09:00:00Z', items: [] },
+  ]);
+
+  render(<MySessionsPage />);
+
+  await waitFor(() => {
+    expect(screen.getByLabelText('Instrument')).toHaveValue('Guitar');
+  });
+});
+
+test('FR12: a manual instrument choice made before the data arrives is not overwritten', async () => {
+  let resolveGetAll!: (value: never[]) => void;
+  mockedService.getAll.mockReturnValue(new Promise(resolve => { resolveGetAll = resolve; }));
+
+  render(<MySessionsPage />);
+  fireEvent.change(screen.getByLabelText('Instrument'), { target: { value: 'Drums' } });
+
+  resolveGetAll([
+    { uid: 's1', date: todayLocalDate(), instrumentType: 'Guitar', createdAt: '2026-06-07T09:00:00Z', items: [] },
+  ] as never);
+
+  await screen.findByText(todayLocalDate());
+  expect(screen.getByLabelText('Instrument')).toHaveValue('Drums');
+});
+
+test('FR12: recently logged songs and topics appear first, deduplicated, current names, deleted refs excluded', async () => {
+  const DELETED_TOPIC = 'ffffffff-ffff-4fff-8fff-ffffffffffff';
+  mockedService.getAll.mockResolvedValue([
+    {
+      uid: 's1', date: todayLocalDate(), instrumentType: 'Bass', createdAt: '2026-06-07T09:00:00Z',
+      items: [
+        { uid: 'i1', sessionUid: 's1', topicUid: TOPIC_UID, label: 'Old snapshot name', minutes: 10 },
+        { uid: 'i2', sessionUid: 's1', songUid: SONG_UID, label: 'Sweet Child', minutes: 5 },
+        // Deleted topic: not in the loaded catalog → must be excluded
+        { uid: 'i3', sessionUid: 's1', topicUid: DELETED_TOPIC, label: 'Ghost topic', minutes: 5 },
+        // Duplicate of i2 → deduplicated
+        { uid: 'i4', sessionUid: 's1', songUid: SONG_UID, label: 'Sweet Child' },
+      ],
+    },
+  ]);
+
+  render(<MySessionsPage />);
+  await screen.findAllByText(/Sweet Child/);
+  fireEvent.click(screen.getByRole('button', { name: 'Add entry' }));
+
+  const select = await screen.findByLabelText('Entry 1');
+  const recentGroup = within(select).getByRole('group', { name: 'Recent' });
+  const recentOptions = within(recentGroup).getAllByRole('option');
+
+  // Order of first occurrence, deduplicated, current catalog name (not the stale snapshot)
+  expect(recentOptions.map(o => o.textContent)).toEqual(['Pentatonic scale', 'Sweet Child']);
+  expect(within(recentGroup).queryByText('Ghost topic')).not.toBeInTheDocument();
+  // Recent group is rendered before Songs/Topics groups
+  const groups = within(select).getAllByRole('group');
+  expect(groups[0]).toHaveAccessibleName('Recent');
+});
+
+test('FR12: instant search filters the picker options and clearing restores them', async () => {
+  render(<MySessionsPage />);
+  fireEvent.click(screen.getByRole('button', { name: 'Add entry' }));
+  const select = await screen.findByLabelText('Entry 1');
+  await screen.findAllByRole('option', { name: 'Sweet Child' });
+
+  fireEvent.change(screen.getByLabelText('Entry 1 search'), { target: { value: 'penta' } });
+
+  expect(within(select).getByRole('option', { name: 'Pentatonic scale' })).toBeInTheDocument();
+  expect(within(select).queryByRole('option', { name: 'Sweet Child' })).not.toBeInTheDocument();
+
+  fireEvent.change(screen.getByLabelText('Entry 1 search'), { target: { value: '' } });
+  expect(within(select).getByRole('option', { name: 'Sweet Child' })).toBeInTheDocument();
+});
+
+test('FR12: the selected option stays rendered even when filtered out', async () => {
+  mockedService.create.mockResolvedValue({ uid: 's1', date: todayLocalDate(), instrumentType: 'Bass' });
+
+  render(<MySessionsPage />);
+  fireEvent.change(screen.getByLabelText('Instrument'), { target: { value: 'Bass' } });
+  await addEntry(1, `song:${SONG_UID}`);
+
+  // Filter that matches nothing the selection belongs to
+  fireEvent.change(screen.getByLabelText('Entry 1 search'), { target: { value: 'penta' } });
+
+  const select = screen.getByLabelText('Entry 1');
+  expect(select).toHaveValue(`song:${SONG_UID}`);
+  expect(within(select).getByRole('option', { name: 'Sweet Child' })).toBeInTheDocument();
+
+  // And the submit still sends the right ref
+  fireEvent.click(screen.getByRole('button', { name: 'Log session' }));
+  await waitFor(() => {
+    expect(mockedService.create).toHaveBeenCalledWith(
+      expect.objectContaining({ items: [expect.objectContaining({ songUid: SONG_UID })] })
+    );
+  });
+});
+
+test('FR12: Recent is ordered by creation time, capped at 5', async () => {
+  const topicUids = Array.from({ length: 6 }, (_, i) => `${i}aaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaa${i}`);
+  mockedTopicService.getAll.mockResolvedValue(topicUids.map((uid, i) => ({ uid, name: `Topic ${i}` })));
+  mockedService.getAll.mockResolvedValue([
+    // Top of the DATE sort but logged long ago: its items must NOT outrank
+    { uid: 's-old-log', date: todayLocalDate(), instrumentType: 'Bass', createdAt: '2026-06-01T10:00:00Z',
+      items: [{ uid: 'iA', sessionUid: 's-old-log', topicUid: topicUids[5], label: 'Topic 5' }] },
+    // Logged just now (retroactive date): its items come FIRST
+    { uid: 's-fresh-log', date: '2026-01-15', instrumentType: 'Guitar', createdAt: '2026-06-07T09:00:00Z',
+      items: topicUids.slice(0, 5).map((uid, i) => ({ uid: `i${i}`, sessionUid: 's-fresh-log', topicUid: uid, label: `Topic ${i}` })) },
+  ]);
+
+  render(<MySessionsPage />);
+  await screen.findByText(todayLocalDate());
+  fireEvent.click(screen.getByRole('button', { name: 'Add entry' }));
+
+  const select = await screen.findByLabelText('Entry 1');
+  const recentGroup = within(select).getByRole('group', { name: 'Recent' });
+  const names = within(recentGroup).getAllByRole('option').map(o => o.textContent);
+
+  // 5 max, and the freshly logged session's items fill the slots first
+  expect(names).toEqual(['Topic 0', 'Topic 1', 'Topic 2', 'Topic 3', 'Topic 4']);
+});
+
+test('FR12: search is accent-insensitive (French catalog)', async () => {
+  mockedSongService.getAllSongs.mockResolvedValue([
+    { uid: SONG_UID, title: 'Étude en mi' } as never,
+  ]);
+
+  render(<MySessionsPage />);
+  fireEvent.click(screen.getByRole('button', { name: 'Add entry' }));
+  const select = await screen.findByLabelText('Entry 1');
+  await screen.findAllByRole('option', { name: 'Étude en mi' });
+
+  fireEvent.change(screen.getByLabelText('Entry 1 search'), { target: { value: 'etude' } });
+
+  expect(within(select).getByRole('option', { name: 'Étude en mi' })).toBeInTheDocument();
+  expect(within(select).queryByRole('option', { name: 'Pentatonic scale' })).not.toBeInTheDocument();
+});
+
+test('FR12: a legacy instrument absent from the options is never pre-filled', async () => {
+  mockedService.getAll.mockResolvedValue([
+    { uid: 's1', date: todayLocalDate(), instrumentType: 'Cello', createdAt: '2026-06-07T09:00:00Z', items: [] },
+  ]);
+
+  render(<MySessionsPage />);
+  await screen.findByText(todayLocalDate());
+
+  expect(screen.getByLabelText('Instrument')).toHaveValue('');
+  expect(screen.getByRole('button', { name: 'Log session' })).toBeDisabled();
+});
+
+test('FR12: Enter in the search field does not submit the session', async () => {
+  render(<MySessionsPage />);
+  fireEvent.change(screen.getByLabelText('Instrument'), { target: { value: 'Bass' } });
+  await addEntry(1, `song:${SONG_UID}`);
+
+  fireEvent.keyDown(screen.getByLabelText('Entry 1 search'), { key: 'Enter' });
+
+  expect(mockedService.create).not.toHaveBeenCalled();
+});
+
 test('a session with zero entries stays valid (no items in payload)', async () => {
   mockedService.create.mockResolvedValue({ uid: 's1', date: todayLocalDate(), instrumentType: 'Guitar' });
 

@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { practiceSessionService, type CreatePracticeSessionDTO, type CreateSessionItemDTO, type UpdateSessionItemDTO, type UpdatePracticeSessionDTO, type PracticeSession } from '../services/practiceSessionService';
 import { songService, type Song } from '../services/songService';
 import { topicService, type Topic } from '../services/topicService';
@@ -10,9 +10,16 @@ type EntryDraft = {
   uid?: string; // present when editing an existing entry (diff-by-uid)
   label?: string; // FR4 snapshot, shown as "Keep ..." for orphan entries
   ref: string; // '' | 'song:<uid>' | 'topic:<uid>'
+  query: string; // instant search filter for the picker (FR12)
   minutes: string;
   note: string;
 };
+
+// Accent-insensitive folding for the instant search: a French catalog must
+// match "etude" against "Étude" (NFD strips combining diacritics)
+function foldForSearch(value: string): string {
+  return value.toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '');
+}
 
 // Anti-chronological: FR19 client-local date first (a retroactive session
 // belongs at its real day), createdAt breaks same-day ties, uid makes the
@@ -53,6 +60,10 @@ function MySessionsPage() {
   const [editingSessionUid, setEditingSessionUid] = useState<string | null>(null);
   const [editingSessionLabel, setEditingSessionLabel] = useState('');
   const [deleteSessionUid, setDeleteSessionUid] = useState<string | null>(null);
+  // True as soon as the user interacts with the instrument field (or enters
+  // edit mode): the FR12 prefill must never fire after that, even if the
+  // sessions response lands late
+  const instrumentTouchedRef = useRef(false);
   const [durationTouched, setDurationTouched] = useState(false);
   const entryKeyRef = useRef(0);
 
@@ -87,6 +98,21 @@ function MySessionsPage() {
           const fetchedUids = new Set(fetched.map(s => s.uid));
           return sortSessions([...prev.filter(s => !fetchedUids.has(s.uid)), ...fetched]);
         });
+        // FR12 one-shot prefill: the instrument of the most recently LOGGED
+        // session (max createdAt — not the top of the date sort, which a
+        // retroactive session could occupy; missing createdAt counts as
+        // newest, consistent with sortSessions). Guarded by the touched ref
+        // AND a functional update so a user interaction always wins, and only
+        // applied if the value is actually offered by the select (a legacy
+        // free-string instrument would submit invisibly otherwise).
+        const mostRecent = fetched.reduce<PracticeSession | null>((best, s) => {
+          return !best || (s.createdAt ?? NEWEST) > (best.createdAt ?? NEWEST) ? s : best;
+        }, null);
+        if (mostRecent
+          && !instrumentTouchedRef.current
+          && instrumentTypeOptions.includes(mostRecent.instrumentType)) {
+          setInstrumentType(prev => (prev === '' ? mostRecent.instrumentType : prev));
+        }
       } else {
         setSessionsFailed(true);
       }
@@ -104,9 +130,41 @@ function MySessionsPage() {
   const autoSum = rawSum !== null && rawSum >= 1 && rawSum <= 1440 ? rawSum : null;
   const effectiveDuration = durationTouched ? duration : (autoSum !== null ? String(autoSum) : duration);
 
+  // FR12: refs recently logged, first occurrence over the anti-chronological
+  // session list, deduplicated, capped at 5. Deleted refs (absent from the
+  // loaded catalogs) are excluded — they cannot be referenced again. Labels
+  // come from the CURRENT catalogs (a renamed song shows its new title).
+  const recentRefs = useMemo(() => {
+    if (!sessions) return [];
+    const labelByRef = new Map<string, string>();
+    songs.forEach(song => labelByRef.set(`song:${song.uid}`, song.title));
+    topics.forEach(topic => labelByRef.set(`topic:${topic.uid}`, topic.name));
+    // "Recently logged" = creation order, NOT the date-sorted display list: a
+    // retroactive session logged a minute ago sits low in the date sort but
+    // its items are exactly what the user wants at hand (same rationale as
+    // the instrument prefill)
+    const byCreation = [...sessions].sort((a, b) => {
+      const aCreated = a.createdAt ?? NEWEST;
+      const bCreated = b.createdAt ?? NEWEST;
+      return aCreated < bCreated ? 1 : aCreated > bCreated ? -1 : 0;
+    });
+    const seen = new Set<string>();
+    const result: { ref: string; label: string }[] = [];
+    for (const session of byCreation) {
+      for (const item of session.items ?? []) {
+        const ref = item.songUid ? `song:${item.songUid}` : item.topicUid ? `topic:${item.topicUid}` : '';
+        if (!ref || seen.has(ref) || !labelByRef.has(ref)) continue;
+        seen.add(ref);
+        result.push({ ref, label: labelByRef.get(ref) as string });
+        if (result.length >= 5) return result;
+      }
+    }
+    return result;
+  }, [sessions, songs, topics]);
+
   const addEntry = () => {
     entryKeyRef.current += 1;
-    setEntries(prev => [...prev, { key: entryKeyRef.current, ref: '', minutes: '', note: '' }]);
+    setEntries(prev => [...prev, { key: entryKeyRef.current, ref: '', query: '', minutes: '', note: '' }]);
   };
 
   const updateEntry = (key: number, patch: Partial<EntryDraft>) => {
@@ -135,6 +193,7 @@ function MySessionsPage() {
   };
 
   const startEditSession = (session: PracticeSession) => {
+    instrumentTouchedRef.current = true;
     setEditingSessionUid(session.uid);
     setEditingSessionLabel(session.date);
     setDate(session.date);
@@ -155,6 +214,7 @@ function MySessionsPage() {
         // option; non-orphan entries must pick a concrete ref
         label: isOrphan ? item.label : undefined,
         ref: item.songUid ? `song:${item.songUid}` : item.topicUid ? `topic:${item.topicUid}` : '',
+        query: '',
         minutes: item.minutes != null ? String(item.minutes) : '',
         note: item.note ?? '',
       };
@@ -349,7 +409,10 @@ function MySessionsPage() {
               <select
                 id="session-instrument"
                 value={instrumentType}
-                onChange={e => setInstrumentType(e.target.value)}
+                onChange={e => {
+                  instrumentTouchedRef.current = true;
+                  setInstrumentType(e.target.value);
+                }}
                 className="input-base text-sm"
                 disabled={loading}
               >
@@ -425,8 +488,46 @@ function MySessionsPage() {
                   Add entry
                 </button>
               </div>
-              {entries.map((entry, index) => (
-                <div key={entry.key} className="grid grid-cols-1 md:grid-cols-4 gap-2 items-start">
+              {entries.map((entry, index) => {
+                // FR12 instant search: case-insensitive substring filter applied
+                // to all three groups at render time
+                const query = foldForSearch(entry.query.trim());
+                const visibleRecents = query
+                  ? recentRefs.filter(r => foldForSearch(r.label).includes(query))
+                  : recentRefs;
+                const visibleSongs = query
+                  ? songs.filter(song => foldForSearch(song.title).includes(query))
+                  : songs;
+                const visibleTopics = query
+                  ? topics.filter(topic => foldForSearch(topic.name).includes(query))
+                  : topics;
+                // Pin the selected option: a controlled <select> whose value has
+                // no matching option DISPLAYS the wrong option while the state
+                // keeps the old value (2.4 review lesson) — never let the
+                // filter remove the current selection from the DOM
+                const selectionVisible = entry.ref === ''
+                  || visibleSongs.some(song => `song:${song.uid}` === entry.ref)
+                  || visibleTopics.some(topic => `topic:${topic.uid}` === entry.ref)
+                  || visibleRecents.some(r => r.ref === entry.ref);
+                const selectedLabel = songs.find(song => `song:${song.uid}` === entry.ref)?.title
+                  ?? topics.find(topic => `topic:${topic.uid}` === entry.ref)?.name
+                  ?? entry.label
+                  // Catalog failed to load: never show a blank selected option
+                  ?? 'Current selection';
+                return (
+                <div key={entry.key} className="grid grid-cols-1 md:grid-cols-5 gap-2 items-start">
+                  <input
+                    aria-label={`Entry ${index + 1} search`}
+                    placeholder="Search..."
+                    value={entry.query}
+                    onChange={e => updateEntry(entry.key, { query: e.target.value })}
+                    onKeyDown={e => {
+                      // Enter while searching must not submit the session
+                      if (e.key === 'Enter') e.preventDefault();
+                    }}
+                    className="input-base text-sm"
+                    disabled={loading}
+                  />
                   <select
                     aria-label={`Entry ${index + 1}`}
                     value={entry.ref}
@@ -439,16 +540,30 @@ function MySessionsPage() {
                     <option value="" disabled={!!entry.uid && !entry.label}>
                       {entry.uid && entry.label ? `Keep "${entry.label}"` : 'Select a song or topic'}
                     </option>
-                    <optgroup label="Songs">
-                      {songs.map(song => (
-                        <option key={song.uid} value={`song:${song.uid}`}>{song.title}</option>
-                      ))}
-                    </optgroup>
-                    <optgroup label="Topics">
-                      {topics.map(topic => (
-                        <option key={topic.uid} value={`topic:${topic.uid}`}>{topic.name}</option>
-                      ))}
-                    </optgroup>
+                    {!selectionVisible && (
+                      <option value={entry.ref}>{selectedLabel}</option>
+                    )}
+                    {visibleRecents.length > 0 && (
+                      <optgroup label="Recent">
+                        {visibleRecents.map(recent => (
+                          <option key={`recent-${recent.ref}`} value={recent.ref}>{recent.label}</option>
+                        ))}
+                      </optgroup>
+                    )}
+                    {visibleSongs.length > 0 && (
+                      <optgroup label="Songs">
+                        {visibleSongs.map(song => (
+                          <option key={song.uid} value={`song:${song.uid}`}>{song.title}</option>
+                        ))}
+                      </optgroup>
+                    )}
+                    {visibleTopics.length > 0 && (
+                      <optgroup label="Topics">
+                        {visibleTopics.map(topic => (
+                          <option key={topic.uid} value={`topic:${topic.uid}`}>{topic.name}</option>
+                        ))}
+                      </optgroup>
+                    )}
                   </select>
                   <input
                     aria-label={`Entry ${index + 1} minutes`}
@@ -482,7 +597,8 @@ function MySessionsPage() {
                     </button>
                   </div>
                 </div>
-              ))}
+                );
+              })}
             </fieldset>
           </form>
         </div>
