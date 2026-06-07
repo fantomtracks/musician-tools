@@ -1,4 +1,4 @@
-const { PracticeSession } = require('../models');
+const { PracticeSession, SessionItem, Song, Topic, sequelize } = require('../models');
 const createError = require('http-errors');
 const logger = require('../logger');
 
@@ -6,6 +6,10 @@ const DATE_PATTERN = /^\d{4}-\d{2}-\d{2}$/;
 const MIN_DATE = '1900-01-01'; // guards against year typos like 0205-06-07
 const MAX_DURATION_MINUTES = 1440; // 24 hours
 const MAX_NOTE_LENGTH = 5000;
+const MAX_ITEMS = 50;
+const MAX_ITEM_NOTE_LENGTH = 1000;
+// Reject malformed uids before they reach Postgres (invalid uuid input throws a DB error)
+const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
 function isValidCalendarDate(value) {
   const [year, month, day] = value.split('-').map(Number);
@@ -33,7 +37,7 @@ const createPracticeSession = async (req, res, next) => {
     }
 
     // req.body is undefined when the request body is not JSON — treat as empty
-    const { date, instrumentType, durationMinutes, note } = req.body || {};
+    const { date, instrumentType, durationMinutes, note, items } = req.body || {};
 
     if (typeof date !== 'string' || !DATE_PATTERN.test(date) || !isValidCalendarDate(date)) {
       return next(createError(400, 'Date must be a valid YYYY-MM-DD date'));
@@ -77,16 +81,129 @@ const createPracticeSession = async (req, res, next) => {
       trimmedNote = note.trim() || null;
     }
 
-    const practiceSession = await PracticeSession.create({
+    // Validate and resolve every entry BEFORE creating anything: a validation
+    // failure must never leave a half-created session behind.
+    const pendingItems = [];
+    const songUids = new Set();
+    const topicUids = new Set();
+    if (items !== undefined && items !== null) {
+      if (!Array.isArray(items)) {
+        return next(createError(400, 'Items must be an array'));
+      }
+      if (items.length > MAX_ITEMS) {
+        return next(createError(400, 'Too many items'));
+      }
+
+      for (const item of items) {
+        if (!item || typeof item !== 'object') {
+          return next(createError(400, 'Each item must reference a song or a topic'));
+        }
+        const { songUid, topicUid, minutes, note: itemNote } = item;
+        const hasSong = songUid !== undefined && songUid !== null;
+        const hasTopic = topicUid !== undefined && topicUid !== null;
+        if (hasSong && hasTopic) {
+          return next(createError(400, 'Each item must reference a song or a topic, not both'));
+        }
+        if (!hasSong && !hasTopic) {
+          return next(createError(400, 'Each item must reference a song or a topic'));
+        }
+        const refUid = hasSong ? songUid : topicUid;
+        if (typeof refUid !== 'string' || !UUID_PATTERN.test(refUid)) {
+          return next(createError(400, 'Invalid entry reference'));
+        }
+
+        if (minutes !== undefined && minutes !== null) {
+          if (typeof minutes !== 'number' || !Number.isInteger(minutes)
+            || minutes < 1 || minutes > MAX_DURATION_MINUTES) {
+            return next(createError(400, 'Entry minutes must be a whole number of minutes between 1 and 1440'));
+          }
+        }
+
+        let trimmedItemNote = null;
+        if (itemNote !== undefined && itemNote !== null) {
+          if (typeof itemNote !== 'string') {
+            return next(createError(400, 'Entry note must be a string'));
+          }
+          if (itemNote.length > MAX_ITEM_NOTE_LENGTH) {
+            return next(createError(400, 'Entry note must be at most 1000 characters'));
+          }
+          if (itemNote.includes('\u0000')) {
+            return next(createError(400, 'Entry note contains invalid characters'));
+          }
+          trimmedItemNote = itemNote.trim() || null;
+        }
+
+        if (hasSong) {
+          songUids.add(refUid);
+        } else {
+          topicUids.add(refUid);
+        }
+        pendingItems.push({
+          songUid: hasSong ? refUid : null,
+          topicUid: hasTopic ? refUid : null,
+          minutes: minutes ?? null,
+          note: trimmedItemNote
+        });
+      }
+    }
+
+    // Ownership-scoped batch resolution (NFR4): two queries total, not one per
+    // item. An unknown uid and another user's uid get the same answer — no
+    // enumeration oracle. Labels are snapshotted server-side so history
+    // survives deletions (FR4).
+    const songTitleByUid = new Map();
+    const topicNameByUid = new Map();
+    if (songUids.size > 0) {
+      const songs = await Song.findAll({ where: { uid: [...songUids], userUid: userId } });
+      songs.forEach(song => songTitleByUid.set(song.uid, song.title));
+    }
+    if (topicUids.size > 0) {
+      const topics = await Topic.findAll({ where: { uid: [...topicUids], userUid: userId } });
+      topics.forEach(topic => topicNameByUid.set(topic.uid, topic.name));
+    }
+
+    const resolvedItems = [];
+    for (const item of pendingItems) {
+      const label = item.songUid !== null
+        ? songTitleByUid.get(item.songUid)
+        : topicNameByUid.get(item.topicUid);
+      if (label === undefined) {
+        return next(createError(400, 'Invalid entry reference'));
+      }
+      resolvedItems.push({ ...item, label });
+    }
+
+    const sessionValues = {
       userUid: userId,
       date,
       instrumentType: trimmedInstrument,
       durationMinutes: durationMinutes ?? null,
       note: trimmedNote
-    });
+    };
 
-    res.status(201).json(practiceSession);
+    let practiceSession;
+    let createdItems = [];
+    if (resolvedItems.length > 0) {
+      await sequelize.transaction(async (transaction) => {
+        practiceSession = await PracticeSession.create(sessionValues, { transaction });
+        createdItems = await SessionItem.bulkCreate(
+          resolvedItems.map(item => ({ ...item, sessionUid: practiceSession.uid })),
+          { transaction }
+        );
+      });
+    } else {
+      practiceSession = await PracticeSession.create(sessionValues);
+    }
+
+    const sessionJson = typeof practiceSession.toJSON === 'function' ? practiceSession.toJSON() : practiceSession;
+    const itemsJson = createdItems.map(item => (typeof item.toJSON === 'function' ? item.toJSON() : item));
+    res.status(201).json({ ...sessionJson, items: itemsJson });
   } catch (error) {
+    // TOCTOU: a referenced song/topic deleted between resolution and insert
+    // violates the FK inside the transaction — same answer as a bad reference
+    if (error.name === 'SequelizeForeignKeyConstraintError') {
+      return next(createError(400, 'Invalid entry reference'));
+    }
     logger.error('Error creating practice session:', error);
     next(createError(500, 'Error creating practice session'));
   }

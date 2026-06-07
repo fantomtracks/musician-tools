@@ -1,14 +1,37 @@
+export type SessionItem = {
+  uid: string;
+  sessionUid: string;
+  songUid?: string | null;
+  topicUid?: string | null;
+  label: string; // server-side snapshot of the song title / topic name (FR4)
+  minutes?: number | null;
+  note?: string | null;
+  createdAt?: string;
+  updatedAt?: string;
+};
+
+// No label here: it is always resolved server-side from the referenced entity
+export type CreateSessionItemDTO = {
+  songUid?: string;
+  topicUid?: string;
+  minutes?: number;
+  note?: string;
+};
+
 export type PracticeSession = {
   uid: string;
   date: string; // YYYY-MM-DD, client-local day (FR19)
   instrumentType: string;
   durationMinutes?: number | null;
   note?: string | null;
+  items?: SessionItem[];
   createdAt?: string;
   updatedAt?: string;
 };
 
-export type CreatePracticeSessionDTO = Omit<PracticeSession, 'uid' | 'createdAt' | 'updatedAt'>;
+export type CreatePracticeSessionDTO = Omit<PracticeSession, 'uid' | 'items' | 'createdAt' | 'updatedAt'> & {
+  items?: CreateSessionItemDTO[];
+};
 
 const API_BASE = '/api';
 

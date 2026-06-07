@@ -3,10 +3,22 @@ jest.mock('../models', () => {
     PracticeSession: {
       create: jest.fn(async (data) => ({ ...data, uid: 'session-uid' })),
     },
+    SessionItem: {
+      bulkCreate: jest.fn(async (rows) => rows.map((row, i) => ({ ...row, uid: `item-${i}` }))),
+    },
+    Song: {
+      findAll: jest.fn(),
+    },
+    Topic: {
+      findAll: jest.fn(),
+    },
+    sequelize: {
+      transaction: jest.fn(async (callback) => callback({ id: 'tx' })),
+    },
   };
 });
 
-const { PracticeSession } = require('../models');
+const { PracticeSession, SessionItem, Song, Topic, sequelize } = require('../models');
 const controller = require('../controllers/practicesessioncontroller');
 
 function mockRes() {
@@ -266,6 +278,154 @@ describe('practicesessioncontroller', () => {
 
       expect(PracticeSession.create).not.toHaveBeenCalled();
       expect(next.mock.calls[0][0].status).toBe(401);
+    });
+  });
+
+  describe('createPracticeSession with items', () => {
+    const SONG_UID = 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa';
+    const TOPIC_UID = 'bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb';
+
+    function baseBody(items) {
+      return { date: utcDateString(0), instrumentType: 'Bass', items };
+    }
+
+    beforeEach(() => {
+      Song.findAll.mockResolvedValue([{ uid: SONG_UID, userUid: 'user-1', title: 'Sweet Child' }]);
+      Topic.findAll.mockResolvedValue([{ uid: TOPIC_UID, userUid: 'user-1', name: 'Pentatonic scale' }]);
+    });
+
+    test('creates a session with song and topic items, labels snapshotted server-side', async () => {
+      const req = {
+        session: { user: 'user-1' },
+        body: baseBody([
+          { songUid: SONG_UID, minutes: 15 },
+          { topicUid: TOPIC_UID, minutes: 25, note: '  at 30 BPM  ' },
+        ]),
+      };
+      const res = mockRes();
+      const next = mockNext();
+
+      await controller.createPracticeSession(req, res, next);
+
+      // Ownership-scoped BATCH resolution (two queries, not one per item)
+      expect(Song.findAll).toHaveBeenCalledTimes(1);
+      expect(Song.findAll).toHaveBeenCalledWith({ where: { uid: [SONG_UID], userUid: 'user-1' } });
+      expect(Topic.findAll).toHaveBeenCalledTimes(1);
+      expect(Topic.findAll).toHaveBeenCalledWith({ where: { uid: [TOPIC_UID], userUid: 'user-1' } });
+
+      // Session and items created inside a transaction — assert the option is
+      // ACTUALLY passed (atomicity must not silently break)
+      expect(sequelize.transaction).toHaveBeenCalled();
+      expect(PracticeSession.create).toHaveBeenCalledWith(expect.any(Object), { transaction: { id: 'tx' } });
+      expect(SessionItem.bulkCreate).toHaveBeenCalledWith(expect.any(Array), { transaction: { id: 'tx' } });
+      const rows = SessionItem.bulkCreate.mock.calls[0][0];
+      expect(rows).toHaveLength(2);
+      expect(rows[0]).toMatchObject({ sessionUid: 'session-uid', songUid: SONG_UID, topicUid: null, label: 'Sweet Child', minutes: 15, note: null });
+      expect(rows[1]).toMatchObject({ sessionUid: 'session-uid', songUid: null, topicUid: TOPIC_UID, label: 'Pentatonic scale', minutes: 25, note: 'at 30 BPM' });
+
+      expect(res.status).toHaveBeenCalledWith(201);
+      const payload = res.json.mock.calls[0][0];
+      expect(payload.items).toHaveLength(2);
+      expect(next).not.toHaveBeenCalled();
+    });
+
+    test('a session with zero items stays valid and skips the transaction', async () => {
+      const req = { session: { user: 'user-1' }, body: baseBody(undefined) };
+      const res = mockRes();
+
+      await controller.createPracticeSession(req, res, mockNext());
+
+      expect(sequelize.transaction).not.toHaveBeenCalled();
+      expect(SessionItem.bulkCreate).not.toHaveBeenCalled();
+      expect(res.status).toHaveBeenCalledWith(201);
+      expect(res.json.mock.calls[0][0].items).toEqual([]);
+    });
+
+    test('rejects malformed items payloads with 400', async () => {
+      for (const items of ['not-an-array', [{}], [{ songUid: SONG_UID, topicUid: TOPIC_UID }], [{ songUid: 'not-a-uuid' }], [null]]) {
+        const req = { session: { user: 'user-1' }, body: baseBody(items) };
+        const res = mockRes();
+        const next = mockNext();
+
+        await controller.createPracticeSession(req, res, next);
+
+        expect(PracticeSession.create).not.toHaveBeenCalled();
+        expect(next.mock.calls[0][0].status).toBe(400);
+      }
+    });
+
+    test('rejects more than 50 items with 400', async () => {
+      const items = Array.from({ length: 51 }, () => ({ songUid: SONG_UID }));
+      const next = mockNext();
+
+      await controller.createPracticeSession({ session: { user: 'user-1' }, body: baseBody(items) }, mockRes(), next);
+
+      expect(PracticeSession.create).not.toHaveBeenCalled();
+      expect(next.mock.calls[0][0].status).toBe(400);
+    });
+
+    test('rejects references that do not belong to the user with 400 (no enumeration oracle)', async () => {
+      Song.findAll.mockResolvedValue([]);
+      const next = mockNext();
+
+      await controller.createPracticeSession(
+        { session: { user: 'user-1' }, body: baseBody([{ songUid: SONG_UID }]) },
+        mockRes(),
+        next
+      );
+
+      expect(PracticeSession.create).not.toHaveBeenCalled();
+      expect(next.mock.calls[0][0].status).toBe(400);
+      expect(next.mock.calls[0][0].message).toBe('Invalid entry reference');
+    });
+
+    test('rejects invalid item minutes and notes with 400', async () => {
+      for (const item of [
+        { songUid: SONG_UID, minutes: 0 },
+        { songUid: SONG_UID, minutes: 1.5 },
+        { songUid: SONG_UID, minutes: 'abc' },
+        { songUid: SONG_UID, minutes: 1441 },
+        { songUid: SONG_UID, note: 42 },
+        { songUid: SONG_UID, note: 'n'.repeat(1001) },
+        { songUid: SONG_UID, note: 'abc' + String.fromCharCode(0) + 'def' },
+      ]) {
+        const next = mockNext();
+
+        await controller.createPracticeSession({ session: { user: 'user-1' }, body: baseBody([item]) }, mockRes(), next);
+
+        expect(PracticeSession.create).not.toHaveBeenCalled();
+        expect(next.mock.calls[0][0].status).toBe(400);
+      }
+    });
+
+    test('no session is created when any item is invalid (validation before transaction)', async () => {
+      const next = mockNext();
+
+      await controller.createPracticeSession(
+        { session: { user: 'user-1' }, body: baseBody([{ songUid: SONG_UID, minutes: 10 }, { songUid: 'bad' }]) },
+        mockRes(),
+        next
+      );
+
+      expect(PracticeSession.create).not.toHaveBeenCalled();
+      expect(sequelize.transaction).not.toHaveBeenCalled();
+      expect(next.mock.calls[0][0].status).toBe(400);
+    });
+
+    test('maps a TOCTOU FK violation during insert to 400, not 500', async () => {
+      const fkError = new Error('violates foreign key constraint');
+      fkError.name = 'SequelizeForeignKeyConstraintError';
+      SessionItem.bulkCreate.mockRejectedValueOnce(fkError);
+
+      const next = mockNext();
+      await controller.createPracticeSession(
+        { session: { user: 'user-1' }, body: baseBody([{ songUid: SONG_UID }]) },
+        mockRes(),
+        next
+      );
+
+      expect(next.mock.calls[0][0].status).toBe(400);
+      expect(next.mock.calls[0][0].message).toBe('Invalid entry reference');
     });
   });
 });

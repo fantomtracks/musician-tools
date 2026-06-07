@@ -48,6 +48,7 @@ module.exports = (sequelize, DataTypes) => {
 
   PracticeSession.associate = function(models) {
     PracticeSession.belongsTo(models.User, { foreignKey: 'userUid' });
+    PracticeSession.hasMany(models.SessionItem, { foreignKey: 'sessionUid', as: 'items' });
   };
 
   return PracticeSession;

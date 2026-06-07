@@ -8,7 +8,27 @@ jest.mock('../services/practiceSessionService', () => ({
   },
 }));
 
+jest.mock('../services/songService', () => ({
+  songService: {
+    getAllSongs: jest.fn(),
+  },
+}));
+
+jest.mock('../services/topicService', () => ({
+  topicService: {
+    getAll: jest.fn(),
+  },
+}));
+
+import { songService } from '../services/songService';
+import { topicService } from '../services/topicService';
+
 const mockedService = practiceSessionService as jest.Mocked<typeof practiceSessionService>;
+const mockedSongService = songService as jest.Mocked<typeof songService>;
+const mockedTopicService = topicService as jest.Mocked<typeof topicService>;
+
+const SONG_UID = 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa';
+const TOPIC_UID = 'bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb';
 
 // Same local-date logic as the page (FR19: local day, not UTC)
 function todayLocalDate() {
@@ -18,7 +38,25 @@ function todayLocalDate() {
 
 beforeEach(() => {
   jest.clearAllMocks();
+  mockedSongService.getAllSongs.mockResolvedValue([
+    { uid: SONG_UID, title: 'Sweet Child' } as never,
+  ]);
+  mockedTopicService.getAll.mockResolvedValue([
+    { uid: TOPIC_UID, name: 'Pentatonic scale' },
+  ]);
 });
+
+async function addEntry(index: number, ref: string, minutes?: string) {
+  fireEvent.click(screen.getByRole('button', { name: 'Add entry' }));
+  const select = await screen.findByLabelText(`Entry ${index}`);
+  // Wait for the async-loaded catalogs: changing a controlled <select> to a
+  // value with no matching <option> silently falls back to ''
+  await screen.findAllByRole('option', { name: 'Sweet Child' });
+  fireEvent.change(select, { target: { value: ref } });
+  if (minutes !== undefined) {
+    fireEvent.change(screen.getByLabelText(`Entry ${index} minutes`), { target: { value: minutes } });
+  }
+}
 
 test('renders a labelled form with today (local) pre-filled and future dates blocked', () => {
   render(<MySessionsPage />);
@@ -170,4 +208,135 @@ test('the toast live region is mounted before any submission', () => {
 
   expect(screen.getByRole('status')).toBeInTheDocument();
   expect(screen.getByRole('status')).toBeEmptyDOMElement();
+});
+
+test('Add entry shows a picker with Songs and Topics optgroups', async () => {
+  render(<MySessionsPage />);
+
+  fireEvent.click(screen.getByRole('button', { name: 'Add entry' }));
+
+  const select = await screen.findByLabelText('Entry 1');
+  expect(select).toBeInTheDocument();
+  expect(screen.getByRole('group', { name: 'Songs' })).toBeInTheDocument();
+  expect(screen.getByRole('group', { name: 'Topics' })).toBeInTheDocument();
+  expect(screen.getByRole('option', { name: 'Sweet Child' })).toBeInTheDocument();
+  expect(screen.getByRole('option', { name: 'Pentatonic scale' })).toBeInTheDocument();
+});
+
+test('submitting with entries sends decoded song/topic items', async () => {
+  mockedService.create.mockResolvedValue({ uid: 's1', date: todayLocalDate(), instrumentType: 'Bass' });
+
+  render(<MySessionsPage />);
+
+  fireEvent.change(screen.getByLabelText('Instrument'), { target: { value: 'Bass' } });
+  await addEntry(1, `song:${SONG_UID}`, '15');
+  fireEvent.change(screen.getByLabelText('Entry 1 note'), { target: { value: 'at 30 BPM' } });
+  await addEntry(2, `topic:${TOPIC_UID}`, '25');
+  fireEvent.click(screen.getByRole('button', { name: 'Log session' }));
+
+  await waitFor(() => {
+    expect(mockedService.create).toHaveBeenCalledWith(
+      expect.objectContaining({
+        items: [
+          { songUid: SONG_UID, minutes: 15, note: 'at 30 BPM' },
+          { topicUid: TOPIC_UID, minutes: 25, note: undefined },
+        ],
+      })
+    );
+  });
+});
+
+test('FR13: duration auto-fills with the sum when every entry has minutes', async () => {
+  render(<MySessionsPage />);
+
+  await addEntry(1, `song:${SONG_UID}`, '15');
+  await addEntry(2, `topic:${TOPIC_UID}`, '25');
+
+  expect(screen.getByLabelText('Duration')).toHaveValue(40);
+});
+
+test('FR13: a manual duration override wins over the auto-sum', async () => {
+  mockedService.create.mockResolvedValue({ uid: 's1', date: todayLocalDate(), instrumentType: 'Bass' });
+
+  render(<MySessionsPage />);
+
+  fireEvent.change(screen.getByLabelText('Instrument'), { target: { value: 'Bass' } });
+  await addEntry(1, `song:${SONG_UID}`, '15');
+  fireEvent.change(screen.getByLabelText('Duration'), { target: { value: '50' } });
+  await addEntry(2, `topic:${TOPIC_UID}`, '25');
+
+  expect(screen.getByLabelText('Duration')).toHaveValue(50);
+
+  fireEvent.click(screen.getByRole('button', { name: 'Log session' }));
+  await waitFor(() => {
+    expect(mockedService.create).toHaveBeenCalledWith(
+      expect.objectContaining({ durationMinutes: 50 })
+    );
+  });
+});
+
+test('FR13: no auto-sum when an entry has no minutes', async () => {
+  render(<MySessionsPage />);
+
+  await addEntry(1, `song:${SONG_UID}`, '15');
+  await addEntry(2, `topic:${TOPIC_UID}`);
+
+  expect(screen.getByLabelText('Duration')).toHaveValue(null);
+});
+
+test('Remove entry deletes the row', async () => {
+  render(<MySessionsPage />);
+
+  await addEntry(1, `song:${SONG_UID}`);
+  fireEvent.click(screen.getByRole('button', { name: 'Remove entry 1' }));
+
+  expect(screen.queryByLabelText('Entry 1')).not.toBeInTheDocument();
+});
+
+test('an entry row without a song/topic blocks submission instead of being dropped', async () => {
+  render(<MySessionsPage />);
+
+  fireEvent.change(screen.getByLabelText('Instrument'), { target: { value: 'Bass' } });
+  fireEvent.click(screen.getByRole('button', { name: 'Add entry' }));
+  fireEvent.change(await screen.findByLabelText('Entry 1 minutes'), { target: { value: '30' } });
+  fireEvent.submit(screen.getByLabelText('Date').closest('form')!);
+
+  expect(await screen.findByText('Each entry needs a song or topic — fill or remove empty entries')).toBeInTheDocument();
+  expect(mockedService.create).not.toHaveBeenCalled();
+});
+
+test('FR13: an auto-sum beyond 1440 is never auto-applied', async () => {
+  render(<MySessionsPage />);
+
+  await addEntry(1, `song:${SONG_UID}`, '800');
+  await addEntry(2, `topic:${TOPIC_UID}`, '800');
+
+  expect(screen.getByLabelText('Duration')).toHaveValue(null);
+});
+
+test('FR13: clearing a manual override re-arms the auto-sum', async () => {
+  render(<MySessionsPage />);
+
+  await addEntry(1, `song:${SONG_UID}`, '15');
+  await addEntry(2, `topic:${TOPIC_UID}`, '25');
+  fireEvent.change(screen.getByLabelText('Duration'), { target: { value: '50' } });
+  expect(screen.getByLabelText('Duration')).toHaveValue(50);
+
+  fireEvent.change(screen.getByLabelText('Duration'), { target: { value: '' } });
+  expect(screen.getByLabelText('Duration')).toHaveValue(40);
+});
+
+test('a session with zero entries stays valid (no items in payload)', async () => {
+  mockedService.create.mockResolvedValue({ uid: 's1', date: todayLocalDate(), instrumentType: 'Guitar' });
+
+  render(<MySessionsPage />);
+
+  fireEvent.change(screen.getByLabelText('Instrument'), { target: { value: 'Guitar' } });
+  fireEvent.click(screen.getByRole('button', { name: 'Log session' }));
+
+  await waitFor(() => {
+    expect(mockedService.create).toHaveBeenCalledWith(
+      expect.objectContaining({ items: undefined })
+    );
+  });
 });
