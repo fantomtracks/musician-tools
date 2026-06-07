@@ -49,8 +49,8 @@ development_status:
   epic-1-retrospective: optional
 
   # Epic 2: Mon journal de sessions
-  epic-2: backlog
-  2-1-creer-une-session-de-pratique: backlog
+  epic-2: in-progress
+  2-1-creer-une-session-de-pratique: done
   2-2-detailler-ma-session-avec-des-entrees: backlog
   2-3-consulter-mon-historique-de-sessions: backlog
   2-4-corriger-mon-journal-a-posteriori: backlog

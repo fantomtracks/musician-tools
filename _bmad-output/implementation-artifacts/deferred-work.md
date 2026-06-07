@@ -1,5 +1,10 @@
 # Deferred Work
 
+## Deferred from: code review of 2-1-creer-une-session-de-pratique (2026-06-07)
+
+- Migrations create-table : le `down: dropTable` peut détruire une table créée par `sequelize.sync` (pas par le `up` gardé) — perte de données si un `db:migrate:undo` tournait en prod. Pattern identique sur toutes les migrations du projet ; le rollback n'est pas utilisé (release_command = migrate up only). À trancher si on introduit un jour des rollbacks.
+- Garde `req.body || {}` absente des contrôleurs préexistants (topiccontroller, instrumentcontroller, songcontroller…) : un POST/PUT avec Content-Type non-JSON laisse `req.body` undefined → destructuring → 500 au lieu de 400. Corrigé dans practicesessioncontroller (2.1) ; à généraliser.
+
 ## Deferred from: code review of 1-2-gerer-ma-bibliotheque-de-sujets (2026-06-07)
 
 - 403 vs 404 sur PUT/DELETE = oracle d'énumération (un utilisateur authentifié peut distinguer « existe mais pas à moi » de « n'existe pas »). Pattern maison (instrumentcontroller identique, imposé par le spec). À trancher globalement : retourner 404 dans les deux cas ou requête `where: { uid, userUid }`.
