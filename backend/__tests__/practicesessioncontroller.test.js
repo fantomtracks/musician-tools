@@ -3,9 +3,13 @@ jest.mock('../models', () => {
     PracticeSession: {
       create: jest.fn(async (data) => ({ ...data, uid: 'session-uid' })),
       findAll: jest.fn(async () => []),
+      findByPk: jest.fn(),
     },
     SessionItem: {
       bulkCreate: jest.fn(async (rows) => rows.map((row, i) => ({ ...row, uid: `item-${i}` }))),
+      create: jest.fn(async (data) => ({ ...data, uid: 'new-item-uid' })),
+      destroy: jest.fn(),
+      findAll: jest.fn(async () => []),
     },
     Song: {
       findAll: jest.fn(),
@@ -300,7 +304,7 @@ describe('practicesessioncontroller', () => {
           ['date', 'DESC'],
           ['createdAt', 'DESC'],
           ['uid', 'DESC'],
-          [{ model: SessionItem, as: 'items' }, 'createdAt', 'ASC'],
+          [{ model: SessionItem, as: 'items' }, 'position', 'ASC'],
           [{ model: SessionItem, as: 'items' }, 'uid', 'ASC'],
         ],
       });
@@ -369,8 +373,8 @@ describe('practicesessioncontroller', () => {
       expect(SessionItem.bulkCreate).toHaveBeenCalledWith(expect.any(Array), { transaction: { id: 'tx' } });
       const rows = SessionItem.bulkCreate.mock.calls[0][0];
       expect(rows).toHaveLength(2);
-      expect(rows[0]).toMatchObject({ sessionUid: 'session-uid', songUid: SONG_UID, topicUid: null, label: 'Sweet Child', minutes: 15, note: null });
-      expect(rows[1]).toMatchObject({ sessionUid: 'session-uid', songUid: null, topicUid: TOPIC_UID, label: 'Pentatonic scale', minutes: 25, note: 'at 30 BPM' });
+      expect(rows[0]).toMatchObject({ sessionUid: 'session-uid', songUid: SONG_UID, topicUid: null, label: 'Sweet Child', minutes: 15, note: null, position: 0 });
+      expect(rows[1]).toMatchObject({ sessionUid: 'session-uid', songUid: null, topicUid: TOPIC_UID, label: 'Pentatonic scale', minutes: 25, note: 'at 30 BPM', position: 1 });
 
       expect(res.status).toHaveBeenCalledWith(201);
       const payload = res.json.mock.calls[0][0];
@@ -475,6 +479,303 @@ describe('practicesessioncontroller', () => {
 
       expect(next.mock.calls[0][0].status).toBe(400);
       expect(next.mock.calls[0][0].message).toBe('Invalid entry reference');
+    });
+  });
+
+  describe('updatePracticeSession', () => {
+    const SESSION_UID = 'cccccccc-cccc-4ccc-8ccc-cccccccccccc';
+    const ITEM_UID = 'dddddddd-dddd-4ddd-8ddd-dddddddddddd';
+    const ITEM_UID_2 = 'eeeeeeee-eeee-4eee-8eee-eeeeeeeeeeee';
+    const SONG_UID = 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa';
+    const TOPIC_UID = 'bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb';
+
+    function mockItem(overrides = {}) {
+      return {
+        uid: ITEM_UID,
+        songUid: SONG_UID,
+        topicUid: null,
+        label: 'Sweet Child',
+        minutes: 15,
+        note: null,
+        update: jest.fn(),
+        ...overrides,
+      };
+    }
+
+    function mockExistingSession(overrides = {}) {
+      return {
+        uid: SESSION_UID,
+        userUid: 'user-1',
+        date: '2026-06-01',
+        instrumentType: 'Bass',
+        durationMinutes: 30,
+        note: 'old note',
+        items: [],
+        update: jest.fn(),
+        toJSON() {
+          return { uid: this.uid, date: this.date, instrumentType: this.instrumentType };
+        },
+        ...overrides,
+      };
+    }
+
+    beforeEach(() => {
+      Song.findAll.mockResolvedValue([{ uid: SONG_UID, userUid: 'user-1', title: 'Sweet Child' }]);
+      Topic.findAll.mockResolvedValue([{ uid: TOPIC_UID, userUid: 'user-1', name: 'Pentatonic scale' }]);
+    });
+
+    test('partial update keeps absent fields and passes the transaction option', async () => {
+      const session = mockExistingSession();
+      PracticeSession.findByPk.mockResolvedValue(session);
+
+      const req = { params: { uid: SESSION_UID }, session: { user: 'user-1' }, body: { date: '2026-05-01' } };
+      const res = mockRes();
+      const next = mockNext();
+
+      await controller.updatePracticeSession(req, res, next);
+
+      expect(session.update).toHaveBeenCalledWith(
+        { date: '2026-05-01', instrumentType: 'Bass', durationMinutes: 30, note: 'old note' },
+        { transaction: { id: 'tx' } }
+      );
+      expect(res.json).toHaveBeenCalled();
+      expect(next).not.toHaveBeenCalled();
+    });
+
+    test('explicit nulls clear duration and note', async () => {
+      const session = mockExistingSession();
+      PracticeSession.findByPk.mockResolvedValue(session);
+
+      const req = { params: { uid: SESSION_UID }, session: { user: 'user-1' }, body: { durationMinutes: null, note: null } };
+
+      await controller.updatePracticeSession(req, mockRes(), mockNext());
+
+      const arg = session.update.mock.calls[0][0];
+      expect(arg.durationMinutes).toBeNull();
+      expect(arg.note).toBeNull();
+    });
+
+    test('rejects invalid or future dates with 400', async () => {
+      for (const date of ['07/06/2026', utcDateString(2), '1899-12-31']) {
+        const session = mockExistingSession();
+        PracticeSession.findByPk.mockResolvedValue(session);
+        const next = mockNext();
+
+        await controller.updatePracticeSession(
+          { params: { uid: SESSION_UID }, session: { user: 'user-1' }, body: { date } },
+          mockRes(),
+          next
+        );
+
+        expect(session.update).not.toHaveBeenCalled();
+        expect(next.mock.calls[0][0].status).toBe(400);
+      }
+    });
+
+    test('404 on malformed and unknown uid, 403 on foreign session, 401 unauthenticated', async () => {
+      const badNext = mockNext();
+      await controller.updatePracticeSession({ params: { uid: 'nope' }, session: { user: 'user-1' }, body: {} }, mockRes(), badNext);
+      expect(PracticeSession.findByPk).not.toHaveBeenCalled();
+      expect(badNext.mock.calls[0][0].status).toBe(404);
+
+      PracticeSession.findByPk.mockResolvedValue(null);
+      const missingNext = mockNext();
+      await controller.updatePracticeSession({ params: { uid: SESSION_UID }, session: { user: 'user-1' }, body: {} }, mockRes(), missingNext);
+      expect(missingNext.mock.calls[0][0].status).toBe(404);
+
+      PracticeSession.findByPk.mockResolvedValue(mockExistingSession({ userUid: 'user-2' }));
+      const foreignNext = mockNext();
+      await controller.updatePracticeSession({ params: { uid: SESSION_UID }, session: { user: 'user-1' }, body: {} }, mockRes(), foreignNext);
+      expect(foreignNext.mock.calls[0][0].status).toBe(403);
+
+      const anonNext = mockNext();
+      await controller.updatePracticeSession({ params: { uid: SESSION_UID }, session: {}, body: {} }, mockRes(), anonNext);
+      expect(anonNext.mock.calls[0][0].status).toBe(401);
+    });
+
+    test('items diff: updates an existing row in place, label preserved without a new ref', async () => {
+      const item = mockItem();
+      const session = mockExistingSession({ items: [item] });
+      PracticeSession.findByPk.mockResolvedValue(session);
+
+      const req = {
+        params: { uid: SESSION_UID },
+        session: { user: 'user-1' },
+        body: { items: [{ uid: ITEM_UID, minutes: 20, note: 'cleaner now' }] },
+      };
+
+      await controller.updatePracticeSession(req, mockRes(), mockNext());
+
+      expect(item.update).toHaveBeenCalledWith(
+        { songUid: SONG_UID, topicUid: null, label: 'Sweet Child', minutes: 20, note: 'cleaner now', position: 0 },
+        { transaction: { id: 'tx' } }
+      );
+      expect(SessionItem.destroy).not.toHaveBeenCalled();
+      expect(SessionItem.create).not.toHaveBeenCalled();
+    });
+
+    test('items diff: reclassifying re-resolves the label (FR4)', async () => {
+      const orphan = mockItem({ songUid: null, topicUid: null, label: 'Ghost topic' });
+      const session = mockExistingSession({ items: [orphan] });
+      PracticeSession.findByPk.mockResolvedValue(session);
+
+      const req = {
+        params: { uid: SESSION_UID },
+        session: { user: 'user-1' },
+        body: { items: [{ uid: ITEM_UID, topicUid: TOPIC_UID }] },
+      };
+
+      await controller.updatePracticeSession(req, mockRes(), mockNext());
+
+      expect(orphan.update).toHaveBeenCalledWith(
+        { songUid: null, topicUid: TOPIC_UID, label: 'Pentatonic scale', minutes: null, note: null, position: 0 },
+        { transaction: { id: 'tx' } }
+      );
+    });
+
+    test('items diff: an orphan sent back without a ref keeps its snapshot label (FR4)', async () => {
+      const orphan = mockItem({ songUid: null, topicUid: null, label: 'Ghost topic', minutes: 10 });
+      const session = mockExistingSession({ items: [orphan] });
+      PracticeSession.findByPk.mockResolvedValue(session);
+
+      const req = {
+        params: { uid: SESSION_UID },
+        session: { user: 'user-1' },
+        body: { items: [{ uid: ITEM_UID, minutes: 10 }] },
+      };
+
+      await controller.updatePracticeSession(req, mockRes(), mockNext());
+
+      const arg = orphan.update.mock.calls[0][0];
+      expect(arg.label).toBe('Ghost topic');
+      expect(arg.songUid).toBeNull();
+      expect(arg.topicUid).toBeNull();
+    });
+
+    test('items diff: rows absent from the payload are deleted, new rows created with their position', async () => {
+      const kept = mockItem();
+      const removed = mockItem({ uid: ITEM_UID_2, label: 'To remove' });
+      const session = mockExistingSession({ items: [kept, removed] });
+      PracticeSession.findByPk.mockResolvedValue(session);
+
+      const req = {
+        params: { uid: SESSION_UID },
+        session: { user: 'user-1' },
+        body: { items: [{ uid: ITEM_UID, minutes: 15 }, { topicUid: TOPIC_UID, minutes: 5 }] },
+      };
+
+      await controller.updatePracticeSession(req, mockRes(), mockNext());
+
+      expect(SessionItem.destroy).toHaveBeenCalledWith({ where: { uid: [ITEM_UID_2] }, transaction: { id: 'tx' } });
+      expect(SessionItem.create).toHaveBeenCalledWith(
+        expect.objectContaining({ sessionUid: SESSION_UID, topicUid: TOPIC_UID, label: 'Pentatonic scale', position: 1 }),
+        { transaction: { id: 'tx' } }
+      );
+      expect(kept.update).toHaveBeenCalledWith(expect.objectContaining({ position: 0 }), expect.anything());
+    });
+
+    test("items diff: a uid that is not one of this session's items is rejected with 400", async () => {
+      const session = mockExistingSession({ items: [mockItem()] });
+      PracticeSession.findByPk.mockResolvedValue(session);
+      const next = mockNext();
+
+      await controller.updatePracticeSession(
+        { params: { uid: SESSION_UID }, session: { user: 'user-1' }, body: { items: [{ uid: ITEM_UID_2, minutes: 5 }] } },
+        mockRes(),
+        next
+      );
+
+      expect(session.update).not.toHaveBeenCalled();
+      expect(next.mock.calls[0][0].status).toBe(400);
+      expect(next.mock.calls[0][0].message).toBe('Invalid entry reference');
+    });
+
+    test('rejects real NUL characters in instrument, note and entry note with 400', async () => {
+      const NUL = String.fromCharCode(0);
+      const bodies = [
+        { instrumentType: 'Bass' + NUL },
+        { note: 'abc' + NUL + 'def' },
+        { items: [{ uid: ITEM_UID, note: 'x' + NUL }] },
+      ];
+      for (const body of bodies) {
+        const session = mockExistingSession({ items: [mockItem()] });
+        PracticeSession.findByPk.mockResolvedValue(session);
+        const next = mockNext();
+
+        await controller.updatePracticeSession({ params: { uid: SESSION_UID }, session: { user: 'user-1' }, body }, mockRes(), next);
+
+        expect(session.update).not.toHaveBeenCalled();
+        expect(next.mock.calls[0][0].status).toBe(400);
+      }
+    });
+
+    test('rejects a duplicate item uid in the payload with 400', async () => {
+      const session = mockExistingSession({ items: [mockItem()] });
+      PracticeSession.findByPk.mockResolvedValue(session);
+      const next = mockNext();
+
+      await controller.updatePracticeSession(
+        { params: { uid: SESSION_UID }, session: { user: 'user-1' }, body: { items: [{ uid: ITEM_UID, minutes: 5 }, { uid: ITEM_UID, minutes: 10 }] } },
+        mockRes(),
+        next
+      );
+
+      expect(session.update).not.toHaveBeenCalled();
+      expect(next.mock.calls[0][0].status).toBe(400);
+      expect(next.mock.calls[0][0].message).toBe('Duplicate entry reference');
+    });
+
+    test('response re-reads items ordered by position', async () => {
+      const session = mockExistingSession();
+      PracticeSession.findByPk.mockResolvedValue(session);
+
+      await controller.updatePracticeSession(
+        { params: { uid: SESSION_UID }, session: { user: 'user-1' }, body: { note: 'updated' } },
+        mockRes(),
+        mockNext()
+      );
+
+      expect(SessionItem.findAll).toHaveBeenCalledWith({
+        where: { sessionUid: SESSION_UID },
+        order: [['position', 'ASC'], ['uid', 'ASC']],
+      });
+    });
+  });
+
+  describe('deletePracticeSession', () => {
+    const SESSION_UID = 'cccccccc-cccc-4ccc-8ccc-cccccccccccc';
+
+    test('deletes an owned session and returns a message', async () => {
+      const session = { uid: SESSION_UID, userUid: 'user-1', destroy: jest.fn() };
+      PracticeSession.findByPk.mockResolvedValue(session);
+
+      const res = mockRes();
+      await controller.deletePracticeSession({ params: { uid: SESSION_UID }, session: { user: 'user-1' } }, res, mockNext());
+
+      expect(session.destroy).toHaveBeenCalled();
+      expect(res.json).toHaveBeenCalledWith({ message: 'Session deleted successfully' });
+    });
+
+    test('404 malformed/unknown, 403 foreign, 401 unauthenticated', async () => {
+      const badNext = mockNext();
+      await controller.deletePracticeSession({ params: { uid: 'nope' }, session: { user: 'user-1' } }, mockRes(), badNext);
+      expect(badNext.mock.calls[0][0].status).toBe(404);
+
+      PracticeSession.findByPk.mockResolvedValue(null);
+      const missingNext = mockNext();
+      await controller.deletePracticeSession({ params: { uid: SESSION_UID }, session: { user: 'user-1' } }, mockRes(), missingNext);
+      expect(missingNext.mock.calls[0][0].status).toBe(404);
+
+      const foreign = { uid: SESSION_UID, userUid: 'user-2', destroy: jest.fn() };
+      PracticeSession.findByPk.mockResolvedValue(foreign);
+      const foreignNext = mockNext();
+      await controller.deletePracticeSession({ params: { uid: SESSION_UID }, session: { user: 'user-1' } }, mockRes(), foreignNext);
+      expect(foreign.destroy).not.toHaveBeenCalled();
+      expect(foreignNext.mock.calls[0][0].status).toBe(403);
+
+      const anonNext = mockNext();
+      await controller.deletePracticeSession({ params: { uid: SESSION_UID }, session: {} }, mockRes(), anonNext);
+      expect(anonNext.mock.calls[0][0].status).toBe(401);
     });
   });
 });

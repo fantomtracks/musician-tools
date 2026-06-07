@@ -6,6 +6,8 @@ jest.mock('../services/practiceSessionService', () => ({
   practiceSessionService: {
     create: jest.fn(),
     getAll: jest.fn(),
+    update: jest.fn(),
+    remove: jest.fn(),
   },
 }));
 
@@ -485,6 +487,215 @@ test('a same-day session created without createdAt sorts as the newest of its da
   await screen.findByText('fresh run');
   const text = history.textContent || '';
   expect(text.indexOf('fresh run')).toBeLessThan(text.indexOf('morning run'));
+});
+
+const ITEM_UID = 'dddddddd-dddd-4ddd-8ddd-dddddddddddd';
+
+function editableSession() {
+  return {
+    uid: 's-edit',
+    date: '2026-06-05',
+    instrumentType: 'Bass',
+    durationMinutes: 40,
+    note: 'old note',
+    items: [
+      { uid: ITEM_UID, sessionUid: 's-edit', songUid: SONG_UID, topicUid: null, label: 'Sweet Child', minutes: 15, note: 'at 30 BPM' },
+    ],
+  };
+}
+
+test('Edit populates the form, shows the banner, and Save sends a diff-by-uid payload', async () => {
+  mockedService.getAll.mockResolvedValue([editableSession()]);
+  mockedService.update.mockResolvedValue({ ...editableSession(), note: 'new note' });
+
+  render(<MySessionsPage />);
+  fireEvent.click(await screen.findByRole('button', { name: 'Edit session of 2026-06-05' }));
+
+  expect(screen.getByText('Editing session of 2026-06-05')).toBeInTheDocument();
+  expect(screen.getByLabelText('Date')).toHaveValue('2026-06-05');
+  expect(screen.getByLabelText('Instrument')).toHaveValue('Bass');
+  expect(screen.getByLabelText('Duration')).toHaveValue(40);
+  expect(screen.getByLabelText('Note')).toHaveValue('old note');
+  expect(screen.getByLabelText('Entry 1')).toHaveValue(`song:${SONG_UID}`);
+  expect(screen.getByLabelText('Entry 1 minutes')).toHaveValue(15);
+
+  fireEvent.change(screen.getByLabelText('Note'), { target: { value: 'new note' } });
+  fireEvent.click(screen.getByRole('button', { name: 'Save session' }));
+
+  await waitFor(() => {
+    expect(mockedService.update).toHaveBeenCalledWith('s-edit', {
+      date: '2026-06-05',
+      instrumentType: 'Bass',
+      durationMinutes: 40,
+      note: 'new note',
+      items: [{ uid: ITEM_UID, songUid: SONG_UID, minutes: 15, note: 'at 30 BPM' }],
+    });
+  });
+  expect(await screen.findByText('Session updated')).toBeInTheDocument();
+  expect(screen.queryByText('Editing session of 2026-06-05')).not.toBeInTheDocument();
+});
+
+test('Cancel edit restores a blank form without calling the API', async () => {
+  mockedService.getAll.mockResolvedValue([editableSession()]);
+
+  render(<MySessionsPage />);
+  fireEvent.click(await screen.findByRole('button', { name: 'Edit session of 2026-06-05' }));
+  fireEvent.click(screen.getByRole('button', { name: 'Cancel edit' }));
+
+  expect(mockedService.update).not.toHaveBeenCalled();
+  expect(screen.queryByText('Editing session of 2026-06-05')).not.toBeInTheDocument();
+  expect(screen.getByLabelText('Date')).toHaveValue(todayLocalDate());
+  expect(screen.getByLabelText('Instrument')).toHaveValue('');
+  expect(screen.queryByLabelText('Entry 1')).not.toBeInTheDocument();
+});
+
+test('an orphan entry shows Keep "label" and is sent back without a ref (FR4)', async () => {
+  const orphanSession = {
+    ...editableSession(),
+    items: [{ uid: ITEM_UID, sessionUid: 's-edit', songUid: null, topicUid: null, label: 'Ghost topic', minutes: 10, note: null }],
+  };
+  mockedService.getAll.mockResolvedValue([orphanSession]);
+  mockedService.update.mockResolvedValue(orphanSession);
+
+  render(<MySessionsPage />);
+  fireEvent.click(await screen.findByRole('button', { name: 'Edit session of 2026-06-05' }));
+
+  expect(screen.getByRole('option', { name: 'Keep "Ghost topic"' })).toBeInTheDocument();
+  expect(screen.getByLabelText('Entry 1')).toHaveValue('');
+
+  fireEvent.click(screen.getByRole('button', { name: 'Save session' }));
+
+  await waitFor(() => {
+    expect(mockedService.update).toHaveBeenCalledWith('s-edit', expect.objectContaining({
+      items: [{ uid: ITEM_UID, minutes: 10, note: undefined }],
+    }));
+  });
+});
+
+test('reclassifying an orphan entry sends the new topic ref (FR4)', async () => {
+  const orphanSession = {
+    ...editableSession(),
+    items: [{ uid: ITEM_UID, sessionUid: 's-edit', songUid: null, topicUid: null, label: 'Ghost topic', minutes: 10, note: null }],
+  };
+  mockedService.getAll.mockResolvedValue([orphanSession]);
+  mockedService.update.mockResolvedValue(orphanSession);
+
+  render(<MySessionsPage />);
+  fireEvent.click(await screen.findByRole('button', { name: 'Edit session of 2026-06-05' }));
+  await screen.findAllByRole('option', { name: 'Pentatonic scale' });
+  fireEvent.change(screen.getByLabelText('Entry 1'), { target: { value: `topic:${TOPIC_UID}` } });
+  fireEvent.click(screen.getByRole('button', { name: 'Save session' }));
+
+  await waitFor(() => {
+    expect(mockedService.update).toHaveBeenCalledWith('s-edit', expect.objectContaining({
+      items: [{ uid: ITEM_UID, topicUid: TOPIC_UID, minutes: 10, note: undefined }],
+    }));
+  });
+});
+
+test('removing an entry in edit mode omits it from the payload', async () => {
+  mockedService.getAll.mockResolvedValue([editableSession()]);
+  mockedService.update.mockResolvedValue(editableSession());
+
+  render(<MySessionsPage />);
+  fireEvent.click(await screen.findByRole('button', { name: 'Edit session of 2026-06-05' }));
+  fireEvent.click(screen.getByRole('button', { name: 'Remove entry 1' }));
+  fireEvent.click(screen.getByRole('button', { name: 'Save session' }));
+
+  await waitFor(() => {
+    expect(mockedService.update).toHaveBeenCalledWith('s-edit', expect.objectContaining({ items: [] }));
+  });
+});
+
+test('FR13 in edit mode: the existing duration is not overwritten by the auto-sum', async () => {
+  mockedService.getAll.mockResolvedValue([editableSession()]);
+
+  render(<MySessionsPage />);
+  fireEvent.click(await screen.findByRole('button', { name: 'Edit session of 2026-06-05' }));
+
+  // The single entry has 15 min; the session duration is 40 — it must stay 40
+  expect(screen.getByLabelText('Duration')).toHaveValue(40);
+});
+
+test('FR13 in edit mode: a duration-less session does not get the auto-sum assigned', async () => {
+  mockedService.getAll.mockResolvedValue([{ ...editableSession(), durationMinutes: null }]);
+  mockedService.update.mockResolvedValue({ ...editableSession(), durationMinutes: null });
+
+  render(<MySessionsPage />);
+  fireEvent.click(await screen.findByRole('button', { name: 'Edit session of 2026-06-05' }));
+
+  // The entry has 15 min but the session deliberately has no duration
+  expect(screen.getByLabelText('Duration')).toHaveValue(null);
+
+  fireEvent.click(screen.getByRole('button', { name: 'Save session' }));
+  await waitFor(() => {
+    expect(mockedService.update).toHaveBeenCalledWith('s-edit', expect.objectContaining({ durationMinutes: null }));
+  });
+});
+
+test('FR13 in edit mode: clearing the duration persists "no duration"', async () => {
+  mockedService.getAll.mockResolvedValue([editableSession()]);
+  mockedService.update.mockResolvedValue(editableSession());
+
+  render(<MySessionsPage />);
+  fireEvent.click(await screen.findByRole('button', { name: 'Edit session of 2026-06-05' }));
+  fireEvent.change(screen.getByLabelText('Duration'), { target: { value: '' } });
+
+  expect(screen.getByLabelText('Duration')).toHaveValue(null);
+
+  fireEvent.click(screen.getByRole('button', { name: 'Save session' }));
+  await waitFor(() => {
+    expect(mockedService.update).toHaveBeenCalledWith('s-edit', expect.objectContaining({ durationMinutes: null }));
+  });
+});
+
+test('the Keep option is reserved for orphan entries', async () => {
+  mockedService.getAll.mockResolvedValue([editableSession()]);
+
+  render(<MySessionsPage />);
+  fireEvent.click(await screen.findByRole('button', { name: 'Edit session of 2026-06-05' }));
+
+  // Non-orphan entry: no Keep option, and the placeholder is disabled
+  expect(screen.queryByRole('option', { name: /^Keep/ })).not.toBeInTheDocument();
+  expect(screen.getByRole('option', { name: 'Select a song or topic' })).toBeDisabled();
+});
+
+test('entering edit mode moves focus to the Date field', async () => {
+  mockedService.getAll.mockResolvedValue([editableSession()]);
+
+  render(<MySessionsPage />);
+  fireEvent.click(await screen.findByRole('button', { name: 'Edit session of 2026-06-05' }));
+
+  expect(screen.getByLabelText('Date')).toHaveFocus();
+});
+
+test('Delete session asks for confirmation naming the session, then removes it', async () => {
+  mockedService.getAll.mockResolvedValue([editableSession()]);
+  mockedService.remove.mockResolvedValue(undefined);
+
+  render(<MySessionsPage />);
+  fireEvent.click(await screen.findByRole('button', { name: 'Delete session of 2026-06-05' }));
+
+  expect(screen.getByText('Are you sure you want to delete the session of 2026-06-05 (Bass)?')).toBeInTheDocument();
+  fireEvent.click(screen.getByText('Delete', { selector: 'div[role="dialog"] button' }));
+
+  expect(screen.queryByRole('dialog')).not.toBeInTheDocument();
+  await waitFor(() => {
+    expect(mockedService.remove).toHaveBeenCalledWith('s-edit');
+  });
+  expect(await screen.findByText('Session deleted')).toBeInTheDocument();
+  expect(screen.queryByText('2026-06-05')).not.toBeInTheDocument();
+});
+
+test('cancelling the session delete dialog keeps the session', async () => {
+  mockedService.getAll.mockResolvedValue([editableSession()]);
+
+  render(<MySessionsPage />);
+  fireEvent.click(await screen.findByRole('button', { name: 'Delete session of 2026-06-05' }));
+  fireEvent.click(screen.getByText('Cancel', { selector: 'div[role="dialog"] button' }));
+
+  expect(mockedService.remove).not.toHaveBeenCalled();
+  expect(screen.getByText('2026-06-05')).toBeInTheDocument();
 });
 
 test('a session with zero entries stays valid (no items in payload)', async () => {

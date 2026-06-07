@@ -51,6 +51,13 @@ module.exports = (sequelize, DataTypes) => {
     note: {
       type: DataTypes.TEXT,
       allowNull: true
+    },
+    // Input order within the session, set from the payload index on create
+    // and on every edit (the user-visible order is the source of truth)
+    position: {
+      type: DataTypes.INTEGER,
+      allowNull: false,
+      defaultValue: 0
     }
   }, {
     tableName: 'SessionItems',

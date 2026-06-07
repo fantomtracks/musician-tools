@@ -1,11 +1,14 @@
 import { useEffect, useRef, useState } from 'react';
-import { practiceSessionService, type CreatePracticeSessionDTO, type CreateSessionItemDTO, type PracticeSession } from '../services/practiceSessionService';
+import { practiceSessionService, type CreatePracticeSessionDTO, type CreateSessionItemDTO, type UpdateSessionItemDTO, type UpdatePracticeSessionDTO, type PracticeSession } from '../services/practiceSessionService';
 import { songService, type Song } from '../services/songService';
 import { topicService, type Topic } from '../services/topicService';
+import { ConfirmDialog } from '../components/ConfirmDialog';
 import { instrumentTypeOptions } from '../constants/instrumentTypes';
 
 type EntryDraft = {
   key: number;
+  uid?: string; // present when editing an existing entry (diff-by-uid)
+  label?: string; // FR4 snapshot, shown as "Keep ..." for orphan entries
   ref: string; // '' | 'song:<uid>' | 'topic:<uid>'
   minutes: string;
   note: string;
@@ -47,6 +50,9 @@ function MySessionsPage() {
   const [topics, setTopics] = useState<Topic[]>([]);
   const [sessions, setSessions] = useState<PracticeSession[] | null>(null);
   const [sessionsFailed, setSessionsFailed] = useState(false);
+  const [editingSessionUid, setEditingSessionUid] = useState<string | null>(null);
+  const [editingSessionLabel, setEditingSessionLabel] = useState('');
+  const [deleteSessionUid, setDeleteSessionUid] = useState<string | null>(null);
   const [durationTouched, setDurationTouched] = useState(false);
   const entryKeyRef = useRef(0);
 
@@ -111,6 +117,74 @@ function MySessionsPage() {
     setEntries(prev => prev.filter(e => e.key !== key));
   };
 
+  const showToast = (message: string) => {
+    if (toastTimerRef.current) clearTimeout(toastTimerRef.current);
+    setToastMessage(message);
+    toastTimerRef.current = window.setTimeout(() => setToastMessage(null), 2500);
+  };
+
+  const resetForm = () => {
+    setEditingSessionUid(null);
+    setEditingSessionLabel('');
+    setDate(todayLocalDate());
+    setInstrumentType('');
+    setDuration('');
+    setDurationTouched(false);
+    setNote('');
+    setEntries([]);
+  };
+
+  const startEditSession = (session: PracticeSession) => {
+    setEditingSessionUid(session.uid);
+    setEditingSessionLabel(session.date);
+    setDate(session.date);
+    setInstrumentType(session.instrumentType);
+    setDuration(session.durationMinutes != null ? String(session.durationMinutes) : '');
+    // FR13 is a capture-time aid only: in edit mode the auto-sum must never
+    // assign or overwrite a duration (a deliberately duration-less session
+    // must stay that way, and clearing the field must mean "no duration")
+    setDurationTouched(true);
+    setNote(session.note ?? '');
+    setEntries((session.items ?? []).map(item => {
+      entryKeyRef.current += 1;
+      const isOrphan = !item.songUid && !item.topicUid;
+      return {
+        key: entryKeyRef.current,
+        uid: item.uid,
+        // label is only kept for orphan entries: it powers the Keep "..."
+        // option; non-orphan entries must pick a concrete ref
+        label: isOrphan ? item.label : undefined,
+        ref: item.songUid ? `song:${item.songUid}` : item.topicUid ? `topic:${item.topicUid}` : '',
+        minutes: item.minutes != null ? String(item.minutes) : '',
+        note: item.note ?? '',
+      };
+    }));
+    setError(null);
+    // Move focus into the form: without it a keyboard/screen-reader user gets
+    // no perceivable cue that the top form switched to edit mode
+    document.getElementById('session-date')?.focus();
+  };
+
+  const handleDeleteSession = async () => {
+    if (!deleteSessionUid) return;
+    const uid = deleteSessionUid;
+    // Close the dialog before the request: prevents a double-click from firing
+    // a duplicate DELETE, and keeps the error banner visible if the call fails.
+    setDeleteSessionUid(null);
+    try {
+      setLoading(true);
+      setError(null);
+      await practiceSessionService.remove(uid);
+      setSessions(prev => (prev ?? []).filter(s => s.uid !== uid));
+      if (editingSessionUid === uid) resetForm();
+      showToast('Session deleted');
+    } catch {
+      setError('Failed to delete session');
+    } finally {
+      setLoading(false);
+    }
+  };
+
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!date || !instrumentType) return;
@@ -122,52 +196,78 @@ function MySessionsPage() {
       return;
     }
     // An entry row without a song/topic would be silently dropped (and its
-    // minutes still counted in the auto-sum) — refuse instead of losing data
-    if (entries.some(e => e.ref === '')) {
+    // minutes still counted in the auto-sum) — refuse instead of losing data.
+    // Exception: an existing orphan entry (uid + FR4 label, refs deleted)
+    // legitimately has no ref — "no ref" means "keep its snapshot label".
+    if (entries.some(e => e.ref === '' && !(e.uid && e.label))) {
       setError('Each entry needs a song or topic — fill or remove empty entries');
       return;
     }
     try {
       setLoading(true);
       setError(null);
-      const items: CreateSessionItemDTO[] = entries
-        .filter(e => e.ref !== '')
-        .map(e => {
-          const separator = e.ref.indexOf(':');
-          const kind = e.ref.slice(0, separator);
-          const uid = e.ref.slice(separator + 1);
-          return {
-            ...(kind === 'song' ? { songUid: uid } : { topicUid: uid }),
+      const decodeRef = (ref: string) => {
+        const separator = ref.indexOf(':');
+        const kind = ref.slice(0, separator);
+        const uid = ref.slice(separator + 1);
+        return kind === 'song' ? { songUid: uid } : { topicUid: uid };
+      };
+
+      if (editingSessionUid) {
+        const items: UpdateSessionItemDTO[] = entries.map(e => ({
+          ...(e.uid ? { uid: e.uid } : {}),
+          ...(e.ref !== '' ? decodeRef(e.ref) : {}),
+          minutes: e.minutes === '' ? undefined : Number(e.minutes),
+          note: e.note.trim() || undefined,
+        }));
+        const payload: UpdatePracticeSessionDTO = {
+          date,
+          instrumentType,
+          durationMinutes: effectiveDuration === '' ? null : Number(effectiveDuration),
+          note: note.trim() || null,
+          items,
+        };
+        const updated = await practiceSessionService.update(editingSessionUid, payload);
+        setSessions(prev => sortSessions((prev ?? []).map(s => (s.uid === editingSessionUid ? updated : s))));
+        setSessionsFailed(false);
+        resetForm();
+        showToast('Session updated');
+      } else {
+        const items: CreateSessionItemDTO[] = entries
+          .filter(e => e.ref !== '')
+          .map(e => ({
+            ...decodeRef(e.ref),
             minutes: e.minutes === '' ? undefined : Number(e.minutes),
             note: e.note.trim() || undefined,
-          };
-        });
-      const payload: CreatePracticeSessionDTO = {
-        date,
-        instrumentType,
-        // '' means "no duration"; anything typed (including 0) is sent so the
-        // server can reject invalid values instead of silently dropping them
-        durationMinutes: effectiveDuration === '' ? undefined : Number(effectiveDuration),
-        note: note.trim() || undefined,
-        items: items.length > 0 ? items : undefined,
-      };
-      const created = await practiceSessionService.create(payload);
-      // Local insert + re-sort: a retroactive session must land at its real
-      // chronological place, not on top of the list. A previously failed
-      // history load must not keep hiding sessions logged since.
-      setSessions(prev => sortSessions([created, ...(prev ?? [])]));
-      setSessionsFailed(false);
-      setDuration('');
-      setDurationTouched(false);
-      setNote('');
-      setEntries([]);
-      if (toastTimerRef.current) clearTimeout(toastTimerRef.current);
-      setToastMessage('Session logged');
-      toastTimerRef.current = window.setTimeout(() => setToastMessage(null), 2500);
+          }));
+        const payload: CreatePracticeSessionDTO = {
+          date,
+          instrumentType,
+          // '' means "no duration"; anything typed (including 0) is sent so the
+          // server can reject invalid values instead of silently dropping them
+          durationMinutes: effectiveDuration === '' ? undefined : Number(effectiveDuration),
+          note: note.trim() || undefined,
+          items: items.length > 0 ? items : undefined,
+        };
+        const created = await practiceSessionService.create(payload);
+        // Local insert + re-sort: a retroactive session must land at its real
+        // chronological place, not on top of the list. A previously failed
+        // history load must not keep hiding sessions logged since.
+        setSessions(prev => sortSessions([created, ...(prev ?? [])]));
+        setSessionsFailed(false);
+        setDuration('');
+        setDurationTouched(false);
+        setNote('');
+        setEntries([]);
+        showToast('Session logged');
+      }
     } catch (err) {
-      setError(err instanceof Error && err.message !== 'Failed to create session'
+      const generic = editingSessionUid ? 'Failed to update session' : 'Failed to log session';
+      setError(err instanceof Error
+        && err.message !== 'Failed to create session'
+        && err.message !== 'Failed to update session'
         ? err.message
-        : 'Failed to log session');
+        : generic);
     } finally {
       setLoading(false);
     }
@@ -175,6 +275,21 @@ function MySessionsPage() {
 
   return (
     <div className="min-h-screen bg-gradient-to-br from-gray-50 via-blue-50 to-purple-50 dark:from-gray-900 dark:via-gray-800 dark:to-gray-950 text-gray-900 dark:text-gray-100">
+      <ConfirmDialog
+        isOpen={!!deleteSessionUid}
+        title="Delete session"
+        message={(() => {
+          const target = (sessions ?? []).find(s => s.uid === deleteSessionUid);
+          return target
+            ? `Are you sure you want to delete the session of ${target.date} (${target.instrumentType})?`
+            : 'Are you sure you want to delete this session?';
+        })()}
+        confirmText="Delete"
+        cancelText="Cancel"
+        isDangerous
+        onConfirm={handleDeleteSession}
+        onCancel={() => setDeleteSessionUid(null)}
+      />
       {/* Always mounted: a live region must exist in the DOM before its content
           changes, or screen readers may never announce the toast */}
       <div
@@ -198,8 +313,18 @@ function MySessionsPage() {
 
         <div className="card-base glass-effect p-4 sm:p-5 space-y-4">
           <div className="flex items-center justify-between">
-            <h2 className="text-xl font-semibold text-gray-900 dark:text-gray-100">New session</h2>
+            <h2 className="text-xl font-semibold text-gray-900 dark:text-gray-100">
+              {editingSessionUid ? 'Edit session' : 'New session'}
+            </h2>
           </div>
+          {editingSessionUid && (
+            <div className="flex items-center justify-between rounded-lg bg-sky-50 dark:bg-sky-900/40 border border-sky-200 dark:border-sky-700/60 px-3 py-2">
+              <span className="text-sm text-gray-700 dark:text-gray-200">Editing session of {editingSessionLabel}</span>
+              <button type="button" className="btn-secondary text-sm" onClick={resetForm} disabled={loading}>
+                Cancel edit
+              </button>
+            </div>
+          )}
 
           <form onSubmit={handleSubmit} className="grid grid-cols-1 md:grid-cols-4 gap-2">
             <div className="flex flex-col gap-1">
@@ -248,9 +373,14 @@ function MySessionsPage() {
                 onChange={e => {
                   setDuration(e.target.value);
                   // Typing freezes the auto-sum; truly clearing the field
-                  // re-arms it. badInput ('1e'…) reads as '' but must NOT
-                  // re-arm, or it would wipe a manual override.
-                  setDurationTouched(e.target.value !== '' || (e.target.validity?.badInput ?? false));
+                  // re-arms it (create mode only — in edit mode "cleared"
+                  // must persist as "no duration"). badInput ('1e'…) reads
+                  // as '' but must NOT re-arm, or it would wipe an override.
+                  setDurationTouched(
+                    e.target.value !== ''
+                    || (e.target.validity?.badInput ?? false)
+                    || editingSessionUid !== null
+                  );
                 }}
                 className="input-base text-sm"
                 disabled={loading}
@@ -262,7 +392,7 @@ function MySessionsPage() {
                 className="btn-primary justify-center"
                 disabled={loading || !date || !instrumentType}
               >
-                Log session
+                {editingSessionUid ? 'Save session' : 'Log session'}
               </button>
             </div>
             <div className="flex flex-col gap-1 md:col-span-4">
@@ -304,7 +434,11 @@ function MySessionsPage() {
                     className="input-base text-sm"
                     disabled={loading}
                   >
-                    <option value="">Select a song or topic</option>
+                    {/* Orphan entries (refs deleted) may keep their FR4 snapshot
+                        label; non-orphan existing entries must keep a real ref */}
+                    <option value="" disabled={!!entry.uid && !entry.label}>
+                      {entry.uid && entry.label ? `Keep "${entry.label}"` : 'Select a song or topic'}
+                    </option>
                     <optgroup label="Songs">
                       {songs.map(song => (
                         <option key={song.uid} value={`song:${song.uid}`}>{song.title}</option>
@@ -378,6 +512,26 @@ function MySessionsPage() {
                     {session.durationMinutes ? (
                       <span className="text-sm text-gray-600 dark:text-gray-400">{session.durationMinutes} min</span>
                     ) : null}
+                    <div className="flex gap-2 ml-auto">
+                      <button
+                        type="button"
+                        aria-label={`Edit session of ${session.date}`}
+                        className="btn-secondary text-sm"
+                        onClick={() => startEditSession(session)}
+                        disabled={loading}
+                      >
+                        Edit
+                      </button>
+                      <button
+                        type="button"
+                        aria-label={`Delete session of ${session.date}`}
+                        className="inline-flex items-center rounded-md bg-red-600 text-white px-3 py-1.5 hover:bg-red-700 dark:bg-red-700 dark:hover:bg-red-800 disabled:opacity-50"
+                        onClick={() => setDeleteSessionUid(session.uid)}
+                        disabled={loading}
+                      >
+                        Delete
+                      </button>
+                    </div>
                   </div>
                   {session.note && (
                     <p className="text-sm text-gray-700 dark:text-gray-300 whitespace-pre-wrap break-words">{session.note}</p>

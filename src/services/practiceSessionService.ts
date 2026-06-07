@@ -33,6 +33,17 @@ export type CreatePracticeSessionDTO = Omit<PracticeSession, 'uid' | 'items' | '
   items?: CreateSessionItemDTO[];
 };
 
+// Diff-by-uid semantics: an item with uid updates the existing row (label kept
+// unless a new ref is provided), without uid it is created, rows absent from
+// the array are deleted.
+export type UpdateSessionItemDTO = CreateSessionItemDTO & { uid?: string };
+
+export type UpdatePracticeSessionDTO = Partial<Omit<CreatePracticeSessionDTO, 'items'>> & {
+  durationMinutes?: number | null;
+  note?: string | null;
+  items?: UpdateSessionItemDTO[];
+};
+
 const API_BASE = '/api';
 
 export const practiceSessionService = {
@@ -58,5 +69,23 @@ export const practiceSessionService = {
     }
     if (!res.ok) throw new Error('Failed to create session');
     return res.json();
+  },
+  async update(uid: string, payload: UpdatePracticeSessionDTO): Promise<PracticeSession> {
+    const res = await fetch(`${API_BASE}/sessions/${uid}`, {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(payload),
+      credentials: 'include'
+    });
+    if (res.status === 400) {
+      const body = await res.json().catch(() => null);
+      throw new Error(body?.message || 'Failed to update session');
+    }
+    if (!res.ok) throw new Error('Failed to update session');
+    return res.json();
+  },
+  async remove(uid: string): Promise<void> {
+    const res = await fetch(`${API_BASE}/sessions/${uid}`, { method: 'DELETE', credentials: 'include' });
+    if (!res.ok) throw new Error('Failed to delete session');
   },
 };

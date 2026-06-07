@@ -47,7 +47,7 @@ const getAllPracticeSessions = async (req, res, next) => {
         // uid tiebreaks: bulkCreate stamps identical timestamps on a batch,
         // and same-ms session inserts are possible — order must be stable
         ['uid', 'DESC'],
-        [{ model: SessionItem, as: 'items' }, 'createdAt', 'ASC'],
+        [{ model: SessionItem, as: 'items' }, 'position', 'ASC'],
         [{ model: SessionItem, as: 'items' }, 'uid', 'ASC']
       ]
     });
@@ -217,7 +217,7 @@ const createPracticeSession = async (req, res, next) => {
       await sequelize.transaction(async (transaction) => {
         practiceSession = await PracticeSession.create(sessionValues, { transaction });
         createdItems = await SessionItem.bulkCreate(
-          resolvedItems.map(item => ({ ...item, sessionUid: practiceSession.uid })),
+          resolvedItems.map((item, index) => ({ ...item, sessionUid: practiceSession.uid, position: index })),
           { transaction }
         );
       });
@@ -239,7 +239,287 @@ const createPracticeSession = async (req, res, next) => {
   }
 };
 
+// PUT update practice session. Session fields are partial (absent = unchanged,
+// explicit null clears duration/note). Items use DIFF-by-uid semantics: a row
+// with a uid is updated in place (its FR4 snapshot label survives unless a new
+// ref triggers re-resolution), a row without uid is created, existing rows
+// absent from the payload are deleted. Positions follow the payload order.
+const updatePracticeSession = async (req, res, next) => {
+  try {
+    const userId = req.session.user;
+    if (!userId) {
+      return next(createError(401, 'Unauthorized'));
+    }
+    if (!UUID_PATTERN.test(req.params.uid)) {
+      return next(createError(404, 'Session not found'));
+    }
+
+    const practiceSession = await PracticeSession.findByPk(req.params.uid, {
+      include: [{ model: SessionItem, as: 'items' }]
+    });
+    if (!practiceSession) {
+      return next(createError(404, 'Session not found'));
+    }
+    if (practiceSession.userUid !== userId) {
+      return next(createError(403, 'Forbidden'));
+    }
+
+    const { date, instrumentType, durationMinutes, note, items } = req.body || {};
+
+    let nextDate = practiceSession.date;
+    if (date !== undefined) {
+      if (typeof date !== 'string' || !DATE_PATTERN.test(date) || !isValidCalendarDate(date)) {
+        return next(createError(400, 'Date must be a valid YYYY-MM-DD date'));
+      }
+      if (date < MIN_DATE) {
+        return next(createError(400, 'Date must be 1900-01-01 or later'));
+      }
+      if (date > maxAllowedDate()) {
+        return next(createError(400, 'Date cannot be in the future'));
+      }
+      nextDate = date;
+    }
+
+    let nextInstrument = practiceSession.instrumentType;
+    if (instrumentType !== undefined) {
+      const trimmedInstrument = typeof instrumentType === 'string' ? instrumentType.trim() : '';
+      if (!trimmedInstrument) {
+        return next(createError(400, 'Instrument is required'));
+      }
+      if (trimmedInstrument.length > 255) {
+        return next(createError(400, 'Instrument must be at most 255 characters'));
+      }
+      if (trimmedInstrument.includes('\u0000')) {
+        return next(createError(400, 'Instrument contains invalid characters'));
+      }
+      nextInstrument = trimmedInstrument;
+    }
+
+    let nextDuration = practiceSession.durationMinutes;
+    if (durationMinutes !== undefined) {
+      if (durationMinutes === null) {
+        nextDuration = null;
+      } else {
+        if (typeof durationMinutes !== 'number' || !Number.isInteger(durationMinutes)
+          || durationMinutes < 1 || durationMinutes > MAX_DURATION_MINUTES) {
+          return next(createError(400, 'Duration must be a whole number of minutes between 1 and 1440'));
+        }
+        nextDuration = durationMinutes;
+      }
+    }
+
+    let nextNote = practiceSession.note;
+    if (note !== undefined) {
+      if (note === null) {
+        nextNote = null;
+      } else {
+        if (typeof note !== 'string') {
+          return next(createError(400, 'Note must be a string'));
+        }
+        if (note.length > MAX_NOTE_LENGTH) {
+          return next(createError(400, 'Note must be at most 5000 characters'));
+        }
+        if (note.includes('\u0000')) {
+          return next(createError(400, 'Note contains invalid characters'));
+        }
+        nextNote = note.trim() || null;
+      }
+    }
+
+    // Items diff — validate and resolve everything BEFORE the transaction
+    let itemOps = null;
+    if (items !== undefined && items !== null) {
+      if (!Array.isArray(items)) {
+        return next(createError(400, 'Items must be an array'));
+      }
+      if (items.length > MAX_ITEMS) {
+        return next(createError(400, 'Too many items'));
+      }
+
+      const existingByUid = new Map(practiceSession.items.map(item => [item.uid, item]));
+      const songUids = new Set();
+      const topicUids = new Set();
+      const keptUids = new Set();
+      const pendingRows = [];
+
+      for (const item of items) {
+        if (!item || typeof item !== 'object') {
+          return next(createError(400, 'Each item must reference a song or a topic'));
+        }
+        const { uid, songUid, topicUid, minutes, note: itemNote } = item;
+        const hasSong = songUid !== undefined && songUid !== null;
+        const hasTopic = topicUid !== undefined && topicUid !== null;
+        if (hasSong && hasTopic) {
+          return next(createError(400, 'Each item must reference a song or a topic, not both'));
+        }
+
+        let existing = null;
+        if (uid !== undefined && uid !== null) {
+          if (typeof uid !== 'string' || !UUID_PATTERN.test(uid) || !existingByUid.has(uid)) {
+            return next(createError(400, 'Invalid entry reference'));
+          }
+          if (keptUids.has(uid)) {
+            // The same row twice would silently collapse into one (last write
+            // wins) and leave a position hole
+            return next(createError(400, 'Duplicate entry reference'));
+          }
+          existing = existingByUid.get(uid);
+          keptUids.add(uid);
+        } else if (!hasSong && !hasTopic) {
+          return next(createError(400, 'Each item must reference a song or a topic'));
+        }
+
+        if (hasSong || hasTopic) {
+          const refUid = hasSong ? songUid : topicUid;
+          if (typeof refUid !== 'string' || !UUID_PATTERN.test(refUid)) {
+            return next(createError(400, 'Invalid entry reference'));
+          }
+          if (hasSong) songUids.add(refUid);
+          else topicUids.add(refUid);
+        }
+
+        if (minutes !== undefined && minutes !== null) {
+          if (typeof minutes !== 'number' || !Number.isInteger(minutes)
+            || minutes < 1 || minutes > MAX_DURATION_MINUTES) {
+            return next(createError(400, 'Entry minutes must be a whole number of minutes between 1 and 1440'));
+          }
+        }
+
+        let trimmedItemNote = null;
+        if (itemNote !== undefined && itemNote !== null) {
+          if (typeof itemNote !== 'string') {
+            return next(createError(400, 'Entry note must be a string'));
+          }
+          if (itemNote.length > MAX_ITEM_NOTE_LENGTH) {
+            return next(createError(400, 'Entry note must be at most 1000 characters'));
+          }
+          if (itemNote.includes('\u0000')) {
+            return next(createError(400, 'Entry note contains invalid characters'));
+          }
+          trimmedItemNote = itemNote.trim() || null;
+        }
+
+        pendingRows.push({ existing, hasSong, hasTopic, songUid, topicUid, minutes: minutes ?? null, note: trimmedItemNote });
+      }
+
+      const songTitleByUid = new Map();
+      const topicNameByUid = new Map();
+      if (songUids.size > 0) {
+        const songs = await Song.findAll({ where: { uid: [...songUids], userUid: userId } });
+        songs.forEach(song => songTitleByUid.set(song.uid, song.title));
+      }
+      if (topicUids.size > 0) {
+        const topics = await Topic.findAll({ where: { uid: [...topicUids], userUid: userId } });
+        topics.forEach(topic => topicNameByUid.set(topic.uid, topic.name));
+      }
+
+      const rows = [];
+      for (let index = 0; index < pendingRows.length; index += 1) {
+        const pending = pendingRows[index];
+        let label;
+        let songUidValue;
+        let topicUidValue;
+        if (pending.hasSong || pending.hasTopic) {
+          label = pending.hasSong
+            ? songTitleByUid.get(pending.songUid)
+            : topicNameByUid.get(pending.topicUid);
+          if (label === undefined) {
+            return next(createError(400, 'Invalid entry reference'));
+          }
+          songUidValue = pending.hasSong ? pending.songUid : null;
+          topicUidValue = pending.hasTopic ? pending.topicUid : null;
+        } else {
+          // No new ref: keep the existing refs and FR4 snapshot label
+          label = pending.existing.label;
+          songUidValue = pending.existing.songUid;
+          topicUidValue = pending.existing.topicUid;
+        }
+        rows.push({
+          existing: pending.existing,
+          values: {
+            songUid: songUidValue,
+            topicUid: topicUidValue,
+            label,
+            minutes: pending.minutes,
+            note: pending.note,
+            position: index
+          }
+        });
+      }
+
+      const toDelete = practiceSession.items
+        .filter(item => !keptUids.has(item.uid))
+        .map(item => item.uid);
+      itemOps = { rows, toDelete };
+    }
+
+    await sequelize.transaction(async (transaction) => {
+      await practiceSession.update({
+        date: nextDate,
+        instrumentType: nextInstrument,
+        durationMinutes: nextDuration,
+        note: nextNote
+      }, { transaction });
+
+      if (itemOps) {
+        if (itemOps.toDelete.length > 0) {
+          await SessionItem.destroy({ where: { uid: itemOps.toDelete }, transaction });
+        }
+        for (const row of itemOps.rows) {
+          if (row.existing) {
+            await row.existing.update(row.values, { transaction });
+          } else {
+            await SessionItem.create({ ...row.values, sessionUid: practiceSession.uid }, { transaction });
+          }
+        }
+      }
+    });
+
+    const itemsAfter = await SessionItem.findAll({
+      where: { sessionUid: practiceSession.uid },
+      order: [['position', 'ASC'], ['uid', 'ASC']]
+    });
+    const sessionJson = typeof practiceSession.toJSON === 'function' ? practiceSession.toJSON() : practiceSession;
+    res.json({ ...sessionJson, items: itemsAfter.map(item => (typeof item.toJSON === 'function' ? item.toJSON() : item)) });
+  } catch (error) {
+    if (error.name === 'SequelizeForeignKeyConstraintError') {
+      return next(createError(400, 'Invalid entry reference'));
+    }
+    logger.error('Error updating practice session:', error);
+    next(createError(500, 'Error updating practice session'));
+  }
+};
+
+// DELETE practice session (items removed by the FK CASCADE)
+const deletePracticeSession = async (req, res, next) => {
+  try {
+    const userId = req.session.user;
+    if (!userId) {
+      return next(createError(401, 'Unauthorized'));
+    }
+    if (!UUID_PATTERN.test(req.params.uid)) {
+      return next(createError(404, 'Session not found'));
+    }
+
+    const practiceSession = await PracticeSession.findByPk(req.params.uid);
+    if (!practiceSession) {
+      return next(createError(404, 'Session not found'));
+    }
+    if (practiceSession.userUid !== userId) {
+      return next(createError(403, 'Forbidden'));
+    }
+
+    await practiceSession.destroy();
+    res.json({ message: 'Session deleted successfully' });
+  } catch (error) {
+    logger.error('Error deleting practice session:', error);
+    next(createError(500, 'Error deleting practice session'));
+  }
+};
+
 module.exports = {
   getAllPracticeSessions,
   createPracticeSession,
+  updatePracticeSession,
+  deletePracticeSession,
 };
