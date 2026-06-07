@@ -1,5 +1,6 @@
 import { render, screen, fireEvent, waitFor, within } from '@testing-library/react';
 import MySessionsPage from '../pages/MySessionsPage';
+import { digitsOnly } from '../utils/digitsOnly';
 import { practiceSessionService, type PracticeSession } from '../services/practiceSessionService';
 
 jest.mock('../services/practiceSessionService', () => ({
@@ -858,6 +859,18 @@ test('FR12: Enter in the search field does not submit the session', async () => 
   fireEvent.keyDown(screen.getByLabelText('Entry 1 search'), { key: 'Enter' });
 
   expect(mockedService.create).not.toHaveBeenCalled();
+});
+
+// jsdom sanitizes number inputs itself, so Safari's permissive typing cannot be
+// simulated end-to-end here — the keystroke filter is tested directly instead
+// (epic-2 retro action #1)
+test('digitsOnly strips everything Safari lets through on number inputs', () => {
+  expect(digitsOnly('abc')).toBe('');
+  expect(digitsOnly('12abc')).toBe('12');
+  expect(digitsOnly('1e5')).toBe('15');
+  expect(digitsOnly('-40')).toBe('40');
+  expect(digitsOnly('4 0.5')).toBe('405');
+  expect(digitsOnly('')).toBe('');
 });
 
 test('a session with zero entries stays valid (no items in payload)', async () => {

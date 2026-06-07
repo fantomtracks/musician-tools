@@ -4,6 +4,7 @@ import { songService, type Song } from '../services/songService';
 import { topicService, type Topic } from '../services/topicService';
 import { ConfirmDialog } from '../components/ConfirmDialog';
 import { instrumentTypeOptions } from '../constants/instrumentTypes';
+import { digitsOnly } from '../utils/digitsOnly';
 
 type EntryDraft = {
   key: number;
@@ -433,14 +434,16 @@ function MySessionsPage() {
                 max={1440}
                 placeholder="Minutes (optional)"
                 value={effectiveDuration}
+                inputMode="numeric"
                 onChange={e => {
-                  setDuration(e.target.value);
+                  const digits = digitsOnly(e.target.value);
+                  setDuration(digits);
                   // Typing freezes the auto-sum; truly clearing the field
                   // re-arms it (create mode only — in edit mode "cleared"
                   // must persist as "no duration"). badInput ('1e'…) reads
                   // as '' but must NOT re-arm, or it would wipe an override.
                   setDurationTouched(
-                    e.target.value !== ''
+                    digits !== ''
                     || (e.target.validity?.badInput ?? false)
                     || editingSessionUid !== null
                   );
@@ -568,11 +571,12 @@ function MySessionsPage() {
                   <input
                     aria-label={`Entry ${index + 1} minutes`}
                     type="number"
+                    inputMode="numeric"
                     min={1}
                     max={1440}
                     placeholder="Minutes (optional)"
                     value={entry.minutes}
-                    onChange={e => updateEntry(entry.key, { minutes: e.target.value })}
+                    onChange={e => updateEntry(entry.key, { minutes: digitsOnly(e.target.value) })}
                     className="input-base text-sm"
                     disabled={loading}
                   />
