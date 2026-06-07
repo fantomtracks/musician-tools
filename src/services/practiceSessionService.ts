@@ -45,9 +45,25 @@ export type UpdatePracticeSessionDTO = Partial<Omit<CreatePracticeSessionDTO, 'i
 };
 
 export type HeatmapDay = {
-  date: string; // YYYY-MM-DD, client-local day (FR19)
+  // YYYY-MM-DD. Session days carry the client-local day (FR19); play-only
+  // rows (FR22 retro-import) carry the UTC day of the server-stamped playedAt
+  // — the best truth available for historical plays.
+  date: string;
   totalMinutes: number;
   sessionCount: number;
+  // Projected play history (FR22 retro-import) — optional so pre-3.3 payloads
+  // and existing test fixtures stay valid
+  playCount?: number;
+};
+
+// A historical "Mark as Played" projected into the day detail (FR22).
+// Presence only: no duration, by design.
+export type DayPlay = {
+  uid: string;
+  songUid: string;
+  title: string;
+  instrumentType?: string | null;
+  playedAt: string;
 };
 
 const API_BASE = '/api';
@@ -62,6 +78,13 @@ export const practiceSessionService = {
       throw new Error(body?.message || 'Failed to fetch heatmap');
     }
     if (!res.ok) throw new Error('Failed to fetch heatmap');
+    return res.json();
+  },
+  async getDayPlays(date: string): Promise<DayPlay[]> {
+    const res = await fetch(`${API_BASE}/sessions/plays?date=${encodeURIComponent(date)}`, {
+      credentials: 'include'
+    });
+    if (!res.ok) throw new Error('Failed to fetch plays');
     return res.json();
   },
   async getAll(date?: string): Promise<PracticeSession[]> {

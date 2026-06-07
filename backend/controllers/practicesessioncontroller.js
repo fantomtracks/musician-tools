@@ -1,5 +1,5 @@
-const { PracticeSession, SessionItem, Song, Topic, sequelize } = require('../models');
-const { fn, col, Op } = require('sequelize');
+const { PracticeSession, SessionItem, Song, SongPlay, Topic, sequelize } = require('../models');
+const { fn, col, literal, Op } = require('sequelize');
 const createError = require('http-errors');
 const logger = require('../logger');
 
@@ -11,6 +11,39 @@ const MAX_ITEMS = 50;
 const MAX_ITEM_NOTE_LENGTH = 1000;
 // Reject malformed uids before they reach Postgres (invalid uuid input throws a DB error)
 const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+
+// The calendar day of a historical play (FR22 retro-import). playedAt was
+// stamped with the SERVER clock, so the UTC day is the best available truth —
+// a 00:30 Paris play lands on the PREVIOUS UTC day, and a late-evening play
+// in a UTC- zone can land on the next day, possibly the next year (known,
+// accepted limitation; story 4.1 fixes the source going forward). This
+// expression defines the day in the heatmap SELECT/GROUP, and the range
+// filters below are its exact sargable equivalent — if either side diverged,
+// a lit cell could open onto an empty panel.
+// SongPlays columns are camelCase IN DB (historical exception) — the double
+// quotes are mandatory or Postgres downcases the identifier.
+const PLAY_DAY_EXPR = 'DATE("SongPlay"."playedAt" AT TIME ZONE \'UTC\')';
+
+// Half-open UTC bounds equivalent to PLAY_DAY_EXPR = day — kept as plain
+// comparisons on "playedAt" so the existing index can serve them (a WHERE on
+// the DATE() expression would force a full scan of the joined plays)
+function utcDayBounds(isoDay) {
+  const start = new Date(`${isoDay}T00:00:00.000Z`);
+  const end = new Date(start.getTime() + 24 * 60 * 60 * 1000);
+  return { [Op.gte]: start.toISOString(), [Op.lt]: end.toISOString() };
+}
+
+// pg can hand a raw DATE() back as a string or a Date depending on the type
+// parser — normalize to the YYYY-MM-DD string the heatmap contract uses.
+// A pg-parsed DATE materializes at LOCAL midnight, so the calendar day lives
+// in the LOCAL components — toISOString() would shift it back a day on any
+// UTC+ server (the very mismatch PLAY_DAY_EXPR exists to prevent).
+function playDayString(value) {
+  if (value instanceof Date) {
+    return `${value.getFullYear()}-${String(value.getMonth() + 1).padStart(2, '0')}-${String(value.getDate()).padStart(2, '0')}`;
+  }
+  return String(value).slice(0, 10);
+}
 
 function isValidCalendarDate(value) {
   const [year, month, day] = value.split('-').map(Number);
@@ -72,10 +105,12 @@ const getAllPracticeSessions = async (req, res, next) => {
 };
 
 // GET heatmap aggregates: total minutes and session count per day for one
-// year. One GROUP BY query over the (user_uid, date) index (NFR2). The date
-// is the client-entered DATEONLY, grouped verbatim — no server timezone
-// conversion (FR19). Only active days are returned; empty days are derived
-// client-side.
+// year, plus the projected play history (FR22 retro-import). Two GROUP BY
+// queries (sessions, plays), merged in JS — a PROJECTION at read time, never
+// materialized: nothing is written, so replays are idempotent by construction
+// (NFR5). Session dates are the client-entered DATEONLY, grouped verbatim —
+// no server timezone conversion (FR19). Only active days are returned; empty
+// days are derived client-side.
 const getHeatmap = async (req, res, next) => {
   try {
     const userId = req.session.user;
@@ -89,28 +124,104 @@ const getHeatmap = async (req, res, next) => {
       return next(createError(400, 'Year must be a valid year'));
     }
 
-    const rows = await PracticeSession.findAll({
-      attributes: [
-        'date',
-        [fn('SUM', col('duration_minutes')), 'totalMinutes'],
-        [fn('COUNT', col('uid')), 'sessionCount']
-      ],
-      where: { userUid: userId, date: { [Op.between]: [`${year}-01-01`, `${year}-12-31`] } },
-      group: ['date'],
-      order: [['date', 'ASC']],
-      raw: true
-    });
+    // Independent queries — run them concurrently.
+    // SongPlay has no userUid: ownership goes through the Song parent.
+    // The year filter is a sargable range on "playedAt" (UTC), strictly
+    // equivalent to PLAY_DAY_EXPR BETWEEN Jan 1 and Dec 31 of the year.
+    const [rows, playRows] = await Promise.all([
+      PracticeSession.findAll({
+        attributes: [
+          'date',
+          [fn('SUM', col('duration_minutes')), 'totalMinutes'],
+          [fn('COUNT', col('uid')), 'sessionCount']
+        ],
+        where: { userUid: userId, date: { [Op.between]: [`${year}-01-01`, `${year}-12-31`] } },
+        group: ['date'],
+        order: [['date', 'ASC']],
+        raw: true
+      }),
+      SongPlay.findAll({
+        attributes: [
+          [literal(PLAY_DAY_EXPR), 'date'],
+          [fn('COUNT', col('SongPlay.uid')), 'playCount']
+        ],
+        include: [{ model: Song, attributes: [], where: { userUid: userId }, required: true }],
+        where: { playedAt: { [Op.gte]: `${year}-01-01T00:00:00.000Z`, [Op.lt]: `${year + 1}-01-01T00:00:00.000Z` } },
+        group: [literal(PLAY_DAY_EXPR)],
+        raw: true
+      })
+    ]);
 
     // pg returns SUM (numeric) and COUNT (bigint) as STRINGS in raw mode;
     // a SUM over all-NULL durations is NULL
-    res.json(rows.map(row => ({
+    const byDate = new Map(rows.map(row => [row.date, {
       date: row.date,
       totalMinutes: Number(row.totalMinutes ?? 0),
-      sessionCount: Number(row.sessionCount)
-    })));
+      sessionCount: Number(row.sessionCount),
+      playCount: 0
+    }]));
+
+    // Merge rule (FR22, no double counting): a day with sessions keeps its
+    // aggregates untouched — plays only annotate; a play-only day is pure
+    // presence (zero minutes, zero sessions → minimal level client-side)
+    for (const play of playRows) {
+      const date = playDayString(play.date);
+      const playCount = Number(play.playCount);
+      const existing = byDate.get(date);
+      if (existing) {
+        existing.playCount = playCount;
+      } else {
+        byDate.set(date, { date, totalMinutes: 0, sessionCount: 0, playCount });
+      }
+    }
+
+    // The merge breaks the SQL ordering — re-sort by date
+    res.json([...byDate.values()].sort((a, b) => (a.date < b.date ? -1 : a.date > b.date ? 1 : 0)));
   } catch (error) {
     logger.error('Error fetching heatmap:', error);
     next(createError(500, 'Error fetching heatmap'));
+  }
+};
+
+// GET the raw plays of one day (FR22/AC4) — the day-detail companion of the
+// heatmap projection. Same PLAY_DAY_EXPR as the aggregation: a lit cell must
+// always open onto its plays. Plays are presence, not sessions: no duration.
+const getDayPlays = async (req, res, next) => {
+  try {
+    const userId = req.session.user;
+    if (!userId) {
+      return next(createError(401, 'Unauthorized'));
+    }
+
+    const date = req.query?.date;
+    if (typeof date !== 'string' || !DATE_PATTERN.test(date) || !isValidCalendarDate(date)) {
+      return next(createError(400, 'Date must be a valid YYYY-MM-DD date'));
+    }
+    if (date < MIN_DATE) {
+      return next(createError(400, 'Date must be 1900-01-01 or later'));
+    }
+
+    const rows = await SongPlay.findAll({
+      attributes: ['uid', 'songUid', 'instrumentType', 'playedAt'],
+      include: [{ model: Song, attributes: ['title'], where: { userUid: userId }, required: true }],
+      // Sargable equivalent of PLAY_DAY_EXPR = date (same UTC day as the grid)
+      where: { playedAt: utcDayBounds(date) },
+      // uid tiebreak: same-timestamp plays (rapid double-marks) need a stable order
+      order: [['playedAt', 'ASC'], ['uid', 'ASC']],
+      raw: true
+    });
+
+    // raw mode flattens the join as 'Song.title'
+    res.json(rows.map(row => ({
+      uid: row.uid,
+      songUid: row.songUid,
+      title: row['Song.title'],
+      instrumentType: row.instrumentType,
+      playedAt: row.playedAt
+    })));
+  } catch (error) {
+    logger.error('Error fetching day plays:', error);
+    next(createError(500, 'Error fetching day plays'));
   }
 };
 
@@ -576,6 +687,7 @@ const deletePracticeSession = async (req, res, next) => {
 module.exports = {
   getAllPracticeSessions,
   getHeatmap,
+  getDayPlays,
   createPracticeSession,
   updatePracticeSession,
   deletePracticeSession,

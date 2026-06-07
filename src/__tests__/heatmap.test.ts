@@ -98,6 +98,43 @@ describe('computeLevels', () => {
     expect(levelFor('2026-01-01')).toBe(1);
     expect(levelFor('2026-01-02')).toBe(4);
   });
+
+  test('a play-only day lights at the minimal level (FR22 retro-import)', () => {
+    const levelFor = computeLevels([
+      { date: '2026-02-01', totalMinutes: 0, sessionCount: 0, playCount: 3 },
+      day('2026-03-10', 60),
+    ]);
+    expect(levelFor('2026-02-01')).toBe(1);
+    // Sessions keep their own scale — plays never inflate it (FR22)
+    expect(levelFor('2026-03-10')).toBe(4);
+  });
+
+  test('plays on a session day never change its level (no double counting, FR22)', () => {
+    const withPlays = computeLevels([
+      { date: '2026-01-01', totalMinutes: 10, sessionCount: 1, playCount: 7 },
+      { date: '2026-01-02', totalMinutes: 40, sessionCount: 1, playCount: 0 },
+    ]);
+    const withoutPlays = computeLevels([
+      day('2026-01-01', 10),
+      day('2026-01-02', 40),
+    ]);
+    expect(withPlays('2026-01-01')).toBe(withoutPlays('2026-01-01'));
+    expect(withPlays('2026-01-02')).toBe(withoutPlays('2026-01-02'));
+  });
+
+  test('a day with neither sessions nor plays stays dark, NaN playCount is sanitized', () => {
+    const levelFor = computeLevels([
+      { date: '2026-01-01', totalMinutes: 0, sessionCount: 0, playCount: 0 },
+      { date: '2026-01-02', totalMinutes: 0, sessionCount: 0, playCount: Number.NaN },
+    ]);
+    expect(levelFor('2026-01-01')).toBe(0);
+    expect(levelFor('2026-01-02')).toBe(0);
+  });
+
+  test('playCount absent (pre-3.3 payload) is tolerated', () => {
+    const levelFor = computeLevels([day('2026-01-01', 30)]);
+    expect(levelFor('2026-01-01')).toBe(4);
+  });
 });
 
 describe('buildYearGrid edge years', () => {

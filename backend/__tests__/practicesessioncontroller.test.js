@@ -14,6 +14,9 @@ jest.mock('../models', () => {
     Song: {
       findAll: jest.fn(),
     },
+    SongPlay: {
+      findAll: jest.fn(async () => []),
+    },
     Topic: {
       findAll: jest.fn(),
     },
@@ -23,8 +26,8 @@ jest.mock('../models', () => {
   };
 });
 
-const { PracticeSession, SessionItem, Song, Topic, sequelize } = require('../models');
-const { fn, col, Op } = require('sequelize');
+const { PracticeSession, SessionItem, Song, SongPlay, Topic, sequelize } = require('../models');
+const { fn, col, literal, Op } = require('sequelize');
 const controller = require('../controllers/practicesessioncontroller');
 
 function mockRes() {
@@ -398,9 +401,78 @@ describe('practicesessioncontroller', () => {
       await controller.getHeatmap({ session: { user: 'user-1' }, query: { year: 2026 } }, res, mockNext());
 
       expect(res.json).toHaveBeenCalledWith([
-        { date: '2026-03-10', totalMinutes: 120, sessionCount: 3 },
-        { date: '2026-03-11', totalMinutes: 0, sessionCount: 1 },
+        { date: '2026-03-10', totalMinutes: 120, sessionCount: 3, playCount: 0 },
+        { date: '2026-03-11', totalMinutes: 0, sessionCount: 1, playCount: 0 },
       ]);
+    });
+
+    test('projects play-only days as presence rows (FR22 retro-import)', async () => {
+      PracticeSession.findAll.mockResolvedValueOnce([]);
+      SongPlay.findAll.mockResolvedValueOnce([
+        { date: '2026-02-01', playCount: '2' },
+      ]);
+
+      const res = mockRes();
+      await controller.getHeatmap({ session: { user: 'user-1' }, query: { year: '2026' } }, res, mockNext());
+
+      // Presence only: zero minutes, zero sessions — the client lights level 1
+      expect(res.json).toHaveBeenCalledWith([
+        { date: '2026-02-01', totalMinutes: 0, sessionCount: 0, playCount: 2 },
+      ]);
+    });
+
+    test('a mixed day keeps the session aggregates untouched — no double counting (FR22)', async () => {
+      PracticeSession.findAll.mockResolvedValueOnce([
+        { date: '2026-03-10', totalMinutes: '120', sessionCount: '3' },
+      ]);
+      SongPlay.findAll.mockResolvedValueOnce([
+        { date: '2026-03-10', playCount: '5' },
+        { date: '2026-03-09', playCount: '2' },
+      ]);
+
+      const res = mockRes();
+      await controller.getHeatmap({ session: { user: 'user-1' }, query: { year: '2026' } }, res, mockNext());
+
+      // Sorted by date; minutes come from sessions only, plays add presence
+      expect(res.json).toHaveBeenCalledWith([
+        { date: '2026-03-09', totalMinutes: 0, sessionCount: 0, playCount: 2 },
+        { date: '2026-03-10', totalMinutes: 120, sessionCount: 3, playCount: 5 },
+      ]);
+    });
+
+    test('scopes plays to the user through the Song join, by UTC day, year-bounded (no userUid on SongPlay)', async () => {
+      PracticeSession.findAll.mockResolvedValueOnce([]);
+
+      await controller.getHeatmap({ session: { user: 'user-1' }, query: { year: '2026' } }, mockRes(), mockNext());
+
+      const PLAY_DAY = 'DATE("SongPlay"."playedAt" AT TIME ZONE \'UTC\')';
+      expect(SongPlay.findAll).toHaveBeenCalledTimes(1);
+      const arg = SongPlay.findAll.mock.calls[0][0];
+      expect(arg.include).toEqual([
+        expect.objectContaining({ attributes: [], where: { userUid: 'user-1' }, required: true }),
+      ]);
+      // The day expression IS the contract with the day-detail endpoint —
+      // pin it in SELECT and GROUP so the two queries cannot silently diverge
+      expect(arg.attributes).toEqual([
+        [literal(PLAY_DAY), 'date'],
+        [fn('COUNT', col('SongPlay.uid')), 'playCount'],
+      ]);
+      expect(arg.group).toEqual([literal(PLAY_DAY)]);
+      // Sargable year bounds on playedAt (index-friendly), equivalent to the
+      // day expression between Jan 1 and Dec 31
+      expect(arg.where).toEqual({
+        playedAt: { [Op.gte]: '2026-01-01T00:00:00.000Z', [Op.lt]: '2027-01-01T00:00:00.000Z' },
+      });
+      expect(arg.raw).toBe(true);
+    });
+
+    test('maps a plays query failure to 500', async () => {
+      PracticeSession.findAll.mockResolvedValueOnce([]);
+      SongPlay.findAll.mockRejectedValueOnce(new Error('db down'));
+
+      const failNext = mockNext();
+      await controller.getHeatmap({ session: { user: 'user-1' }, query: { year: '2026' } }, mockRes(), failNext);
+      expect(failNext.mock.calls[0][0].status).toBe(500);
     });
 
     test('rejects invalid years with 400', async () => {
@@ -421,6 +493,75 @@ describe('practicesessioncontroller', () => {
       PracticeSession.findAll.mockRejectedValueOnce(new Error('db down'));
       const failNext = mockNext();
       await controller.getHeatmap({ session: { user: 'user-1' }, query: { year: '2026' } }, mockRes(), failNext);
+      expect(failNext.mock.calls[0][0].status).toBe(500);
+    });
+  });
+
+  describe('getDayPlays', () => {
+    test('returns the day plays joined with the song title, oldest first (FR22/AC4)', async () => {
+      SongPlay.findAll.mockResolvedValueOnce([
+        {
+          uid: 'play-1', songUid: 'song-1', instrumentType: 'Guitar',
+          playedAt: '2026-03-10T09:00:00.000Z', 'Song.title': 'Sweet Child',
+        },
+        {
+          uid: 'play-2', songUid: 'song-2', instrumentType: null,
+          playedAt: '2026-03-10T21:30:00.000Z', 'Song.title': 'Money',
+        },
+      ]);
+
+      const res = mockRes();
+      const next = mockNext();
+      await controller.getDayPlays({ session: { user: 'user-1' }, query: { date: '2026-03-10' } }, res, next);
+
+      // Plays are presence, not sessions: no duration anywhere in the payload
+      expect(res.json).toHaveBeenCalledWith([
+        { uid: 'play-1', songUid: 'song-1', title: 'Sweet Child', instrumentType: 'Guitar', playedAt: '2026-03-10T09:00:00.000Z' },
+        { uid: 'play-2', songUid: 'song-2', title: 'Money', instrumentType: null, playedAt: '2026-03-10T21:30:00.000Z' },
+      ]);
+      expect(next).not.toHaveBeenCalled();
+
+      const arg = SongPlay.findAll.mock.calls[0][0];
+      expect(arg.include).toEqual([
+        expect.objectContaining({ attributes: ['title'], where: { userUid: 'user-1' }, required: true }),
+      ]);
+      // Same UTC day as the heatmap aggregation, as a sargable range;
+      // uid tiebreak keeps same-timestamp plays stable across requests
+      expect(arg.where).toEqual({
+        playedAt: { [Op.gte]: '2026-03-10T00:00:00.000Z', [Op.lt]: '2026-03-11T00:00:00.000Z' },
+      });
+      expect(arg.order).toEqual([['playedAt', 'ASC'], ['uid', 'ASC']]);
+      expect(arg.raw).toBe(true);
+    });
+
+    test('rejects a missing or invalid date with 400', async () => {
+      for (const date of [undefined, '', 'garbage', '2026-02-31', '03/10/2026']) {
+        const next = mockNext();
+        await controller.getDayPlays({ session: { user: 'user-1' }, query: { date } }, mockRes(), next);
+
+        expect(SongPlay.findAll).not.toHaveBeenCalled();
+        expect(next.mock.calls[0][0].status).toBe(400);
+        expect(next.mock.calls[0][0].message).toBe('Date must be a valid YYYY-MM-DD date');
+      }
+    });
+
+    test('rejects far-past dates (year typos) with 400, like the rest of the controller', async () => {
+      const next = mockNext();
+      await controller.getDayPlays({ session: { user: 'user-1' }, query: { date: '0205-06-07' } }, mockRes(), next);
+
+      expect(SongPlay.findAll).not.toHaveBeenCalled();
+      expect(next.mock.calls[0][0].status).toBe(400);
+      expect(next.mock.calls[0][0].message).toBe('Date must be 1900-01-01 or later');
+    });
+
+    test('rejects unauthenticated requests with 401 and maps failures to 500', async () => {
+      const anonNext = mockNext();
+      await controller.getDayPlays({ session: {}, query: { date: '2026-03-10' } }, mockRes(), anonNext);
+      expect(anonNext.mock.calls[0][0].status).toBe(401);
+
+      SongPlay.findAll.mockRejectedValueOnce(new Error('db down'));
+      const failNext = mockNext();
+      await controller.getDayPlays({ session: { user: 'user-1' }, query: { date: '2026-03-10' } }, mockRes(), failNext);
       expect(failNext.mock.calls[0][0].status).toBe(500);
     });
   });

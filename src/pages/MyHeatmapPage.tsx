@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { Link } from 'react-router-dom';
-import { practiceSessionService, type HeatmapDay, type PracticeSession } from '../services/practiceSessionService';
+import { practiceSessionService, type DayPlay, type HeatmapDay, type PracticeSession } from '../services/practiceSessionService';
 import { ConfirmDialog } from '../components/ConfirmDialog';
 import { buildYearGrid, computeLevels, formatLocalDate } from '../utils/heatmap';
 
@@ -32,7 +32,9 @@ function MyHeatmapPage() {
   const [focusedDate, setFocusedDate] = useState<string | null>(null);
   const [selectedDate, setSelectedDate] = useState<string | null>(null);
   const [daySessions, setDaySessions] = useState<PracticeSession[] | null>(null);
+  const [dayPlays, setDayPlays] = useState<DayPlay[] | null>(null);
   const [dayFailed, setDayFailed] = useState(false);
+  const [playsFailed, setPlaysFailed] = useState(false);
   const [deleteSessionUid, setDeleteSessionUid] = useState<string | null>(null);
   const [deleteFailed, setDeleteFailed] = useState(false);
   const [deleteInFlight, setDeleteInFlight] = useState(false);
@@ -58,28 +60,37 @@ function MyHeatmapPage() {
     return () => { cancelled = true; };
   }, [year, heatmapVersion]);
 
-  // Day detail (FR16): one filtered fetch per selected day; a slow response
-  // for a previously selected day must not land on the current one
+  // Day detail (FR16): sessions and projected plays (FR22) fetched in parallel
+  // per selected day; a slow response for a previously selected day must not
+  // land on the current one. allSettled: each list fails independently — the
+  // surviving one still renders, with a failure message for the other.
   useEffect(() => {
     selectedDateRef.current = selectedDate;
     // A pending delete dialog must not survive a context change
     setDeleteSessionUid(null);
     if (!selectedDate) {
       setDaySessions(null);
+      setDayPlays(null);
       setDayFailed(false);
+      setPlaysFailed(false);
       return;
     }
     let cancelled = false;
     setDaySessions(null);
+    setDayPlays(null);
     setDayFailed(false);
+    setPlaysFailed(false);
     setDeleteFailed(false);
     (async () => {
-      try {
-        const data = await practiceSessionService.getAll(selectedDate);
-        if (!cancelled) setDaySessions(data ?? []);
-      } catch {
-        if (!cancelled) setDayFailed(true);
-      }
+      const [sessionsResult, playsResult] = await Promise.allSettled([
+        practiceSessionService.getAll(selectedDate),
+        practiceSessionService.getDayPlays(selectedDate),
+      ]);
+      if (cancelled) return;
+      if (sessionsResult.status === 'fulfilled') setDaySessions(sessionsResult.value ?? []);
+      else setDayFailed(true);
+      if (playsResult.status === 'fulfilled') setDayPlays(playsResult.value ?? []);
+      else setPlaysFailed(true);
     })();
     return () => { cancelled = true; };
   }, [selectedDate]);
@@ -144,9 +155,16 @@ function MyHeatmapPage() {
   const labelFor = (date: string): string => {
     const day = dayByDate.get(date);
     if (!day) return `${date} — no practice`;
+    const playCount = day.playCount ?? 0;
+    const playsPart = `${playCount} play${playCount === 1 ? '' : 's'}`;
+    // Play-only day (FR22 retro-import): presence, not a session
+    if (day.sessionCount === 0) {
+      return playCount > 0 ? `${date} — played (${playsPart})` : `${date} — no practice`;
+    }
     const minutesPart = `${day.totalMinutes} minute${day.totalMinutes === 1 ? '' : 's'}`;
     const sessionsPart = `${day.sessionCount} session${day.sessionCount === 1 ? '' : 's'}`;
-    return `${date} — ${minutesPart}, ${sessionsPart}`;
+    const base = `${date} — ${minutesPart}, ${sessionsPart}`;
+    return playCount > 0 ? `${base}, ${playsPart}` : base;
   };
 
   // Roving tabindex (NFR6), APG grid pattern: the DOM rows are weekdays, so
@@ -325,14 +343,20 @@ function MyHeatmapPage() {
             <h3 className="text-lg font-semibold text-gray-900 dark:text-gray-100">{selectedDate}</h3>
             <div role="status" aria-label="Day detail status" className="text-sm text-gray-600 dark:text-gray-400">
               {dayFailed
-                ? 'Day detail could not be loaded.'
+                // Loaded plays still render below — only claim a total loss
+                // when there is truly nothing to show
+                ? dayPlays !== null && dayPlays.length > 0
+                  ? 'Sessions could not be loaded.'
+                  : 'Day detail could not be loaded.'
                 : deleteFailed
                   ? 'Session could not be deleted.'
-                  : daySessions === null
-                    ? 'Loading...'
-                    : daySessions.length === 0
-                      ? `No practice on ${selectedDate}.`
-                      : null}
+                  : playsFailed
+                    ? 'Plays could not be loaded.'
+                    : daySessions === null || dayPlays === null
+                      ? 'Loading...'
+                      : daySessions.length === 0 && dayPlays.length === 0
+                        ? `No practice on ${selectedDate}.`
+                        : null}
             </div>
             {/* No dead-end CTA: a future day cannot be logged (the target form
                 rejects future dates), so the link is simply not offered */}
@@ -387,6 +411,22 @@ function MyHeatmapPage() {
                         ))}
                       </ul>
                     )}
+                  </li>
+                ))}
+              </ul>
+            )}
+            {/* Projected play history (FR22), below the real sessions:
+                presence markers, deliberately more sober than session cards —
+                no duration, no actions (a play is not an editable session).
+                Independent of dayFailed: loaded plays survive a sessions
+                failure. */}
+            {dayPlays !== null && dayPlays.length > 0 && (
+              <ul aria-label="Day plays" className="space-y-1">
+                {dayPlays.map(play => (
+                  <li key={play.uid} className="text-sm text-gray-700 dark:text-gray-300 pl-3 border-l-2 border-gray-200 dark:border-gray-700 break-words">
+                    <span className="font-medium">{play.title}</span>
+                    {play.instrumentType ? <span className="text-gray-500 dark:text-gray-400"> — {play.instrumentType}</span> : null}
+                    <span className="text-gray-500 dark:text-gray-400 italic"> · Played</span>
                   </li>
                 ))}
               </ul>

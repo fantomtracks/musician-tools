@@ -8,6 +8,7 @@ jest.mock('../services/practiceSessionService', () => ({
   practiceSessionService: {
     getHeatmap: jest.fn(),
     getAll: jest.fn(),
+    getDayPlays: jest.fn(),
     remove: jest.fn(),
   },
 }));
@@ -23,6 +24,7 @@ beforeEach(() => {
   jest.clearAllMocks();
   mockedService.getHeatmap.mockResolvedValue([]);
   mockedService.getAll.mockResolvedValue([]);
+  mockedService.getDayPlays.mockResolvedValue([]);
 });
 
 // <Link> requires a Router context since 3.2
@@ -311,4 +313,101 @@ test('a failed day detail shows an error, not misleading content', async () => {
 
   expect(await screen.findByText('Day detail could not be loaded.')).toBeInTheDocument();
   expect(screen.queryByText(`No practice on ${YEAR}-02-15.`)).not.toBeInTheDocument();
+});
+
+test('a play-only day lights up with a played label and lists its plays (FR22/AC1/AC4)', async () => {
+  mockedService.getHeatmap.mockResolvedValue([
+    { date: `${YEAR}-02-15`, totalMinutes: 0, sessionCount: 0, playCount: 2 },
+  ]);
+  mockedService.getDayPlays.mockResolvedValue([
+    { uid: 'p1', songUid: 'song-1', title: 'Sweet Child', instrumentType: 'Guitar', playedAt: `${YEAR}-02-15T09:00:00.000Z` },
+    { uid: 'p2', songUid: 'song-2', title: 'Money', instrumentType: null, playedAt: `${YEAR}-02-15T20:00:00.000Z` },
+  ]);
+
+  renderPage();
+  fireEvent.click(await screen.findByLabelText(`${YEAR}-02-15 — played (2 plays)`));
+
+  expect(mockedService.getDayPlays).toHaveBeenCalledWith(`${YEAR}-02-15`);
+  const plays = await screen.findByRole('list', { name: 'Day plays' });
+  expect(within(plays).getByText('Sweet Child')).toBeInTheDocument();
+  expect(within(plays).getByText('Money')).toBeInTheDocument();
+  expect(within(plays).getByText(/Guitar/)).toBeInTheDocument();
+  // Plays are presence, not sessions: marked "Played", no duration, no actions
+  expect(within(plays).getAllByText(/Played/)).toHaveLength(2);
+  expect(within(plays).queryByText(/min/)).not.toBeInTheDocument();
+  expect(within(plays).queryByRole('button')).not.toBeInTheDocument();
+  expect(within(plays).queryByRole('link')).not.toBeInTheDocument();
+  // Not an empty day — and logging a real session remains offered
+  expect(screen.queryByText(`No practice on ${YEAR}-02-15.`)).not.toBeInTheDocument();
+  expect(screen.getByRole('link', { name: 'Log a session for this day' })).toBeInTheDocument();
+});
+
+test('a mixed day shows sessions AND plays, with both in the cell label (FR22/AC2)', async () => {
+  mockedService.getHeatmap.mockResolvedValue([
+    { date: `${YEAR}-03-10`, totalMinutes: 40, sessionCount: 1, playCount: 1 },
+  ]);
+  mockedService.getAll.mockResolvedValue([
+    { uid: 's1', date: `${YEAR}-03-10`, instrumentType: 'Bass', durationMinutes: 40, items: [] },
+  ]);
+  mockedService.getDayPlays.mockResolvedValue([
+    { uid: 'p1', songUid: 'song-1', title: 'Money', instrumentType: null, playedAt: `${YEAR}-03-10T09:00:00.000Z` },
+  ]);
+
+  renderPage();
+  fireEvent.click(await screen.findByLabelText(`${YEAR}-03-10 — 40 minutes, 1 session, 1 play`));
+
+  const sessions = await screen.findByRole('list', { name: 'Day sessions' });
+  expect(within(sessions).getByText('Bass')).toBeInTheDocument();
+  const plays = await screen.findByRole('list', { name: 'Day plays' });
+  expect(within(plays).getByText('Money')).toBeInTheDocument();
+  // A day with a real session does not offer the empty-day log link
+  expect(screen.queryByRole('link', { name: 'Log a session for this day' })).not.toBeInTheDocument();
+});
+
+test('a failed plays fetch keeps the sessions and says so (partial failure)', async () => {
+  mockedService.getAll.mockResolvedValue([
+    { uid: 's1', date: `${YEAR}-03-10`, instrumentType: 'Bass', durationMinutes: 40, items: [] },
+  ]);
+  mockedService.getDayPlays.mockRejectedValue(new Error('Failed to fetch plays'));
+
+  renderPage();
+  fireEvent.click(await screen.findByLabelText(`${YEAR}-03-10 — no practice`));
+
+  expect(await screen.findByText('Plays could not be loaded.')).toBeInTheDocument();
+  expect(within(screen.getByRole('list', { name: 'Day sessions' })).getByText('Bass')).toBeInTheDocument();
+});
+
+test('a failed sessions fetch keeps the loaded plays and says so (the other partial failure)', async () => {
+  mockedService.getAll.mockRejectedValue(new Error('Failed to fetch sessions'));
+  mockedService.getDayPlays.mockResolvedValue([
+    { uid: 'p1', songUid: 'song-1', title: 'Money', instrumentType: null, playedAt: `${YEAR}-03-10T09:00:00.000Z` },
+  ]);
+
+  renderPage();
+  fireEvent.click(await screen.findByLabelText(`${YEAR}-03-10 — no practice`));
+
+  expect(await screen.findByText('Sessions could not be loaded.')).toBeInTheDocument();
+  expect(within(screen.getByRole('list', { name: 'Day plays' })).getByText('Money')).toBeInTheDocument();
+});
+
+test('a slow plays response for a previous day never paints the newly selected day', async () => {
+  let resolveSlowPlays!: (plays: { uid: string; songUid: string; title: string; instrumentType: null; playedAt: string }[]) => void;
+  // Day A's plays hang; day B's resolve instantly
+  mockedService.getDayPlays
+    .mockImplementationOnce(() => new Promise(resolve => { resolveSlowPlays = resolve; }))
+    .mockResolvedValue([]);
+
+  renderPage();
+  fireEvent.click(await screen.findByLabelText(`${YEAR}-02-15 — no practice`));
+  fireEvent.click(screen.getByLabelText(`${YEAR}-02-16 — no practice`));
+  expect(await screen.findByText(`No practice on ${YEAR}-02-16.`)).toBeInTheDocument();
+
+  // Day A's plays land AFTER day B was selected — they must be dropped
+  await act(async () => {
+    resolveSlowPlays([
+      { uid: 'p1', songUid: 'song-1', title: 'Ghost Song', instrumentType: null, playedAt: `${YEAR}-02-15T09:00:00.000Z` },
+    ]);
+  });
+  expect(screen.queryByText('Ghost Song')).not.toBeInTheDocument();
+  expect(screen.getByText(`No practice on ${YEAR}-02-16.`)).toBeInTheDocument();
 });

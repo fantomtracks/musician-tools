@@ -56,7 +56,10 @@ export function computeLevels(activeDays: HeatmapDay[]): (date: string) => numbe
 
   return (date: string): number => {
     const day = byDate.get(date);
-    if (!day || day.sessionCount === 0) return 0;
+    // A day lights up with sessions OR projected plays (FR22 retro-import);
+    // play-only days fall through to the minimal level — quantiles only ever
+    // see session minutes, so plays can never inflate the scale
+    if (!day || (day.sessionCount === 0 && sanitize(day.playCount ?? 0) === 0)) return 0;
     const minutes = sanitize(day.totalMinutes);
     if (minutes <= 0 || positives.length === 0) return 1;
     // The personal best is always the brightest green: a perfectly consistent
