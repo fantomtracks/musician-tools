@@ -6,6 +6,7 @@ import RegisterPage from './pages/RegisterPage';
 import MyInstrumentsPage from './pages/MyInstrumentsPage';
 import MyPlaylistsPage from './pages/MyPlaylistsPage';
 import MyTopicsPage from './pages/MyTopicsPage';
+import MySessionsPage from './pages/MySessionsPage';
 import Header from './components/Header';
 import Footer from './components/Footer';
 
@@ -72,6 +73,10 @@ function App() {
           <Route
             path="/my-topics"
             element={isAuthenticated ? <MyTopicsPage /> : <Navigate to="/login" replace />}
+          />
+          <Route
+            path="/my-sessions"
+            element={isAuthenticated ? <MySessionsPage /> : <Navigate to="/login" replace />}
           />
           <Route path="/login" element={!isAuthenticated ? <LoginPage /> : <Navigate to="/songs" replace />} />
           <Route
