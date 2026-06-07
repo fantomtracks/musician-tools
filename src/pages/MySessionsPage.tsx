@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from 'react';
-import { practiceSessionService, type CreatePracticeSessionDTO, type CreateSessionItemDTO } from '../services/practiceSessionService';
+import { practiceSessionService, type CreatePracticeSessionDTO, type CreateSessionItemDTO, type PracticeSession } from '../services/practiceSessionService';
 import { songService, type Song } from '../services/songService';
 import { topicService, type Topic } from '../services/topicService';
 import { instrumentTypeOptions } from '../constants/instrumentTypes';
@@ -10,6 +10,21 @@ type EntryDraft = {
   minutes: string;
   note: string;
 };
+
+// Anti-chronological: FR19 client-local date first (a retroactive session
+// belongs at its real day), createdAt breaks same-day ties, uid makes the
+// order fully deterministic. A session missing createdAt (fresh local insert)
+// counts as the newest of its day, matching the server's eventual order.
+const NEWEST = '9999-12-31T23:59:59.999Z';
+function sortSessions(list: PracticeSession[]): PracticeSession[] {
+  return [...list].sort((a, b) => {
+    if (a.date !== b.date) return a.date < b.date ? 1 : -1;
+    const aCreated = a.createdAt ?? NEWEST;
+    const bCreated = b.createdAt ?? NEWEST;
+    if (aCreated !== bCreated) return aCreated < bCreated ? 1 : -1;
+    return a.uid < b.uid ? 1 : a.uid > b.uid ? -1 : 0;
+  });
+}
 
 // The session day is the device's LOCAL date (FR19) — toISOString() would give
 // the UTC date, which is yesterday around midnight in timezones ahead of UTC.
@@ -30,6 +45,8 @@ function MySessionsPage() {
   const [entries, setEntries] = useState<EntryDraft[]>([]);
   const [songs, setSongs] = useState<Song[]>([]);
   const [topics, setTopics] = useState<Topic[]>([]);
+  const [sessions, setSessions] = useState<PracticeSession[] | null>(null);
+  const [sessionsFailed, setSessionsFailed] = useState(false);
   const [durationTouched, setDurationTouched] = useState(false);
   const entryKeyRef = useRef(0);
 
@@ -45,14 +62,27 @@ function MySessionsPage() {
     (async () => {
       // allSettled: one failing catalog must not discard the other — the form
       // stays usable (possibly with a partial picker)
-      const [songsResult, topicsResult] = await Promise.allSettled([
+      const [songsResult, topicsResult, sessionsResult] = await Promise.allSettled([
         songService.getAllSongs(),
         topicService.getAll(),
+        practiceSessionService.getAll(),
       ]);
       if (songsResult.status === 'fulfilled') setSongs(songsResult.value ?? []);
       if (topicsResult.status === 'fulfilled') setTopics(topicsResult.value ?? []);
       if (songsResult.status === 'rejected' || topicsResult.status === 'rejected') {
         setError('Failed to load songs and topics');
+      }
+      if (sessionsResult.status === 'fulfilled') {
+        const fetched = sessionsResult.value ?? [];
+        // Merge instead of overwrite: a session logged while this request was
+        // in flight must not vanish when the (stale) response lands
+        setSessions(prev => {
+          if (prev === null) return sortSessions(fetched);
+          const fetchedUids = new Set(fetched.map(s => s.uid));
+          return sortSessions([...prev.filter(s => !fetchedUids.has(s.uid)), ...fetched]);
+        });
+      } else {
+        setSessionsFailed(true);
       }
     })();
   }, []);
@@ -121,7 +151,12 @@ function MySessionsPage() {
         note: note.trim() || undefined,
         items: items.length > 0 ? items : undefined,
       };
-      await practiceSessionService.create(payload);
+      const created = await practiceSessionService.create(payload);
+      // Local insert + re-sort: a retroactive session must land at its real
+      // chronological place, not on top of the list. A previously failed
+      // history load must not keep hiding sessions logged since.
+      setSessions(prev => sortSessions([created, ...(prev ?? [])]));
+      setSessionsFailed(false);
       setDuration('');
       setDurationTouched(false);
       setNote('');
@@ -144,6 +179,7 @@ function MySessionsPage() {
           changes, or screen readers may never announce the toast */}
       <div
         role="status"
+        aria-label="Notification"
         className={toastMessage
           ? 'fixed bottom-6 right-6 z-50 rounded-lg bg-green-600 dark:bg-green-700 text-white px-4 py-2 shadow-lg'
           : 'sr-only'}
@@ -315,6 +351,52 @@ function MySessionsPage() {
               ))}
             </fieldset>
           </form>
+        </div>
+
+        <div className="card-base glass-effect p-4 sm:p-5 space-y-4">
+          <h2 className="text-xl font-semibold text-gray-900 dark:text-gray-100">History</h2>
+          {/* Always-mounted live region: state transitions (loading → error/empty)
+              must be announced to assistive tech */}
+          <div role="status" aria-label="History status" className="text-sm text-gray-600 dark:text-gray-400">
+            {sessionsFailed
+              ? 'Sessions could not be loaded.'
+              : sessions === null
+                ? 'Loading...'
+                : sessions.length === 0
+                  ? 'No sessions logged yet.'
+                  : null}
+          </div>
+          {!sessionsFailed && sessions !== null && sessions.length > 0 && (
+            <ul aria-label="Session history" className="space-y-3">
+              {sessions.map(session => (
+                <li key={session.uid} className="rounded-lg border border-gray-200 dark:border-gray-700 p-3 space-y-2">
+                  <div className="flex flex-wrap items-baseline gap-x-3 gap-y-1">
+                    {/* The DATEONLY string is displayed verbatim: new Date('YYYY-MM-DD')
+                        would parse as UTC midnight and shift the day in some timezones */}
+                    <span className="font-semibold">{session.date}</span>
+                    <span className="text-sm text-gray-600 dark:text-gray-400">{session.instrumentType}</span>
+                    {session.durationMinutes ? (
+                      <span className="text-sm text-gray-600 dark:text-gray-400">{session.durationMinutes} min</span>
+                    ) : null}
+                  </div>
+                  {session.note && (
+                    <p className="text-sm text-gray-700 dark:text-gray-300 whitespace-pre-wrap break-words">{session.note}</p>
+                  )}
+                  {session.items && session.items.length > 0 && (
+                    <ul className="space-y-1">
+                      {session.items.map(item => (
+                        <li key={item.uid} className="text-sm text-gray-700 dark:text-gray-300 pl-3 border-l-2 border-gray-200 dark:border-gray-700 break-words">
+                          <span className="font-medium">{item.label}</span>
+                          {item.minutes ? <span className="text-gray-500 dark:text-gray-400"> — {item.minutes} min</span> : null}
+                          {item.note ? <span className="text-gray-500 dark:text-gray-400 italic"> · {item.note}</span> : null}
+                        </li>
+                      ))}
+                    </ul>
+                  )}
+                </li>
+              ))}
+            </ul>
+          )}
         </div>
       </div>
     </div>

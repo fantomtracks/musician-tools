@@ -28,6 +28,36 @@ function maxAllowedDate() {
   return d.toISOString().slice(0, 10);
 }
 
+// GET all practice sessions for logged-in user, anti-chronological.
+// Primary sort on the FR19 client-local date (a retroactive session belongs at
+// its real day), createdAt breaks same-day ties. No pagination at this stage.
+const getAllPracticeSessions = async (req, res, next) => {
+  try {
+    const userId = req.session.user;
+    if (!userId) {
+      return next(createError(401, 'Unauthorized'));
+    }
+
+    const sessions = await PracticeSession.findAll({
+      where: { userUid: userId },
+      include: [{ model: SessionItem, as: 'items' }],
+      order: [
+        ['date', 'DESC'],
+        ['createdAt', 'DESC'],
+        // uid tiebreaks: bulkCreate stamps identical timestamps on a batch,
+        // and same-ms session inserts are possible — order must be stable
+        ['uid', 'DESC'],
+        [{ model: SessionItem, as: 'items' }, 'createdAt', 'ASC'],
+        [{ model: SessionItem, as: 'items' }, 'uid', 'ASC']
+      ]
+    });
+    res.json(sessions);
+  } catch (error) {
+    logger.error('Error fetching practice sessions:', error);
+    next(createError(500, 'Error fetching practice sessions'));
+  }
+};
+
 // POST create new practice session
 const createPracticeSession = async (req, res, next) => {
   try {
@@ -210,5 +240,6 @@ const createPracticeSession = async (req, res, next) => {
 };
 
 module.exports = {
+  getAllPracticeSessions,
   createPracticeSession,
 };

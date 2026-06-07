@@ -6,6 +6,7 @@ const authsess = require('../middleware/authsess');
 router.use(express.json());
 
 // All session routes require authentication
+router.get('/', authsess, practiceSessionController.getAllPracticeSessions);
 router.post('/', authsess, practiceSessionController.createPracticeSession);
 
 module.exports = router;

@@ -1,10 +1,11 @@
-import { render, screen, fireEvent, waitFor } from '@testing-library/react';
+import { render, screen, fireEvent, waitFor, within } from '@testing-library/react';
 import MySessionsPage from '../pages/MySessionsPage';
 import { practiceSessionService, type PracticeSession } from '../services/practiceSessionService';
 
 jest.mock('../services/practiceSessionService', () => ({
   practiceSessionService: {
     create: jest.fn(),
+    getAll: jest.fn(),
   },
 }));
 
@@ -44,6 +45,7 @@ beforeEach(() => {
   mockedTopicService.getAll.mockResolvedValue([
     { uid: TOPIC_UID, name: 'Pentatonic scale' },
   ]);
+  mockedService.getAll.mockResolvedValue([]);
 });
 
 async function addEntry(index: number, ref: string, minutes?: string) {
@@ -206,8 +208,9 @@ test('typed duration "0" is sent to the server, not silently dropped', async () 
 test('the toast live region is mounted before any submission', () => {
   render(<MySessionsPage />);
 
-  expect(screen.getByRole('status')).toBeInTheDocument();
-  expect(screen.getByRole('status')).toBeEmptyDOMElement();
+  const toast = screen.getByRole('status', { name: 'Notification' });
+  expect(toast).toBeInTheDocument();
+  expect(toast).toBeEmptyDOMElement();
 });
 
 test('Add entry shows a picker with Songs and Topics optgroups', async () => {
@@ -324,6 +327,164 @@ test('FR13: clearing a manual override re-arms the auto-sum', async () => {
 
   fireEvent.change(screen.getByLabelText('Duration'), { target: { value: '' } });
   expect(screen.getByLabelText('Duration')).toHaveValue(40);
+});
+
+test('the history lists sessions with date, instrument, duration, notes and entries', async () => {
+  mockedService.getAll.mockResolvedValue([
+    {
+      uid: 's1',
+      date: '2026-06-05',
+      instrumentType: 'Bass',
+      durationMinutes: 40,
+      note: 'great session',
+      items: [
+        { uid: 'i1', sessionUid: 's1', label: 'Sweet Child', minutes: 15, note: 'at 30 BPM' },
+        { uid: 'i2', sessionUid: 's1', label: 'Pentatonic scale', minutes: 25 },
+      ],
+    },
+  ]);
+
+  render(<MySessionsPage />);
+
+  const history = await screen.findByRole('list', { name: 'Session history' });
+  expect(within(history).getByText('2026-06-05')).toBeInTheDocument();
+  expect(within(history).getByText('Bass')).toBeInTheDocument();
+  expect(within(history).getByText('40 min')).toBeInTheDocument();
+  expect(within(history).getByText('great session')).toBeInTheDocument();
+  expect(within(history).getByText(/Sweet Child/)).toBeInTheDocument();
+  expect(within(history).getByText(/15 min/)).toBeInTheDocument();
+  expect(within(history).getByText(/at 30 BPM/)).toBeInTheDocument();
+  expect(within(history).getByText(/Pentatonic scale/)).toBeInTheDocument();
+});
+
+test('shows the empty history state', async () => {
+  render(<MySessionsPage />);
+
+  expect(await screen.findByText('No sessions logged yet.')).toBeInTheDocument();
+});
+
+test('a failed history load does not pretend the history is empty', async () => {
+  mockedService.getAll.mockRejectedValue(new Error('Failed to fetch sessions'));
+
+  render(<MySessionsPage />);
+
+  expect(await screen.findByText('Sessions could not be loaded.')).toBeInTheDocument();
+  expect(screen.queryByText('No sessions logged yet.')).not.toBeInTheDocument();
+});
+
+test('a newly logged session appears in the history', async () => {
+  mockedService.create.mockResolvedValue({
+    uid: 's-new',
+    date: todayLocalDate(),
+    instrumentType: 'Bass',
+    items: [{ uid: 'i1', sessionUid: 's-new', label: 'Sweet Child' }],
+  });
+
+  render(<MySessionsPage />);
+  await screen.findByText('No sessions logged yet.');
+
+  fireEvent.change(screen.getByLabelText('Instrument'), { target: { value: 'Bass' } });
+  fireEvent.click(screen.getByRole('button', { name: 'Log session' }));
+
+  expect(await screen.findByText(todayLocalDate())).toBeInTheDocument();
+  expect(screen.getByText(/Sweet Child/)).toBeInTheDocument();
+  expect(screen.queryByText('No sessions logged yet.')).not.toBeInTheDocument();
+});
+
+test('a retroactive session is inserted at its chronological place, not on top', async () => {
+  const yesterday = (() => {
+    const d = new Date();
+    d.setDate(d.getDate() - 1);
+    return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+  })();
+  mockedService.getAll.mockResolvedValue([
+    { uid: 's-today', date: todayLocalDate(), instrumentType: 'Guitar', items: [] },
+  ]);
+  mockedService.create.mockResolvedValue({
+    uid: 's-old', date: yesterday, instrumentType: 'Bass', items: [],
+  });
+
+  render(<MySessionsPage />);
+  await screen.findByText(todayLocalDate());
+
+  fireEvent.change(screen.getByLabelText('Instrument'), { target: { value: 'Bass' } });
+  fireEvent.change(screen.getByLabelText('Date'), { target: { value: yesterday } });
+  fireEvent.click(screen.getByRole('button', { name: 'Log session' }));
+
+  const history = await screen.findByRole('list', { name: 'Session history' });
+  await screen.findByText(yesterday);
+  const text = history.textContent || '';
+  expect(text.indexOf(todayLocalDate())).toBeGreaterThanOrEqual(0);
+  expect(text.indexOf(yesterday)).toBeGreaterThan(text.indexOf(todayLocalDate()));
+});
+
+test('a slow initial history load does not clobber a session logged meanwhile', async () => {
+  let resolveGetAll!: (value: never[]) => void;
+  mockedService.getAll.mockReturnValue(new Promise(resolve => { resolveGetAll = resolve; }));
+  mockedService.create.mockResolvedValue({
+    uid: 's-new', date: todayLocalDate(), instrumentType: 'Bass', items: [],
+  });
+
+  render(<MySessionsPage />);
+
+  fireEvent.change(screen.getByLabelText('Instrument'), { target: { value: 'Bass' } });
+  fireEvent.click(screen.getByRole('button', { name: 'Log session' }));
+  await screen.findByText(todayLocalDate());
+
+  // The stale GET (computed before the create) finally lands
+  resolveGetAll([]);
+  await waitFor(() => {
+    expect(screen.getByText(todayLocalDate())).toBeInTheDocument();
+  });
+});
+
+test('a successful create recovers the history from a failed initial load', async () => {
+  mockedService.getAll.mockRejectedValue(new Error('Failed to fetch sessions'));
+  mockedService.create.mockResolvedValue({
+    uid: 's-new', date: todayLocalDate(), instrumentType: 'Bass', items: [],
+  });
+
+  render(<MySessionsPage />);
+  await screen.findByText('Sessions could not be loaded.');
+
+  fireEvent.change(screen.getByLabelText('Instrument'), { target: { value: 'Bass' } });
+  fireEvent.click(screen.getByRole('button', { name: 'Log session' }));
+
+  expect(await screen.findByText(todayLocalDate())).toBeInTheDocument();
+  expect(screen.queryByText('Sessions could not be loaded.')).not.toBeInTheDocument();
+});
+
+test('the initial history is sorted locally even if the server order regresses', async () => {
+  mockedService.getAll.mockResolvedValue([
+    { uid: 's-old', date: '2026-06-01', instrumentType: 'Bass', items: [] },
+    { uid: 's-recent', date: '2026-06-05', instrumentType: 'Guitar', items: [] },
+  ]);
+
+  render(<MySessionsPage />);
+
+  const history = await screen.findByRole('list', { name: 'Session history' });
+  const text = history.textContent || '';
+  expect(text.indexOf('2026-06-05')).toBeLessThan(text.indexOf('2026-06-01'));
+});
+
+test('a same-day session created without createdAt sorts as the newest of its day', async () => {
+  mockedService.getAll.mockResolvedValue([
+    { uid: 's-morning', date: todayLocalDate(), instrumentType: 'Guitar', note: 'morning run', createdAt: '2026-06-07T08:00:00Z', items: [] },
+  ]);
+  mockedService.create.mockResolvedValue({
+    uid: 's-fresh', date: todayLocalDate(), instrumentType: 'Bass', note: 'fresh run', items: [],
+  });
+
+  render(<MySessionsPage />);
+  await screen.findByText('morning run');
+
+  fireEvent.change(screen.getByLabelText('Instrument'), { target: { value: 'Bass' } });
+  fireEvent.click(screen.getByRole('button', { name: 'Log session' }));
+
+  const history = await screen.findByRole('list', { name: 'Session history' });
+  await screen.findByText('fresh run');
+  const text = history.textContent || '';
+  expect(text.indexOf('fresh run')).toBeLessThan(text.indexOf('morning run'));
 });
 
 test('a session with zero entries stays valid (no items in payload)', async () => {

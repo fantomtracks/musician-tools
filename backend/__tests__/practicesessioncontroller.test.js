@@ -2,6 +2,7 @@ jest.mock('../models', () => {
   return {
     PracticeSession: {
       create: jest.fn(async (data) => ({ ...data, uid: 'session-uid' })),
+      findAll: jest.fn(async () => []),
     },
     SessionItem: {
       bulkCreate: jest.fn(async (rows) => rows.map((row, i) => ({ ...row, uid: `item-${i}` }))),
@@ -278,6 +279,54 @@ describe('practicesessioncontroller', () => {
 
       expect(PracticeSession.create).not.toHaveBeenCalled();
       expect(next.mock.calls[0][0].status).toBe(401);
+    });
+  });
+
+  describe('getAllPracticeSessions', () => {
+    test('returns the user sessions with items, anti-chronologically ordered', async () => {
+      const sessions = [{ uid: 's1', date: '2026-06-07', items: [] }];
+      PracticeSession.findAll.mockResolvedValue(sessions);
+
+      const req = { session: { user: 'user-1' } };
+      const res = mockRes();
+      const next = mockNext();
+
+      await controller.getAllPracticeSessions(req, res, next);
+
+      expect(PracticeSession.findAll).toHaveBeenCalledWith({
+        where: { userUid: 'user-1' },
+        include: [{ model: SessionItem, as: 'items' }],
+        order: [
+          ['date', 'DESC'],
+          ['createdAt', 'DESC'],
+          ['uid', 'DESC'],
+          [{ model: SessionItem, as: 'items' }, 'createdAt', 'ASC'],
+          [{ model: SessionItem, as: 'items' }, 'uid', 'ASC'],
+        ],
+      });
+      expect(res.json).toHaveBeenCalledWith(sessions);
+      expect(next).not.toHaveBeenCalled();
+    });
+
+    test('rejects unauthenticated requests with 401', async () => {
+      const req = { session: {} };
+      const next = mockNext();
+
+      await controller.getAllPracticeSessions(req, mockRes(), next);
+
+      expect(PracticeSession.findAll).not.toHaveBeenCalled();
+      expect(next.mock.calls[0][0].status).toBe(401);
+    });
+
+    test('maps unexpected findAll failures to 500', async () => {
+      PracticeSession.findAll.mockRejectedValueOnce(new Error('db down'));
+
+      const req = { session: { user: 'user-1' } };
+      const next = mockNext();
+
+      await controller.getAllPracticeSessions(req, mockRes(), next);
+
+      expect(next.mock.calls[0][0].status).toBe(500);
     });
   });
 

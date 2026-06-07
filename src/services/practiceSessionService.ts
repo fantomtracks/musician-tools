@@ -36,6 +36,13 @@ export type CreatePracticeSessionDTO = Omit<PracticeSession, 'uid' | 'items' | '
 const API_BASE = '/api';
 
 export const practiceSessionService = {
+  async getAll(): Promise<PracticeSession[]> {
+    const res = await fetch(`${API_BASE}/sessions`, {
+      credentials: 'include'
+    });
+    if (!res.ok) throw new Error('Failed to fetch sessions');
+    return res.json();
+  },
   async create(payload: CreatePracticeSessionDTO): Promise<PracticeSession> {
     const res = await fetch(`${API_BASE}/sessions`, {
       method: 'POST',
