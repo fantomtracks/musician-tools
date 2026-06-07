@@ -39,8 +39,20 @@ const getAllPracticeSessions = async (req, res, next) => {
       return next(createError(401, 'Unauthorized'));
     }
 
+    // Optional day filter (3.2 heatmap day detail): same list, one day
+    const dateFilter = req.query?.date;
+    if (dateFilter !== undefined) {
+      if (typeof dateFilter !== 'string' || !DATE_PATTERN.test(dateFilter) || !isValidCalendarDate(dateFilter)) {
+        return next(createError(400, 'Date must be a valid YYYY-MM-DD date'));
+      }
+    }
+    const where = { userUid: userId };
+    if (dateFilter) {
+      where.date = dateFilter;
+    }
+
     const sessions = await PracticeSession.findAll({
-      where: { userUid: userId },
+      where,
       include: [{ model: SessionItem, as: 'items' }],
       order: [
         ['date', 'DESC'],

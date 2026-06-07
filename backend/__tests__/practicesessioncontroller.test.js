@@ -323,6 +323,34 @@ describe('practicesessioncontroller', () => {
       expect(next.mock.calls[0][0].status).toBe(401);
     });
 
+    test('filters by day when a valid date query param is provided (3.2 day detail)', async () => {
+      PracticeSession.findAll.mockResolvedValueOnce([]);
+
+      await controller.getAllPracticeSessions(
+        { session: { user: 'user-1' }, query: { date: '2026-03-10' } },
+        mockRes(),
+        mockNext()
+      );
+
+      expect(PracticeSession.findAll).toHaveBeenCalledWith(
+        expect.objectContaining({ where: { userUid: 'user-1', date: '2026-03-10' } })
+      );
+    });
+
+    test('rejects an invalid date query param with 400', async () => {
+      for (const date of ['10/03/2026', '2026-13-45', 'abc']) {
+        const next = mockNext();
+        await controller.getAllPracticeSessions(
+          { session: { user: 'user-1' }, query: { date } },
+          mockRes(),
+          next
+        );
+
+        expect(PracticeSession.findAll).not.toHaveBeenCalled();
+        expect(next.mock.calls[0][0].status).toBe(400);
+      }
+    });
+
     test('maps unexpected findAll failures to 500', async () => {
       PracticeSession.findAll.mockRejectedValueOnce(new Error('db down'));
 

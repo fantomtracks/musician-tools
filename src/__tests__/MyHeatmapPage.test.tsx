@@ -1,11 +1,14 @@
-import { render, screen, fireEvent, within, act } from '@testing-library/react';
+import { render, screen, fireEvent, within, act, waitFor } from '@testing-library/react';
+import { MemoryRouter } from 'react-router-dom';
 import MyHeatmapPage from '../pages/MyHeatmapPage';
 import { practiceSessionService } from '../services/practiceSessionService';
-import { buildYearGrid } from '../utils/heatmap';
+import { buildYearGrid, formatLocalDate } from '../utils/heatmap';
 
 jest.mock('../services/practiceSessionService', () => ({
   practiceSessionService: {
     getHeatmap: jest.fn(),
+    getAll: jest.fn(),
+    remove: jest.fn(),
   },
 }));
 
@@ -14,14 +17,21 @@ const mockedService = practiceSessionService as jest.Mocked<typeof practiceSessi
 const YEAR = new Date().getFullYear();
 const isLeap = (YEAR % 4 === 0 && YEAR % 100 !== 0) || YEAR % 400 === 0;
 const DAYS_IN_YEAR = isLeap ? 366 : 365;
+const TODAY = formatLocalDate(new Date());
 
 beforeEach(() => {
   jest.clearAllMocks();
   mockedService.getHeatmap.mockResolvedValue([]);
+  mockedService.getAll.mockResolvedValue([]);
 });
 
+// <Link> requires a Router context since 3.2
+function renderPage() {
+  return render(<MemoryRouter><MyHeatmapPage /></MemoryRouter>);
+}
+
 test('renders one gridcell per day of the current year', async () => {
-  render(<MyHeatmapPage />);
+  renderPage();
 
   const grid = await screen.findByRole('grid', { name: `Practice heatmap ${YEAR}` });
   expect(within(grid).getAllByRole('gridcell')).toHaveLength(DAYS_IN_YEAR);
@@ -34,7 +44,7 @@ test('active days carry textual alternatives, empty days stay neutral (FR18/NFR6
     { date: `${YEAR}-03-11`, totalMinutes: 1, sessionCount: 1 },
   ]);
 
-  render(<MyHeatmapPage />);
+  renderPage();
 
   expect(await screen.findByLabelText(`${YEAR}-03-10 — 120 minutes, 2 sessions`)).toBeInTheDocument();
   expect(screen.getByLabelText(`${YEAR}-03-11 — 1 minute, 1 session`)).toBeInTheDocument();
@@ -47,10 +57,10 @@ test('a zero-minute session day lights up at the minimal level (FR15)', async ()
     { date: `${YEAR}-03-11`, totalMinutes: 100, sessionCount: 1 },
   ]);
 
-  render(<MyHeatmapPage />);
+  renderPage();
 
   const minimal = await screen.findByLabelText(`${YEAR}-03-10 — 0 minutes, 1 session`);
-  expect(minimal.className).toContain('bg-green-200');
+  expect(minimal.className).toContain('bg-green-400');
   // An empty day stays neutral gray — never red, never aggressive
   const empty = screen.getByLabelText(`${YEAR}-01-15 — no practice`);
   expect(empty.className).toContain('bg-gray-200');
@@ -64,14 +74,14 @@ test('the relative scale puts the user top day at the highest level (FR15)', asy
     { date: `${YEAR}-03-04`, totalMinutes: 40, sessionCount: 1 },
   ]);
 
-  render(<MyHeatmapPage />);
+  renderPage();
 
   const top = await screen.findByLabelText(`${YEAR}-03-04 — 40 minutes, 1 session`);
   expect(top.className).toContain('bg-green-800');
 });
 
 test('FR20: with zero sessions the grid still renders with a neutral message', async () => {
-  render(<MyHeatmapPage />);
+  renderPage();
 
   expect(await screen.findByRole('grid', { name: `Practice heatmap ${YEAR}` })).toBeInTheDocument();
   expect(screen.getByText(`No practice logged in ${YEAR} yet.`)).toBeInTheDocument();
@@ -80,14 +90,14 @@ test('FR20: with zero sessions the grid still renders with a neutral message', a
 test('a failed load shows an error and no misleading grid', async () => {
   mockedService.getHeatmap.mockRejectedValue(new Error('Failed to fetch heatmap'));
 
-  render(<MyHeatmapPage />);
+  renderPage();
 
   expect(await screen.findByText('Heatmap could not be loaded.')).toBeInTheDocument();
   expect(screen.queryByRole('grid')).not.toBeInTheDocument();
 });
 
 test('arrow keys move the roving focus between day cells (NFR6)', async () => {
-  render(<MyHeatmapPage />);
+  renderPage();
 
   const grid = await screen.findByRole('grid', { name: `Practice heatmap ${YEAR}` });
   const firstCell = screen.getByLabelText(`${YEAR}-01-01 — no practice`);
@@ -123,4 +133,182 @@ test('arrow keys move the roving focus between day cells (NFR6)', async () => {
   expect(screen.getByLabelText(`${endDate} — no practice`)).toHaveFocus();
   fireEvent.keyDown(grid, { key: 'Home' });
   expect(first).toHaveFocus();
+});
+
+test('clicking an active day opens its detail with sessions, entries and an Edit link (FR16/AC4)', async () => {
+  mockedService.getHeatmap.mockResolvedValue([
+    { date: `${YEAR}-03-10`, totalMinutes: 40, sessionCount: 1 },
+  ]);
+  mockedService.getAll.mockResolvedValue([
+    {
+      uid: 's1', date: `${YEAR}-03-10`, instrumentType: 'Bass', durationMinutes: 40, note: 'solid run',
+      items: [{ uid: 'i1', sessionUid: 's1', label: 'Sweet Child', minutes: 15, note: 'at 30 BPM' }],
+    },
+  ]);
+
+  renderPage();
+  fireEvent.click(await screen.findByLabelText(`${YEAR}-03-10 — 40 minutes, 1 session`));
+
+  expect(mockedService.getAll).toHaveBeenCalledWith(`${YEAR}-03-10`);
+  const panel = await screen.findByRole('list', { name: 'Day sessions' });
+  expect(within(panel).getByText('Bass')).toBeInTheDocument();
+  expect(within(panel).getByText('40 min')).toBeInTheDocument();
+  expect(within(panel).getByText('solid run')).toBeInTheDocument();
+  expect(within(panel).getByText(/Sweet Child/)).toBeInTheDocument();
+  expect(within(panel).getByText(/at 30 BPM/)).toBeInTheDocument();
+
+  const editLink = within(panel).getByRole('link', { name: `Edit session of ${YEAR}-03-10` });
+  expect(editLink).toHaveAttribute('href', '/my-sessions?edit=s1');
+});
+
+test('Enter on the focused cell opens the day detail (FR16, keyboard)', async () => {
+  renderPage();
+
+  const grid = await screen.findByRole('grid', { name: `Practice heatmap ${YEAR}` });
+  const firstCell = screen.getByLabelText(`${YEAR}-01-01 — no practice`);
+  act(() => firstCell.focus());
+  fireEvent.keyDown(grid, { key: 'Enter' });
+
+  expect(await screen.findByText(`No practice on ${YEAR}-01-01.`)).toBeInTheDocument();
+});
+
+test('Space on the focused cell opens the day detail (APG activation)', async () => {
+  renderPage();
+
+  const grid = await screen.findByRole('grid', { name: `Practice heatmap ${YEAR}` });
+  const firstCell = screen.getByLabelText(`${YEAR}-01-01 — no practice`);
+  act(() => firstCell.focus());
+  fireEvent.keyDown(grid, { key: ' ' });
+
+  expect(await screen.findByText(`No practice on ${YEAR}-01-01.`)).toBeInTheDocument();
+});
+
+test('an empty day shows a neutral state with a pre-dated log link (FR18/AC5)', async () => {
+  renderPage();
+
+  // Today is always a valid (non-future) empty day whatever the run date
+  fireEvent.click(await screen.findByLabelText(`${TODAY} — no practice`));
+
+  expect(await screen.findByText(`No practice on ${TODAY}.`)).toBeInTheDocument();
+  const logLink = screen.getByRole('link', { name: 'Log a session for this day' });
+  expect(logLink).toHaveAttribute('href', `/my-sessions?date=${TODAY}`);
+});
+
+// Dec 31 is a strictly future day unless the suite runs on Dec 31 itself
+const FUTURE_DAY = `${YEAR}-12-31`;
+(TODAY === FUTURE_DAY ? test.skip : test)('a future empty day offers no dead-end log link', async () => {
+  renderPage();
+
+  fireEvent.click(await screen.findByLabelText(`${FUTURE_DAY} — no practice`));
+
+  expect(await screen.findByText(`No practice on ${FUTURE_DAY}.`)).toBeInTheDocument();
+  expect(screen.queryByRole('link', { name: 'Log a session for this day' })).not.toBeInTheDocument();
+});
+
+test('activating the selected day again closes the panel (mouse and keyboard)', async () => {
+  renderPage();
+
+  // Mouse toggle
+  const cell = await screen.findByLabelText(`${YEAR}-02-15 — no practice`);
+  fireEvent.click(cell);
+  expect(await screen.findByText(`No practice on ${YEAR}-02-15.`)).toBeInTheDocument();
+  fireEvent.click(cell);
+  expect(screen.queryByText(`No practice on ${YEAR}-02-15.`)).not.toBeInTheDocument();
+
+  // Keyboard toggle (Enter twice on the same focused cell)
+  const grid = screen.getByRole('grid', { name: `Practice heatmap ${YEAR}` });
+  act(() => cell.focus());
+  fireEvent.keyDown(grid, { key: 'Enter' });
+  expect(await screen.findByText(`No practice on ${YEAR}-02-15.`)).toBeInTheDocument();
+  fireEvent.keyDown(grid, { key: 'Enter' });
+  expect(screen.queryByText(`No practice on ${YEAR}-02-15.`)).not.toBeInTheDocument();
+});
+
+test('year navigation reloads the grid and resets the selection (FR17)', async () => {
+  renderPage();
+
+  fireEvent.click(await screen.findByLabelText(`${YEAR}-02-15 — no practice`));
+  await screen.findByText(`No practice on ${YEAR}-02-15.`);
+
+  fireEvent.click(screen.getByRole('button', { name: 'Previous year' }));
+
+  expect(await screen.findByRole('grid', { name: `Practice heatmap ${YEAR - 1}` })).toBeInTheDocument();
+  expect(mockedService.getHeatmap).toHaveBeenLastCalledWith(YEAR - 1);
+  expect(screen.queryByText(`No practice on ${YEAR}-02-15.`)).not.toBeInTheDocument();
+
+  // Back to the current year — Next is then disabled (no future sessions)
+  fireEvent.click(screen.getByRole('button', { name: 'Next year' }));
+  expect(await screen.findByRole('grid', { name: `Practice heatmap ${YEAR}` })).toBeInTheDocument();
+  expect(screen.getByRole('button', { name: 'Next year' })).toBeDisabled();
+});
+
+test('deleting a session from the day detail confirms, removes it and refreshes the grid', async () => {
+  mockedService.getHeatmap.mockResolvedValue([
+    { date: `${YEAR}-03-10`, totalMinutes: 40, sessionCount: 1 },
+  ]);
+  mockedService.getAll.mockResolvedValue([
+    { uid: 's1', date: `${YEAR}-03-10`, instrumentType: 'Bass', durationMinutes: 40, items: [] },
+  ]);
+  mockedService.remove.mockResolvedValue(undefined);
+
+  renderPage();
+  fireEvent.click(await screen.findByLabelText(`${YEAR}-03-10 — 40 minutes, 1 session`));
+  fireEvent.click(await screen.findByRole('button', { name: `Delete session of ${YEAR}-03-10` }));
+
+  expect(screen.getByText(`Are you sure you want to delete the session of ${YEAR}-03-10 (Bass)?`)).toBeInTheDocument();
+  const heatmapCallsBefore = mockedService.getHeatmap.mock.calls.length;
+  fireEvent.click(screen.getByText('Delete', { selector: 'div[role="dialog"] button' }));
+
+  // Dialog closed before the request (house pattern), session gone, grid refetched
+  expect(screen.queryByRole('dialog')).not.toBeInTheDocument();
+  await waitFor(() => {
+    expect(mockedService.remove).toHaveBeenCalledWith('s1');
+  });
+  expect(await screen.findByText(`No practice on ${YEAR}-03-10.`)).toBeInTheDocument();
+  await waitFor(() => {
+    expect(mockedService.getHeatmap.mock.calls.length).toBeGreaterThan(heatmapCallsBefore);
+  });
+});
+
+test('cancelling the day-detail delete keeps the session', async () => {
+  mockedService.getAll.mockResolvedValue([
+    { uid: 's1', date: `${YEAR}-02-15`, instrumentType: 'Bass', items: [] },
+  ]);
+
+  renderPage();
+  fireEvent.click(await screen.findByLabelText(`${YEAR}-02-15 — no practice`));
+  fireEvent.click(await screen.findByRole('button', { name: `Delete session of ${YEAR}-02-15` }));
+  fireEvent.click(screen.getByText('Cancel', { selector: 'div[role="dialog"] button' }));
+
+  expect(mockedService.remove).not.toHaveBeenCalled();
+  expect(within(screen.getByRole('list', { name: 'Day sessions' })).getByText('Bass')).toBeInTheDocument();
+});
+
+test('a failed deletion shows an error and keeps the session listed', async () => {
+  mockedService.getHeatmap.mockResolvedValue([
+    { date: `${YEAR}-03-10`, totalMinutes: 40, sessionCount: 1 },
+  ]);
+  mockedService.getAll.mockResolvedValue([
+    { uid: 's1', date: `${YEAR}-03-10`, instrumentType: 'Bass', durationMinutes: 40, items: [] },
+  ]);
+  mockedService.remove.mockRejectedValue(new Error('Failed to delete session'));
+
+  renderPage();
+  fireEvent.click(await screen.findByLabelText(`${YEAR}-03-10 — 40 minutes, 1 session`));
+  fireEvent.click(await screen.findByRole('button', { name: `Delete session of ${YEAR}-03-10` }));
+  fireEvent.click(screen.getByText('Delete', { selector: 'div[role="dialog"] button' }));
+
+  expect(await screen.findByText('Session could not be deleted.')).toBeInTheDocument();
+  // The session is NOT removed from the panel on failure
+  expect(within(screen.getByRole('list', { name: 'Day sessions' })).getByText('Bass')).toBeInTheDocument();
+});
+
+test('a failed day detail shows an error, not misleading content', async () => {
+  mockedService.getAll.mockRejectedValue(new Error('Failed to fetch sessions'));
+
+  renderPage();
+  fireEvent.click(await screen.findByLabelText(`${YEAR}-02-15 — no practice`));
+
+  expect(await screen.findByText('Day detail could not be loaded.')).toBeInTheDocument();
+  expect(screen.queryByText(`No practice on ${YEAR}-02-15.`)).not.toBeInTheDocument();
 });

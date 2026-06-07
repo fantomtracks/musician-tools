@@ -67,6 +67,10 @@ function MySessionsPage() {
   const instrumentTouchedRef = useRef(false);
   const [durationTouched, setDurationTouched] = useState(false);
   const entryKeyRef = useRef(0);
+  // Deep-link ?edit=<uid> from the heatmap day detail (3.2): applied once the
+  // sessions list has loaded
+  const pendingEditUidRef = useRef<string | null>(null);
+  const submitInFlightRef = useRef(false);
 
   const today = todayLocalDate();
 
@@ -74,6 +78,38 @@ function MySessionsPage() {
     return () => {
       if (toastTimerRef.current) clearTimeout(toastTimerRef.current);
     };
+  }, []);
+
+  // Heatmap deep-links (3.2). Read from window.location instead of
+  // react-router's useSearchParams: the hook would require a <Router>
+  // ancestor in every test rendering this page bare. ?edit wins over ?date;
+  // the URL is cleaned once consumed so a re-render never re-triggers.
+  useEffect(() => {
+    const params = new URLSearchParams(window.location.search);
+    const editParam = params.get('edit');
+    const dateParam = params.get('date');
+    if (editParam) {
+      pendingEditUidRef.current = editParam;
+    } else if (dateParam && /^\d{4}-\d{2}-\d{2}$/.test(dateParam)
+      && dateParam >= '1900-01-01' && dateParam <= todayLocalDate()) {
+      // Round-trip through a LOCAL Date to reject non-calendar dates like
+      // 2026-02-31 (never new Date('string') — FR19 read-side trap)
+      const [y, m, d] = dateParam.split('-').map(Number);
+      const probe = new Date(y, m - 1, d, 12);
+      probe.setFullYear(y);
+      const roundTrip = `${probe.getFullYear()}-${String(probe.getMonth() + 1).padStart(2, '0')}-${String(probe.getDate()).padStart(2, '0')}`;
+      if (roundTrip === dateParam) {
+        setDate(dateParam);
+      }
+    }
+    if (params.has('edit') || params.has('date')) {
+      // Remove ONLY the consumed params — other query params and the hash
+      // belong to someone else
+      params.delete('edit');
+      params.delete('date');
+      const rest = params.toString();
+      window.history.replaceState({}, '', `${window.location.pathname}${rest ? `?${rest}` : ''}${window.location.hash}`);
+    }
   }, []);
 
   useEffect(() => {
@@ -114,8 +150,20 @@ function MySessionsPage() {
           && instrumentTypeOptions.includes(mostRecent.instrumentType)) {
           setInstrumentType(prev => (prev === '' ? mostRecent.instrumentType : prev));
         }
+        // Apply a pending ?edit deep-link now that the sessions are known;
+        // an unknown uid is silently ignored, and a submit already in flight
+        // (user started typing/logging while the list loaded) wins over the
+        // late-arriving deep-link
+        if (pendingEditUidRef.current) {
+          const target = fetched.find(s => s.uid === pendingEditUidRef.current);
+          pendingEditUidRef.current = null;
+          if (target && !submitInFlightRef.current) startEditSession(target);
+        }
       } else {
         setSessionsFailed(true);
+        // The deep-linked edit intent cannot survive a failed list load (and
+        // the URL is already cleaned): drop it instead of firing later
+        pendingEditUidRef.current = null;
       }
     })();
   }, []);
@@ -266,6 +314,7 @@ function MySessionsPage() {
     }
     try {
       setLoading(true);
+      submitInFlightRef.current = true;
       setError(null);
       const decodeRef = (ref: string) => {
         const separator = ref.indexOf(':');
@@ -331,6 +380,7 @@ function MySessionsPage() {
         : generic);
     } finally {
       setLoading(false);
+      submitInFlightRef.current = false;
     }
   };
 
@@ -379,11 +429,24 @@ function MySessionsPage() {
             </h2>
           </div>
           {editingSessionUid && (
-            <div className="flex items-center justify-between rounded-lg bg-sky-50 dark:bg-sky-900/40 border border-sky-200 dark:border-sky-700/60 px-3 py-2">
+            <div className="flex items-center justify-between flex-wrap gap-2 rounded-lg bg-sky-50 dark:bg-sky-900/40 border border-sky-200 dark:border-sky-700/60 px-3 py-2">
               <span className="text-sm text-gray-700 dark:text-gray-200">Editing session of {editingSessionLabel}</span>
-              <button type="button" className="btn-secondary text-sm" onClick={resetForm} disabled={loading}>
-                Cancel edit
-              </button>
+              <div className="flex gap-2">
+                <button type="button" className="btn-secondary text-sm" onClick={resetForm} disabled={loading}>
+                  Cancel edit
+                </button>
+                {/* The history (and its Delete buttons) is hidden while editing,
+                    so deletion must be reachable from here too */}
+                <button
+                  type="button"
+                  aria-label={`Delete session of ${editingSessionLabel}`}
+                  className="inline-flex items-center rounded-md bg-red-600 text-white px-3 py-1.5 hover:bg-red-700 dark:bg-red-700 dark:hover:bg-red-800 disabled:opacity-50"
+                  onClick={() => setDeleteSessionUid(editingSessionUid)}
+                  disabled={loading}
+                >
+                  Delete session
+                </button>
+              </div>
             </div>
           )}
 
@@ -607,11 +670,19 @@ function MySessionsPage() {
           </form>
         </div>
 
-        <div className="card-base glass-effect p-4 sm:p-5 space-y-4">
-          <h2 className="text-xl font-semibold text-gray-900 dark:text-gray-100">History</h2>
-          {/* Always-mounted live region: state transitions (loading → error/empty)
-              must be announced to assistive tech */}
-          <div role="status" aria-label="History status" className="text-sm text-gray-600 dark:text-gray-400">
+        {/* Hidden while editing: a list of other sessions under the edit form
+            reads as confusing context (northwood field feedback, 3.2). The
+            live region stays MOUNTED (sr-only) — unmounting a role="status"
+            silences in-flight announcements for assistive tech */}
+        <div className={editingSessionUid ? '' : 'card-base glass-effect p-4 sm:p-5 space-y-4'}>
+          {!editingSessionUid && (
+            <h2 className="text-xl font-semibold text-gray-900 dark:text-gray-100">History</h2>
+          )}
+          <div
+            role="status"
+            aria-label="History status"
+            className={editingSessionUid ? 'sr-only' : 'text-sm text-gray-600 dark:text-gray-400'}
+          >
             {sessionsFailed
               ? 'Sessions could not be loaded.'
               : sessions === null
@@ -620,7 +691,7 @@ function MySessionsPage() {
                   ? 'No sessions logged yet.'
                   : null}
           </div>
-          {!sessionsFailed && sessions !== null && sessions.length > 0 && (
+          {!editingSessionUid && !sessionsFailed && sessions !== null && sessions.length > 0 && (
             <ul aria-label="Session history" className="space-y-3">
               {sessions.map(session => (
                 <li key={session.uid} className="rounded-lg border border-gray-200 dark:border-gray-700 p-3 space-y-2">

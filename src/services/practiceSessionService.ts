@@ -64,8 +64,8 @@ export const practiceSessionService = {
     if (!res.ok) throw new Error('Failed to fetch heatmap');
     return res.json();
   },
-  async getAll(): Promise<PracticeSession[]> {
-    const res = await fetch(`${API_BASE}/sessions`, {
+  async getAll(date?: string): Promise<PracticeSession[]> {
+    const res = await fetch(`${API_BASE}/sessions${date ? `?date=${encodeURIComponent(date)}` : ''}`, {
       credentials: 'include'
     });
     if (!res.ok) throw new Error('Failed to fetch sessions');

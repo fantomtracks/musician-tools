@@ -873,6 +873,102 @@ test('digitsOnly strips everything Safari lets through on number inputs', () => 
   expect(digitsOnly('')).toBe('');
 });
 
+test('the history is hidden while editing and comes back on cancel (3.2 field feedback)', async () => {
+  mockedService.getAll.mockResolvedValue([editableSession()]);
+
+  render(<MySessionsPage />);
+  await screen.findByRole('list', { name: 'Session history' });
+
+  fireEvent.click(screen.getByRole('button', { name: 'Edit session of 2026-06-05' }));
+  expect(screen.queryByRole('list', { name: 'Session history' })).not.toBeInTheDocument();
+  expect(screen.queryByText('History')).not.toBeInTheDocument();
+  // The live region stays mounted (sr-only) so AT announcements survive edit mode
+  expect(screen.getByRole('status', { name: 'History status' })).toBeInTheDocument();
+
+  fireEvent.click(screen.getByRole('button', { name: 'Cancel edit' }));
+  expect(screen.getByRole('list', { name: 'Session history' })).toBeInTheDocument();
+});
+
+test('the edit banner offers a confirmed Delete session (3.2 field feedback)', async () => {
+  mockedService.getAll.mockResolvedValue([editableSession()]);
+  mockedService.remove.mockResolvedValue(undefined);
+
+  render(<MySessionsPage />);
+  fireEvent.click(await screen.findByRole('button', { name: 'Edit session of 2026-06-05' }));
+
+  // The banner's Delete is the only one visible (history is hidden)
+  fireEvent.click(screen.getByRole('button', { name: 'Delete session of 2026-06-05' }));
+  expect(screen.getByText('Are you sure you want to delete the session of 2026-06-05 (Bass)?')).toBeInTheDocument();
+
+  fireEvent.click(screen.getByText('Delete', { selector: 'div[role="dialog"] button' }));
+
+  await waitFor(() => {
+    expect(mockedService.remove).toHaveBeenCalledWith('s-edit');
+  });
+  // Deleting the session being edited exits edit mode (2.4 acquis) — the
+  // history is visible again, without the deleted session
+  expect(screen.queryByText('Editing session of 2026-06-05')).not.toBeInTheDocument();
+  expect(await screen.findByText('No sessions logged yet.')).toBeInTheDocument();
+});
+
+describe('heatmap deep-links (3.2)', () => {
+  afterEach(() => {
+    window.history.replaceState({}, '', '/');
+  });
+
+  test('?date= pre-fills the date field and cleans the URL (AC5)', async () => {
+    window.history.pushState({}, '', '/my-sessions?date=2026-02-15');
+
+    render(<MySessionsPage />);
+
+    expect(screen.getByLabelText('Date')).toHaveValue('2026-02-15');
+    expect(window.location.search).toBe('');
+    await screen.findByText('No sessions logged yet.');
+  });
+
+  test('URL cleanup removes only the consumed params, keeping the rest and the hash', async () => {
+    window.history.pushState({}, '', '/my-sessions?date=2026-02-15&tab=stats#anchor');
+
+    render(<MySessionsPage />);
+
+    expect(screen.getByLabelText('Date')).toHaveValue('2026-02-15');
+    expect(window.location.search).toBe('?tab=stats');
+    expect(window.location.hash).toBe('#anchor');
+    await screen.findByText('No sessions logged yet.');
+  });
+
+  test('a future or non-calendar ?date= is silently ignored', async () => {
+    for (const param of ['2099-01-01', '2026-02-31', '1899-12-31', 'garbage']) {
+      window.history.pushState({}, '', `/my-sessions?date=${param}`);
+      const { unmount } = render(<MySessionsPage />);
+
+      expect(screen.getByLabelText('Date')).toHaveValue(todayLocalDate());
+      unmount();
+    }
+  });
+
+  test('?edit=<uid> opens the session in edit mode once loaded (AC4)', async () => {
+    mockedService.getAll.mockResolvedValue([editableSession()]);
+    window.history.pushState({}, '', '/my-sessions?edit=s-edit');
+
+    render(<MySessionsPage />);
+
+    expect(await screen.findByText('Editing session of 2026-06-05')).toBeInTheDocument();
+    expect(screen.getByLabelText('Instrument')).toHaveValue('Bass');
+    expect(window.location.search).toBe('');
+  });
+
+  test('an unknown ?edit uid is silently ignored', async () => {
+    mockedService.getAll.mockResolvedValue([editableSession()]);
+    window.history.pushState({}, '', '/my-sessions?edit=does-not-exist');
+
+    render(<MySessionsPage />);
+
+    await screen.findByText('2026-06-05');
+    expect(screen.queryByText(/Editing session of/)).not.toBeInTheDocument();
+  });
+});
+
 test('a session with zero entries stays valid (no items in payload)', async () => {
   mockedService.create.mockResolvedValue({ uid: 's1', date: todayLocalDate(), instrumentType: 'Guitar' });
 

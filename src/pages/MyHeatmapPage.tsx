@@ -1,15 +1,20 @@
-import { useEffect, useMemo, useState } from 'react';
-import { practiceSessionService, type HeatmapDay } from '../services/practiceSessionService';
-import { buildYearGrid, computeLevels } from '../utils/heatmap';
+import { useEffect, useMemo, useRef, useState } from 'react';
+import { Link } from 'react-router-dom';
+import { practiceSessionService, type HeatmapDay, type PracticeSession } from '../services/practiceSessionService';
+import { ConfirmDialog } from '../components/ConfirmDialog';
+import { buildYearGrid, computeLevels, formatLocalDate } from '../utils/heatmap';
 
 // Non-punitive palette (FR18): empty days stay neutral, activity ramps green.
 // No red, no streak counters, no guilt-tripping copy anywhere on this page.
 const LEVEL_CLASSES = [
   // Empty days must read as cells, not blend into the page gradient
-  // (northwood's field feedback) — still neutral, never aggressive (FR18)
+  // (northwood's field feedback) — still neutral, never aggressive (FR18).
+  // NOT shown in the legend: an empty day is not an activity level
   'bg-gray-200 dark:bg-gray-700',
-  'bg-green-200 dark:bg-green-900',
+  // The whole ramp starts saturated: level 1 must be unmistakably green on
+  // the glass cards in both modes (northwood field feedback, iterated)
   'bg-green-400 dark:bg-green-700',
+  'bg-green-500 dark:bg-green-600',
   'bg-green-600 dark:bg-green-500',
   'bg-green-800 dark:bg-green-300',
 ];
@@ -20,21 +25,107 @@ const MONTH_LABELS = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'S
 const WEEKDAY_LABELS = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'];
 
 function MyHeatmapPage() {
-  const year = new Date().getFullYear();
+  const currentYear = new Date().getFullYear();
+  const [year, setYear] = useState(currentYear);
   const [days, setDays] = useState<HeatmapDay[] | null>(null);
   const [failed, setFailed] = useState(false);
   const [focusedDate, setFocusedDate] = useState<string | null>(null);
+  const [selectedDate, setSelectedDate] = useState<string | null>(null);
+  const [daySessions, setDaySessions] = useState<PracticeSession[] | null>(null);
+  const [dayFailed, setDayFailed] = useState(false);
+  const [deleteSessionUid, setDeleteSessionUid] = useState<string | null>(null);
+  const [deleteFailed, setDeleteFailed] = useState(false);
+  const [deleteInFlight, setDeleteInFlight] = useState(false);
+  // Bumped after a deletion: the day's aggregate changed, the grid must refetch
+  const [heatmapVersion, setHeatmapVersion] = useState(0);
+  // Mirrors selectedDate for async completions (a slow DELETE must not touch
+  // the panel of a day selected afterwards)
+  const selectedDateRef = useRef<string | null>(null);
 
   useEffect(() => {
+    // Cancellation guard: rapid year changes (or a delete-refetch racing a
+    // year change) must never let a stale response paint the wrong year
+    let cancelled = false;
+    setFailed(false);
     (async () => {
       try {
         const data = await practiceSessionService.getHeatmap(year);
-        setDays(data ?? []);
+        if (!cancelled) setDays(data ?? []);
       } catch {
-        setFailed(true);
+        if (!cancelled) setFailed(true);
       }
     })();
-  }, [year]);
+    return () => { cancelled = true; };
+  }, [year, heatmapVersion]);
+
+  // Day detail (FR16): one filtered fetch per selected day; a slow response
+  // for a previously selected day must not land on the current one
+  useEffect(() => {
+    selectedDateRef.current = selectedDate;
+    // A pending delete dialog must not survive a context change
+    setDeleteSessionUid(null);
+    if (!selectedDate) {
+      setDaySessions(null);
+      setDayFailed(false);
+      return;
+    }
+    let cancelled = false;
+    setDaySessions(null);
+    setDayFailed(false);
+    setDeleteFailed(false);
+    (async () => {
+      try {
+        const data = await practiceSessionService.getAll(selectedDate);
+        if (!cancelled) setDaySessions(data ?? []);
+      } catch {
+        if (!cancelled) setDayFailed(true);
+      }
+    })();
+    return () => { cancelled = true; };
+  }, [selectedDate]);
+
+  const handleDeleteSession = async () => {
+    if (!deleteSessionUid) return;
+    const uid = deleteSessionUid;
+    const dayAtDelete = selectedDateRef.current;
+    // Close the dialog before the request (anti double-submit, house pattern)
+    setDeleteSessionUid(null);
+    try {
+      setDeleteFailed(false);
+      setDeleteInFlight(true);
+      await practiceSessionService.remove(uid);
+      // The grid refetches regardless; the PANEL is only touched if the user
+      // is still on the day the deletion was issued from (a null daySessions
+      // means a fresh fetch is in flight — never fake an empty day)
+      setHeatmapVersion(v => v + 1);
+      if (selectedDateRef.current === dayAtDelete) {
+        setDaySessions(prev => (prev === null ? prev : prev.filter(s => s.uid !== uid)));
+      }
+    } catch {
+      if (selectedDateRef.current === dayAtDelete) {
+        setDeleteFailed(true);
+      }
+    } finally {
+      setDeleteInFlight(false);
+    }
+  };
+
+  const changeYear = (delta: number) => {
+    const next = year + delta;
+    setYear(next);
+    setSelectedDate(null);
+    setFocusedDate(null);
+    setDeleteSessionUid(null);
+    setDays(null);
+    setFailed(false);
+    // A bound can disable the button under keyboard focus — keep focus alive
+    if (delta > 0 && next >= currentYear) {
+      document.getElementById('heatmap-prev-year')?.focus();
+    }
+    if (delta < 0 && next <= 1900) {
+      document.getElementById('heatmap-next-year')?.focus();
+    }
+  };
 
   const grid = useMemo(() => buildYearGrid(year), [year]);
   const levelFor = useMemo(() => computeLevels(days ?? []), [days]);
@@ -68,6 +159,14 @@ function MyHeatmapPage() {
     const currentIndex = grid.days.indexOf(tabbableDate);
     if (currentIndex === -1) return;
 
+    // APG activation: Enter/Space toggles the focused day's detail (FR16);
+    // re-activating the selected day closes the panel
+    if (e.key === 'Enter' || e.key === ' ') {
+      e.preventDefault();
+      setSelectedDate(prev => (prev === tabbableDate ? null : tabbableDate));
+      return;
+    }
+
     let nextIndex: number;
     switch (e.key) {
       case 'ArrowDown': nextIndex = currentIndex + 1; break;
@@ -95,9 +194,48 @@ function MyHeatmapPage() {
 
   return (
     <div className="min-h-screen bg-gradient-to-br from-gray-50 via-blue-50 to-purple-50 dark:from-gray-900 dark:via-gray-800 dark:to-gray-950 text-gray-900 dark:text-gray-100">
+      <ConfirmDialog
+        isOpen={!!deleteSessionUid}
+        title="Delete session"
+        message={(() => {
+          const target = (daySessions ?? []).find(s => s.uid === deleteSessionUid);
+          return target
+            ? `Are you sure you want to delete the session of ${target.date} (${target.instrumentType})?`
+            : 'Are you sure you want to delete this session?';
+        })()}
+        confirmText="Delete"
+        cancelText="Cancel"
+        isDangerous
+        onConfirm={handleDeleteSession}
+        onCancel={() => setDeleteSessionUid(null)}
+      />
       <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8 space-y-6">
         <div className="card-base glass-effect p-4 sm:p-5 space-y-4">
-          <h2 className="text-xl font-semibold text-gray-900 dark:text-gray-100">Practice heatmap {year}</h2>
+          <div className="flex items-center justify-between flex-wrap gap-2">
+            <h2 className="text-xl font-semibold text-gray-900 dark:text-gray-100">Practice heatmap {year}</h2>
+            <div className="flex items-center gap-2">
+              <button
+                type="button"
+                id="heatmap-prev-year"
+                aria-label="Previous year"
+                className="btn-secondary text-sm"
+                onClick={() => changeYear(-1)}
+                disabled={year <= 1900}
+              >
+                ← {year - 1}
+              </button>
+              <button
+                type="button"
+                id="heatmap-next-year"
+                aria-label="Next year"
+                className="btn-secondary text-sm"
+                onClick={() => changeYear(1)}
+                disabled={year >= currentYear}
+              >
+                {year + 1} →
+              </button>
+            </div>
+          </div>
 
           <div role="status" aria-label="Heatmap status" className="text-sm text-gray-600 dark:text-gray-400">
             {failed
@@ -150,9 +288,15 @@ function MyHeatmapPage() {
                               role="gridcell"
                               tabIndex={date === tabbableDate ? 0 : -1}
                               aria-label={labelFor(date)}
+                              aria-selected={date === selectedDate}
                               title={labelFor(date)}
                               onFocus={() => setFocusedDate(date)}
-                              className={`w-3 h-3 rounded-sm ${LEVEL_CLASSES[levelFor(date)]}`}
+                              onClick={() => {
+                                setFocusedDate(date);
+                                // Clicking the selected day again closes the panel
+                                setSelectedDate(prev => (prev === date ? null : date));
+                              }}
+                              className={`w-3 h-3 rounded-sm cursor-pointer ${LEVEL_CLASSES[levelFor(date)]} ${date === selectedDate ? 'ring-2 ring-brand-500 dark:ring-brand-400' : ''}`}
                             />
                           );
                         })}
@@ -163,7 +307,9 @@ function MyHeatmapPage() {
                 {/* Legend — a quiet scale, not a scoreboard */}
                 <div className="flex items-center gap-1 justify-end text-[10px] text-gray-500 dark:text-gray-400" aria-hidden="true">
                   <span>Less</span>
-                  {LEVEL_CLASSES.map((cls, level) => (
+                  {/* Activity levels only — the empty-day gray was mistaken
+                      for the lowest level (northwood field feedback) */}
+                  {LEVEL_CLASSES.slice(1).map((cls, level) => (
                     <div key={level} className={`w-3 h-3 rounded-sm ${cls}`} />
                   ))}
                   <span>More</span>
@@ -172,6 +318,81 @@ function MyHeatmapPage() {
             </div>
           )}
         </div>
+
+        {selectedDate && (
+          <div className="card-base glass-effect p-4 sm:p-5 space-y-4">
+            {/* The DATEONLY string is displayed verbatim (FR19 read-side trap) */}
+            <h3 className="text-lg font-semibold text-gray-900 dark:text-gray-100">{selectedDate}</h3>
+            <div role="status" aria-label="Day detail status" className="text-sm text-gray-600 dark:text-gray-400">
+              {dayFailed
+                ? 'Day detail could not be loaded.'
+                : deleteFailed
+                  ? 'Session could not be deleted.'
+                  : daySessions === null
+                    ? 'Loading...'
+                    : daySessions.length === 0
+                      ? `No practice on ${selectedDate}.`
+                      : null}
+            </div>
+            {/* No dead-end CTA: a future day cannot be logged (the target form
+                rejects future dates), so the link is simply not offered */}
+            {!dayFailed && daySessions !== null && daySessions.length === 0
+              && selectedDate <= formatLocalDate(new Date()) && (
+              <Link
+                to={`/my-sessions?date=${selectedDate}`}
+                className="btn-secondary text-sm inline-flex items-center"
+              >
+                Log a session for this day
+              </Link>
+            )}
+            {!dayFailed && daySessions !== null && daySessions.length > 0 && (
+              <ul aria-label="Day sessions" className="space-y-3">
+                {daySessions.map(session => (
+                  <li key={session.uid} className="rounded-lg border border-gray-200 dark:border-gray-700 p-3 space-y-2">
+                    <div className="flex flex-wrap items-baseline gap-x-3 gap-y-1">
+                      <span className="text-sm text-gray-600 dark:text-gray-400">{session.instrumentType}</span>
+                      {session.durationMinutes ? (
+                        <span className="text-sm text-gray-600 dark:text-gray-400">{session.durationMinutes} min</span>
+                      ) : null}
+                      <div className="flex gap-2 ml-auto">
+                        <Link
+                          to={`/my-sessions?edit=${session.uid}`}
+                          aria-label={`Edit session of ${session.date}`}
+                          className="btn-secondary text-sm"
+                        >
+                          Edit
+                        </Link>
+                        <button
+                          type="button"
+                          aria-label={`Delete session of ${session.date}`}
+                          className="inline-flex items-center rounded-md bg-red-600 text-white px-3 py-1.5 hover:bg-red-700 dark:bg-red-700 dark:hover:bg-red-800 disabled:opacity-50"
+                          onClick={() => setDeleteSessionUid(session.uid)}
+                          disabled={deleteInFlight}
+                        >
+                          Delete
+                        </button>
+                      </div>
+                    </div>
+                    {session.note && (
+                      <p className="text-sm text-gray-700 dark:text-gray-300 whitespace-pre-wrap break-words">{session.note}</p>
+                    )}
+                    {session.items && session.items.length > 0 && (
+                      <ul className="space-y-1">
+                        {session.items.map(item => (
+                          <li key={item.uid} className="text-sm text-gray-700 dark:text-gray-300 pl-3 border-l-2 border-gray-200 dark:border-gray-700 break-words">
+                            <span className="font-medium">{item.label}</span>
+                            {item.minutes ? <span className="text-gray-500 dark:text-gray-400"> — {item.minutes} min</span> : null}
+                            {item.note ? <span className="text-gray-500 dark:text-gray-400 italic"> · {item.note}</span> : null}
+                          </li>
+                        ))}
+                      </ul>
+                    )}
+                  </li>
+                ))}
+              </ul>
+            )}
+          </div>
+        )}
       </div>
     </div>
   );
