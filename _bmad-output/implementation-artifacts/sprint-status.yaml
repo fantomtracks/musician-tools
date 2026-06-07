@@ -43,9 +43,9 @@ story_location: _bmad-output/implementation-artifacts
 
 development_status:
   # Epic 1: Ma bibliothèque de sujets de travail
-  epic-1: backlog
-  1-1-creer-un-sujet-de-travail: backlog
-  1-2-gerer-ma-bibliotheque-de-sujets: backlog
+  epic-1: done
+  1-1-creer-un-sujet-de-travail: done
+  1-2-gerer-ma-bibliotheque-de-sujets: done
   epic-1-retrospective: optional
 
   # Epic 2: Mon journal de sessions
