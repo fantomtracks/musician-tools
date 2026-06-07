@@ -342,6 +342,14 @@ So that la grille devienne la porte d'entrée de mon journal.
 **When** j'utilise la navigation d'années
 **Then** je passe d'une année à l'autre et la grille se recharge (FR17)
 
+**Given** le détail d'un jour affichant une session _(ajout northwood, 2026-06-07)_
+**When** je choisis « Edit » sur cette session
+**Then** le formulaire de session s'ouvre directement en mode édition de cette session (réutilisation du mode édition existant, deep-link)
+
+**Given** le détail d'un jour vide _(ajout northwood, 2026-06-07)_
+**When** je choisis « Log a session for this day »
+**Then** le formulaire de session s'ouvre avec la date de ce jour pré-remplie — une affordance choisie par l'utilisateur, pas une relance (FR18 préservé)
+
 ### Story 3.3: Ma grille a déjà une histoire (rétro-import)
 
 As a musicien qui utilise l'app depuis des mois,
