@@ -68,4 +68,9 @@ development_status:
   epic-4: done
   4-1-mark-as-played-remplit-mon-journal-tout-seul: done
   4-2-mon-dernier-joue-ne-ment-jamais: done
-  epic-4-retrospective: optional
+  epic-4-retrospective: done
+
+  # Epic 5: Robustesse / confort (post-PRD, issu des rétros)
+  epic-5: in-progress
+  5-1-session-expiree-re-login-propre: done
+  epic-5-retrospective: optional
