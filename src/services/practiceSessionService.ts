@@ -1,3 +1,4 @@
+import { apiFetch } from './apiFetch';
 export type SessionItem = {
   uid: string;
   sessionUid: string;
@@ -70,7 +71,7 @@ const API_BASE = '/api';
 
 export const practiceSessionService = {
   async getHeatmap(year: number): Promise<HeatmapDay[]> {
-    const res = await fetch(`${API_BASE}/sessions/heatmap?year=${year}`, {
+    const res = await apiFetch(`${API_BASE}/sessions/heatmap?year=${year}`, {
       credentials: 'include'
     });
     if (res.status === 400) {
@@ -81,21 +82,21 @@ export const practiceSessionService = {
     return res.json();
   },
   async getDayPlays(date: string): Promise<DayPlay[]> {
-    const res = await fetch(`${API_BASE}/sessions/plays?date=${encodeURIComponent(date)}`, {
+    const res = await apiFetch(`${API_BASE}/sessions/plays?date=${encodeURIComponent(date)}`, {
       credentials: 'include'
     });
     if (!res.ok) throw new Error('Failed to fetch plays');
     return res.json();
   },
   async getAll(date?: string): Promise<PracticeSession[]> {
-    const res = await fetch(`${API_BASE}/sessions${date ? `?date=${encodeURIComponent(date)}` : ''}`, {
+    const res = await apiFetch(`${API_BASE}/sessions${date ? `?date=${encodeURIComponent(date)}` : ''}`, {
       credentials: 'include'
     });
     if (!res.ok) throw new Error('Failed to fetch sessions');
     return res.json();
   },
   async create(payload: CreatePracticeSessionDTO): Promise<PracticeSession> {
-    const res = await fetch(`${API_BASE}/sessions`, {
+    const res = await apiFetch(`${API_BASE}/sessions`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(payload),
@@ -111,7 +112,7 @@ export const practiceSessionService = {
     return res.json();
   },
   async update(uid: string, payload: UpdatePracticeSessionDTO): Promise<PracticeSession> {
-    const res = await fetch(`${API_BASE}/sessions/${uid}`, {
+    const res = await apiFetch(`${API_BASE}/sessions/${uid}`, {
       method: 'PUT',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(payload),
@@ -125,7 +126,7 @@ export const practiceSessionService = {
     return res.json();
   },
   async remove(uid: string): Promise<void> {
-    const res = await fetch(`${API_BASE}/sessions/${uid}`, { method: 'DELETE', credentials: 'include' });
+    const res = await apiFetch(`${API_BASE}/sessions/${uid}`, { method: 'DELETE', credentials: 'include' });
     if (!res.ok) throw new Error('Failed to delete session');
   },
 };

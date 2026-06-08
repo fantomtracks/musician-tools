@@ -1,3 +1,4 @@
+import { apiFetch } from './apiFetch';
 export type Topic = {
   uid: string;
   name: string;
@@ -13,14 +14,14 @@ const API_BASE = '/api';
 
 export const topicService = {
   async getAll(): Promise<Topic[]> {
-    const res = await fetch(`${API_BASE}/topics`, {
+    const res = await apiFetch(`${API_BASE}/topics`, {
       credentials: 'include'
     });
     if (!res.ok) throw new Error('Failed to fetch topics');
     return res.json();
   },
   async create(payload: CreateTopicDTO): Promise<Topic> {
-    const res = await fetch(`${API_BASE}/topics`, {
+    const res = await apiFetch(`${API_BASE}/topics`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(payload),
@@ -31,7 +32,7 @@ export const topicService = {
     return res.json();
   },
   async update(uid: string, payload: UpdateTopicDTO): Promise<Topic> {
-    const res = await fetch(`${API_BASE}/topics/${uid}`, {
+    const res = await apiFetch(`${API_BASE}/topics/${uid}`, {
       method: 'PUT',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(payload),
@@ -42,7 +43,7 @@ export const topicService = {
     return res.json();
   },
   async remove(uid: string): Promise<void> {
-    const res = await fetch(`${API_BASE}/topics/${uid}`, { method: 'DELETE', credentials: 'include' });
+    const res = await apiFetch(`${API_BASE}/topics/${uid}`, { method: 'DELETE', credentials: 'include' });
     if (!res.ok) throw new Error('Failed to delete topic');
   },
 };

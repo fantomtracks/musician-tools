@@ -1,3 +1,4 @@
+import { apiFetch } from './apiFetch';
 const API_BASE = '/api/songs';
 
 export interface SongPlay {
@@ -19,7 +20,7 @@ export interface MarkPlayedDTO {
 
 export const songPlayService = {
   async markPlayed(songUid: string, dto: MarkPlayedDTO): Promise<SongPlay> {
-    const response = await fetch(`${API_BASE}/${songUid}/plays`, {
+    const response = await apiFetch(`${API_BASE}/${songUid}/plays`, {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
@@ -34,7 +35,7 @@ export const songPlayService = {
   },
 
   async getPlays(songUid: string): Promise<SongPlay[]> {
-    const response = await fetch(`${API_BASE}/${songUid}/plays`, {
+    const response = await apiFetch(`${API_BASE}/${songUid}/plays`, {
       credentials: 'include'
     });
     if (!response.ok) {

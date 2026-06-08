@@ -1,3 +1,4 @@
+import { apiFetch } from './apiFetch';
 export type Playlist = {
   uid: string;
   name: string;
@@ -15,7 +16,7 @@ const API_BASE = '/api';
 export const playlistService = {
   // Get all playlists
   async getAllPlaylists(): Promise<Playlist[]> {
-    const response = await fetch(`${API_BASE}/playlists`, {
+    const response = await apiFetch(`${API_BASE}/playlists`, {
       credentials: 'include'
     });
     if (!response.ok) {
@@ -26,7 +27,7 @@ export const playlistService = {
 
   // Get single playlist by uid
   async getPlaylist(uid: string): Promise<Playlist> {
-    const response = await fetch(`${API_BASE}/playlists/${uid}`, {
+    const response = await apiFetch(`${API_BASE}/playlists/${uid}`, {
       credentials: 'include'
     });
     if (!response.ok) {
@@ -37,7 +38,7 @@ export const playlistService = {
 
   // Create new playlist
   async createPlaylist(playlist: CreatePlaylistDTO): Promise<Playlist> {
-    const response = await fetch(`${API_BASE}/playlists`, {
+    const response = await apiFetch(`${API_BASE}/playlists`, {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
@@ -53,7 +54,7 @@ export const playlistService = {
 
   // Update existing playlist
   async updatePlaylist(uid: string, playlist: UpdatePlaylistDTO): Promise<Playlist> {
-    const response = await fetch(`${API_BASE}/playlists/${uid}`, {
+    const response = await apiFetch(`${API_BASE}/playlists/${uid}`, {
       method: 'PUT',
       headers: {
         'Content-Type': 'application/json',
@@ -69,7 +70,7 @@ export const playlistService = {
 
   // Delete playlist
   async deletePlaylist(uid: string): Promise<void> {
-    const response = await fetch(`${API_BASE}/playlists/${uid}`, {
+    const response = await apiFetch(`${API_BASE}/playlists/${uid}`, {
       method: 'DELETE',
       credentials: 'include'
     });
@@ -80,7 +81,7 @@ export const playlistService = {
 
   // Add song to playlist
   async addSongToPlaylist(playlistUid: string, songUid: string): Promise<Playlist> {
-    const response = await fetch(`${API_BASE}/playlists/${playlistUid}/songs/${songUid}`, {
+    const response = await apiFetch(`${API_BASE}/playlists/${playlistUid}/songs/${songUid}`, {
       method: 'POST',
     });
     if (!response.ok) {
@@ -91,7 +92,7 @@ export const playlistService = {
 
   // Remove song from playlist
   async removeSongFromPlaylist(playlistUid: string, songUid: string): Promise<Playlist> {
-    const response = await fetch(`${API_BASE}/playlists/${playlistUid}/songs/${songUid}`, {
+    const response = await apiFetch(`${API_BASE}/playlists/${playlistUid}/songs/${songUid}`, {
       method: 'DELETE',
     });
     if (!response.ok) {
