@@ -16,6 +16,10 @@ jest.mock('../models', () => {
     },
     SongPlay: {
       findAll: jest.fn(async () => []),
+      create: jest.fn(async (data) => ({ ...data, uid: 'play-uid' })),
+      bulkCreate: jest.fn(async (rows) => rows.map((row, i) => ({ ...row, uid: `play-${i}` }))),
+      update: jest.fn(async () => [0]),
+      destroy: jest.fn(async () => 0),
     },
     Topic: {
       findAll: jest.fn(),
@@ -614,6 +618,28 @@ describe('practicesessioncontroller', () => {
       expect(next).not.toHaveBeenCalled();
     });
 
+    test('4.2: a linked SongPlay is created for each SONG entry, none for topics', async () => {
+      const req = {
+        session: { user: 'user-1' },
+        body: { date: '2026-03-10', instrumentType: 'Bass', items: [
+          { songUid: SONG_UID, minutes: 15 },
+          { topicUid: TOPIC_UID },
+        ] },
+      };
+
+      await controller.createPracticeSession(req, mockRes(), mockNext());
+
+      expect(SongPlay.bulkCreate).toHaveBeenCalledTimes(1);
+      const playRows = SongPlay.bulkCreate.mock.calls[0][0];
+      // Only the song entry yields a play, linked to its item, dated on the
+      // session day at noon UTC, carrying the session instrument
+      expect(playRows).toHaveLength(1);
+      expect(playRows[0]).toMatchObject({ songUid: SONG_UID, instrumentType: 'Bass', instrumentUid: null, sessionItemUid: 'item-0' });
+      expect(playRows[0].playedAt.toISOString()).toBe('2026-03-10T12:00:00.000Z');
+      // Inside the same transaction (atomic with the session + items)
+      expect(SongPlay.bulkCreate).toHaveBeenCalledWith(expect.any(Array), { transaction: { id: 'tx' } });
+    });
+
     test('a session with zero items stays valid and skips the transaction', async () => {
       const req = { session: { user: 'user-1' }, body: baseBody(undefined) };
       const res = mockRes();
@@ -972,6 +998,116 @@ describe('practicesessioncontroller', () => {
         order: [['position', 'ASC'], ['uid', 'ASC']],
       });
     });
+
+    test('4.2: changing the date moves the linked plays to the new day (AC3)', async () => {
+      const session = mockExistingSession({ date: '2026-06-01', items: [mockItem()] });
+      PracticeSession.findByPk.mockResolvedValue(session);
+      SessionItem.findAll.mockResolvedValue([{ uid: ITEM_UID }]);
+
+      await controller.updatePracticeSession(
+        { params: { uid: SESSION_UID }, session: { user: 'user-1' }, body: { date: '2026-05-15' } },
+        mockRes(), mockNext()
+      );
+
+      expect(SongPlay.update).toHaveBeenCalledWith(
+        expect.objectContaining({ playedAt: expect.any(Date) }),
+        expect.objectContaining({ where: { sessionItemUid: [ITEM_UID] } })
+      );
+      expect(SongPlay.update.mock.calls[0][0].playedAt.toISOString()).toBe('2026-05-15T12:00:00.000Z');
+    });
+
+    test('4.2: changing the instrument re-labels the linked plays (FR7)', async () => {
+      const session = mockExistingSession({ instrumentType: 'Bass', items: [mockItem()] });
+      PracticeSession.findByPk.mockResolvedValue(session);
+      SessionItem.findAll.mockResolvedValue([{ uid: ITEM_UID }]);
+
+      await controller.updatePracticeSession(
+        { params: { uid: SESSION_UID }, session: { user: 'user-1' }, body: { instrumentType: 'Guitar' } },
+        mockRes(), mockNext()
+      );
+
+      expect(SongPlay.update).toHaveBeenCalledWith(
+        // instrumentUid cleared: the session carries only a TYPE, a stale
+        // instrumentUid would point at the old instrument
+        { instrumentType: 'Guitar', instrumentUid: null },
+        expect.objectContaining({ where: { sessionItemUid: [ITEM_UID] } })
+      );
+    });
+
+    test('4.2: a note/duration-only edit does NOT touch the linked plays', async () => {
+      const session = mockExistingSession({ items: [mockItem()] });
+      PracticeSession.findByPk.mockResolvedValue(session);
+
+      await controller.updatePracticeSession(
+        { params: { uid: SESSION_UID }, session: { user: 'user-1' }, body: { note: 'just a note', durationMinutes: 45 } },
+        mockRes(), mockNext()
+      );
+
+      // No date/instrument change → the realign must not run (mark-as-played
+      // real-time playedAt must not be flattened on an unrelated edit)
+      expect(SongPlay.update).not.toHaveBeenCalled();
+      expect(SongPlay.destroy).not.toHaveBeenCalled();
+      expect(SongPlay.bulkCreate).not.toHaveBeenCalled();
+    });
+
+    test('4.2: the realign covers EVERY linked play of a multi-entry session', async () => {
+      const item2 = mockItem({ uid: ITEM_UID_2, songUid: TOPIC_UID });
+      const session = mockExistingSession({ date: '2026-06-01', items: [mockItem(), item2] });
+      PracticeSession.findByPk.mockResolvedValue(session);
+      SessionItem.findAll.mockResolvedValue([{ uid: ITEM_UID }, { uid: ITEM_UID_2 }]);
+
+      await controller.updatePracticeSession(
+        { params: { uid: SESSION_UID }, session: { user: 'user-1' }, body: { date: '2026-05-10' } },
+        mockRes(), mockNext()
+      );
+
+      expect(SongPlay.update).toHaveBeenCalledWith(
+        expect.objectContaining({ playedAt: expect.any(Date) }),
+        expect.objectContaining({ where: { sessionItemUid: [ITEM_UID, ITEM_UID_2] } })
+      );
+    });
+
+    test('4.2: adding a song entry creates a linked play (AC1)', async () => {
+      const session = mockExistingSession({ items: [] });
+      PracticeSession.findByPk.mockResolvedValue(session);
+
+      await controller.updatePracticeSession(
+        { params: { uid: SESSION_UID }, session: { user: 'user-1' }, body: { items: [{ songUid: SONG_UID }] } },
+        mockRes(), mockNext()
+      );
+
+      expect(SongPlay.bulkCreate).toHaveBeenCalledTimes(1);
+      expect(SongPlay.bulkCreate.mock.calls[0][0][0]).toMatchObject({ songUid: SONG_UID, sessionItemUid: 'new-item-uid', instrumentType: 'Bass' });
+    });
+
+    test('4.2: removing an entry deletes the entry (its plays cascade)', async () => {
+      const session = mockExistingSession({ items: [mockItem()] });
+      PracticeSession.findByPk.mockResolvedValue(session);
+
+      await controller.updatePracticeSession(
+        { params: { uid: SESSION_UID }, session: { user: 'user-1' }, body: { items: [] } },
+        mockRes(), mockNext()
+      );
+
+      expect(SessionItem.destroy).toHaveBeenCalledWith(
+        expect.objectContaining({ where: { uid: [ITEM_UID] } })
+      );
+    });
+
+    test('4.2: re-pointing an entry from a song to a topic drops its play', async () => {
+      const item = mockItem({ update: jest.fn(function (vals) { Object.assign(this, vals); }) });
+      const session = mockExistingSession({ items: [item] });
+      PracticeSession.findByPk.mockResolvedValue(session);
+
+      await controller.updatePracticeSession(
+        { params: { uid: SESSION_UID }, session: { user: 'user-1' }, body: { items: [{ uid: ITEM_UID, topicUid: TOPIC_UID }] } },
+        mockRes(), mockNext()
+      );
+
+      expect(SongPlay.destroy).toHaveBeenCalledWith(
+        expect.objectContaining({ where: { sessionItemUid: ITEM_UID } })
+      );
+    });
   });
 
   describe('deletePracticeSession', () => {
@@ -986,6 +1122,21 @@ describe('practicesessioncontroller', () => {
 
       expect(session.destroy).toHaveBeenCalled();
       expect(res.json).toHaveBeenCalledWith({ message: 'Session deleted successfully' });
+    });
+
+    test('4.2/AC3: deleting a session destroys it so its items — and their linked plays — cascade', async () => {
+      // The controller only destroys the session; SessionItems cascade from the
+      // session FK and their linked SongPlays cascade from sessionItemUid (both
+      // ON DELETE CASCADE, declared in the model + migration). The actual DB
+      // cascade is exercised by the migration + the manual/DB pass; here we pin
+      // that the delete path fires and never hand-deletes plays in the controller.
+      const session = { uid: SESSION_UID, userUid: 'user-1', destroy: jest.fn() };
+      PracticeSession.findByPk.mockResolvedValue(session);
+
+      await controller.deletePracticeSession({ params: { uid: SESSION_UID }, session: { user: 'user-1' } }, mockRes(), mockNext());
+
+      expect(session.destroy).toHaveBeenCalledTimes(1);
+      expect(SongPlay.destroy).not.toHaveBeenCalled(); // plays vanish by FK, not by code
     });
 
     test('404 malformed/unknown, 403 foreign, 401 unauthenticated', async () => {

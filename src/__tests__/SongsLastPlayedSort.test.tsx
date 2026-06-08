@@ -85,6 +85,45 @@ describe('Songs — last played sort with an active instrument filter', () => {
     await waitFor(() => expect(rowTitlesInOrder()).toEqual(['Bravo', 'Alpha']));
   });
 
+  test('4.2: a journal-entry play (noon UTC, session instrument) surfaces as the last played', async () => {
+    // The frontend cannot distinguish a journal play from a mark-as-played one:
+    // both are SongPlays carrying an instrumentType. A play minted by a session
+    // entry (noon UTC of the session day) drives the per-instrument last played.
+    PLAYS['song-a'] = [{ uid: 'pa', songUid: 'song-a', instrumentType: 'Guitar', instrumentUid: null, playedAt: '2026-04-20T12:00:00.000Z' }];
+    PLAYS['song-b'] = [{ uid: 'pb', songUid: 'song-b', instrumentType: 'Guitar', instrumentUid: null, playedAt: '2026-04-21T12:00:00.000Z' }];
+
+    renderSongs();
+    await screen.findByText('Alpha');
+
+    expect(rowTitlesInOrder()).toEqual(['Alpha', 'Bravo']); // asc by the journal-play day
+    fireEvent.click(screen.getByText('Last played'));
+    await waitFor(() => expect(rowTitlesInOrder()).toEqual(['Bravo', 'Alpha']));
+
+    PLAYS['song-a'] = [{ uid: 'pa', songUid: 'song-a', instrumentType: 'Guitar', instrumentUid: null, playedAt: '2026-03-01T10:00:00.000Z' }];
+    PLAYS['song-b'] = [{ uid: 'pb', songUid: 'song-b', instrumentType: 'Guitar', instrumentUid: null, playedAt: '2026-03-02T10:00:00.000Z' }];
+  });
+
+  test('4.2/AC2: an older journal play never pulls the per-instrument last played backward', async () => {
+    // song-a has a recent Guitar play (Jan 15); song-b has a more recent one
+    // (Jan 20) PLUS an older one (Dec 01) — the older play must not win. Plays
+    // arrive newest-first (server order), so the derivation takes index 0.
+    PLAYS['song-a'] = [{ uid: 'pa', songUid: 'song-a', instrumentType: 'Guitar', instrumentUid: null, playedAt: '2026-01-15T12:00:00.000Z' }];
+    PLAYS['song-b'] = [
+      { uid: 'pb2', songUid: 'song-b', instrumentType: 'Guitar', instrumentUid: null, playedAt: '2026-01-20T12:00:00.000Z' },
+      { uid: 'pb1', songUid: 'song-b', instrumentType: 'Guitar', instrumentUid: null, playedAt: '2025-12-01T12:00:00.000Z' },
+    ];
+
+    renderSongs();
+    await screen.findByText('Alpha');
+
+    // asc: song-a (Jan 15) before song-b (Jan 20) — Bravo's Dec play did NOT
+    // make it sort as December (which would put it first)
+    expect(rowTitlesInOrder()).toEqual(['Alpha', 'Bravo']);
+
+    PLAYS['song-a'] = [{ uid: 'pa', songUid: 'song-a', instrumentType: 'Guitar', instrumentUid: null, playedAt: '2026-03-01T10:00:00.000Z' }];
+    PLAYS['song-b'] = [{ uid: 'pb', songUid: 'song-b', instrumentType: 'Guitar', instrumentUid: null, playedAt: '2026-03-02T10:00:00.000Z' }];
+  });
+
   test('stale identical per-instrument timestamps still reorder via the global lastPlayed tiebreak', async () => {
     // Both guitar plays collide on the exact same timestamp (the old noon-UTC
     // data), but the global lastPlayed differs — the sort must not look frozen

@@ -45,6 +45,34 @@ function playDayString(value) {
   return String(value).slice(0, 10);
 }
 
+// A journal entry is also a play event (story 4.2). The play is stamped at noon
+// UTC of the session day so its UTC day — what the 3.3 heatmap and the per-
+// instrument "last played" derive — equals the session's DATEONLY date in every
+// timezone. instrumentUid is null: the session tracks only an instrument TYPE.
+// Defensive: a DATEONLY may surface as a Date in some paths — keep only the
+// YYYY-MM-DD part so the literal never becomes an Invalid Date.
+function journalPlayedAt(date) {
+  const day = date instanceof Date ? date.toISOString().slice(0, 10) : String(date).slice(0, 10);
+  return new Date(`${day}T12:00:00.000Z`);
+}
+
+// Create one linked SongPlay per song entry (skips topic entries). Used by
+// session create/update so the derived "last played" reflects journal entries.
+async function createJournalPlays(items, instrumentType, date, transaction) {
+  const rows = items
+    .filter(item => item.songUid)
+    .map(item => ({
+      songUid: item.songUid,
+      instrumentUid: null,
+      instrumentType,
+      playedAt: journalPlayedAt(date),
+      sessionItemUid: item.uid
+    }));
+  if (rows.length > 0) {
+    await SongPlay.bulkCreate(rows, { transaction });
+  }
+}
+
 // GET all practice sessions for logged-in user, anti-chronological.
 // Primary sort on the FR19 client-local date (a retroactive session belongs at
 // its real day), createdAt breaks same-day ties. No pagination at this stage.
@@ -370,6 +398,10 @@ const createPracticeSession = async (req, res, next) => {
           resolvedItems.map((item, index) => ({ ...item, sessionUid: practiceSession.uid, position: index })),
           { transaction }
         );
+        // 4.2: each song entry is also a play event for the session's instrument,
+        // linked to its entry (cascade target) and dated on the session day, so
+        // the per-instrument "last played" derived from SongPlays reflects it.
+        await createJournalPlays(createdItems, trimmedInstrument, date, transaction);
       });
     } else {
       practiceSession = await PracticeSession.create(sessionValues);
@@ -603,6 +635,17 @@ const updatePracticeSession = async (req, res, next) => {
       itemOps = { rows, toDelete };
     }
 
+    // Capture before the update so the play sync (4.2) can detect changes.
+    // Normalize the day to a YYYY-MM-DD string on both sides: a DATEONLY could
+    // surface as a Date, and a raw !== would then always read as "changed" and
+    // needlessly re-stamp every linked play.
+    const oldDate = practiceSession.date instanceof Date
+      ? practiceSession.date.toISOString().slice(0, 10)
+      : String(practiceSession.date).slice(0, 10);
+    const oldInstrument = practiceSession.instrumentType;
+    const dateChanged = nextDate !== oldDate;
+    const instrumentChanged = nextInstrument !== oldInstrument;
+
     await sequelize.transaction(async (transaction) => {
       await practiceSession.update({
         date: nextDate,
@@ -612,15 +655,51 @@ const updatePracticeSession = async (req, res, next) => {
       }, { transaction });
 
       if (itemOps) {
+        // Removed entries: their linked plays vanish by FK CASCADE (4.2)
         if (itemOps.toDelete.length > 0) {
           await SessionItem.destroy({ where: { uid: itemOps.toDelete }, transaction });
         }
+        // New song entries get a linked play; an entry that changed what it
+        // references has its old play dropped and (if now a song) recreated.
+        const playItemsToCreate = [];
         for (const row of itemOps.rows) {
           if (row.existing) {
+            const oldSong = row.existing.songUid;
             await row.existing.update(row.values, { transaction });
+            if (oldSong !== row.existing.songUid) {
+              await SongPlay.destroy({ where: { sessionItemUid: row.existing.uid }, transaction });
+              if (row.existing.songUid) playItemsToCreate.push(row.existing);
+            }
           } else {
-            await SessionItem.create({ ...row.values, sessionUid: practiceSession.uid }, { transaction });
+            const created = await SessionItem.create({ ...row.values, sessionUid: practiceSession.uid }, { transaction });
+            if (created.songUid) playItemsToCreate.push(created);
           }
+        }
+        if (playItemsToCreate.length > 0) {
+          await createJournalPlays(playItemsToCreate, nextInstrument, nextDate, transaction);
+        }
+      }
+
+      // A new session date or instrument moves ALL its surviving linked plays
+      // (the play's day must follow the session day; FR7 one instrument)
+      if (dateChanged || instrumentChanged) {
+        const currentItems = await SessionItem.findAll({
+          where: { sessionUid: practiceSession.uid },
+          attributes: ['uid'],
+          transaction
+        });
+        const itemUids = currentItems.map(item => item.uid);
+        if (itemUids.length > 0) {
+          const patch = {};
+          if (dateChanged) patch.playedAt = journalPlayedAt(nextDate);
+          if (instrumentChanged) {
+            // The session carries only an instrument TYPE; a specific
+            // instrumentUid from a mark-as-played would now point at the old
+            // instrument — clear it to keep the play internally consistent.
+            patch.instrumentType = nextInstrument;
+            patch.instrumentUid = null;
+          }
+          await SongPlay.update(patch, { where: { sessionItemUid: itemUids }, transaction });
         }
       }
     });

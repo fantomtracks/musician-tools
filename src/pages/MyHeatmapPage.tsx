@@ -109,8 +109,18 @@ function MyHeatmapPage() {
       // is still on the day the deletion was issued from (a null daySessions
       // means a fresh fetch is in flight — never fake an empty day)
       setHeatmapVersion(v => v + 1);
-      if (selectedDateRef.current === dayAtDelete) {
+      if (dayAtDelete && selectedDateRef.current === dayAtDelete) {
         setDaySessions(prev => (prev === null ? prev : prev.filter(s => s.uid !== uid)));
+        // 4.2: deleting a session CASCADES its linked plays, so the "Played"
+        // list is now stale. Refetch it from the server (we cannot know which
+        // plays cascaded optimistically). A separate try: a plays-refresh
+        // failure must not report the (successful) delete as failed.
+        try {
+          const freshPlays = await practiceSessionService.getDayPlays(dayAtDelete);
+          if (selectedDateRef.current === dayAtDelete) setDayPlays(freshPlays ?? []);
+        } catch {
+          // Keep the current list rather than blanking it; a reload reconciles
+        }
       }
     } catch {
       if (selectedDateRef.current === dayAtDelete) {
@@ -338,7 +348,7 @@ function MyHeatmapPage() {
                                 // Clicking the selected day again closes the panel
                                 setSelectedDate(prev => (prev === date ? null : date));
                               }}
-                              className={`w-3 h-3 rounded-sm cursor-pointer ${LEVEL_CLASSES[levelFor(date)]} ${date === selectedDate ? 'ring-2 ring-brand-500 dark:ring-brand-400' : ''} ${date === todayStr ? 'outline outline-1 outline-amber-500 dark:outline-amber-400' : ''}`}
+                              className={`w-3 h-3 rounded-sm cursor-pointer ${LEVEL_CLASSES[levelFor(date)]} ${date === selectedDate ? 'ring-2 ring-brand-500 dark:ring-brand-400' : ''} ${date === todayStr ? 'outline outline-1 outline-gray-400 dark:outline-gray-500' : ''}`}
                             />
                           );
                         })}

@@ -35,14 +35,14 @@ function renderPage() {
 test('today\'s cell carries a discreet marker, other days do not (field feedback)', async () => {
   renderPage();
 
-  // "today" is announced in the label, not by the amber outline alone (a11y)
+  // "today" is announced in the label, not by the discreet outline alone (a11y)
   const today = await screen.findByLabelText(`${TODAY} — no practice (today)`);
-  expect(today.className).toContain('outline-amber');
+  expect(today.className).toContain('outline-gray');
 
   // A different empty day has neither the marker nor the suffix
   const otherDay = TODAY.endsWith('-01') ? `${YEAR}-01-15` : `${YEAR}-01-01`;
   const other = screen.getByLabelText(`${otherDay} — no practice`);
-  expect(other.className).not.toContain('outline-amber');
+  expect(other.className).not.toContain('outline-gray');
 });
 
 test('renders one gridcell per day of the current year', async () => {
@@ -282,6 +282,44 @@ test('deleting a session from the day detail confirms, removes it and refreshes 
   expect(await screen.findByText(`No practice on ${YEAR}-03-10.`)).toBeInTheDocument();
   await waitFor(() => {
     expect(mockedService.getHeatmap.mock.calls.length).toBeGreaterThan(heatmapCallsBefore);
+  });
+});
+
+test('deleting a session refreshes the Played list (its cascaded plays disappear without a reload)', async () => {
+  mockedService.getHeatmap.mockResolvedValue([
+    { date: `${YEAR}-03-10`, totalMinutes: 0, sessionCount: 1, playCount: 1 },
+  ]);
+  mockedService.getAll.mockResolvedValue([
+    {
+      uid: 's1', date: `${YEAR}-03-10`, instrumentType: 'Guitar', durationMinutes: null,
+      items: [{ uid: 'i1', sessionUid: 's1', songUid: 'song-1', label: 'Sweet Child', minutes: null }],
+    },
+  ]);
+  // A play on a DIFFERENT instrument is shown under Played (not deduped);
+  // after the session delete cascades... here we model that the day has no
+  // plays left, so the Played block must vanish without a reload
+  mockedService.getDayPlays
+    .mockResolvedValueOnce([
+      { uid: 'p1', songUid: 'song-2', title: 'Money', instrumentType: 'Bass', playedAt: `${YEAR}-03-10T12:00:00.000Z` },
+    ])
+    .mockResolvedValue([]); // the refetch after delete: cascade emptied the day
+  mockedService.remove.mockResolvedValue(undefined);
+
+  renderPage();
+  fireEvent.click(await screen.findByLabelText(`${YEAR}-03-10 — 0 minutes, 1 session, 1 play`));
+  // The Played block is there before the delete
+  expect(await screen.findByText('Money')).toBeInTheDocument();
+
+  fireEvent.click(await screen.findByRole('button', { name: `Delete session of ${YEAR}-03-10` }));
+  fireEvent.click(screen.getByText('Delete', { selector: 'div[role="dialog"] button' }));
+
+  // After the delete, the Played list is refetched and reflects the cascade —
+  // no manual reload needed
+  await waitFor(() => {
+    expect(mockedService.getDayPlays).toHaveBeenCalledTimes(2);
+  });
+  await waitFor(() => {
+    expect(screen.queryByText('Money')).not.toBeInTheDocument();
   });
 });
 

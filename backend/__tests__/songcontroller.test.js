@@ -126,6 +126,10 @@ describe('songcontroller', () => {
       // FR4: label is the server-side snapshot of the song title; no minutes (FR21)
       expect(itemArg).toMatchObject({ sessionUid: 'session-uid', songUid: 'song-1', label: 'Sweet Child', minutes: null });
 
+      // 4.2: the play is LINKED to the created entry (cascade target)
+      const playArg = SongPlay.create.mock.calls[0][0];
+      expect(playArg.sessionItemUid).toBe('item-uid');
+
       expect(res.status).toHaveBeenCalledWith(201);
       expect(next).not.toHaveBeenCalled();
     });
@@ -169,6 +173,8 @@ describe('songcontroller', () => {
       await controller.markSongPlayed(markReq({ instrumentType: 'Guitar', playedOn: TODAY }), res, next);
 
       expect(SessionItem.create).not.toHaveBeenCalled();
+      // 4.2: the play links to the EXISTING entry, not a new one
+      expect(SongPlay.create.mock.calls[0][0].sessionItemUid).toBe('already-there');
       expect(res.status).toHaveBeenCalledWith(201); // still a success, just idempotent
       expect(next).not.toHaveBeenCalled();
     });
@@ -228,6 +234,8 @@ describe('songcontroller', () => {
       await controller.markSongPlayed(markReq({ playedOn: TODAY }), res, mockNext());
 
       expect(SongPlay.create).toHaveBeenCalledTimes(1);
+      // A standalone play (no journal entry) is not linked to anything (4.2)
+      expect(SongPlay.create.mock.calls[0][0].sessionItemUid).toBeNull();
       expect(PracticeSession.findOne).not.toHaveBeenCalled();
       expect(PracticeSession.create).not.toHaveBeenCalled();
       expect(SessionItem.create).not.toHaveBeenCalled();

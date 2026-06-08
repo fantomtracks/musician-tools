@@ -247,7 +247,10 @@ const markSongPlayed = async (req, res, next) => {
       trimmedInstrument = '';
     }
 
-    // Atomicity: the play record, the day session and its entry move together
+    // Atomicity: the session, its entry and the linked play move together.
+    // Order (4.2): the session entry is created/found FIRST so the play can
+    // link to it (sessionItemUid) — deleting the session/entry then cascades
+    // the play away, keeping the derived "last played" honest (FR23).
     const songPlay = await sequelize.transaction(async (transaction) => {
       // Stamp the play on the CLIENT day (FR19/AC5) but keep the server's
       // current time-of-day so successive marks stay orderable — the per-
@@ -257,16 +260,12 @@ const markSongPlayed = async (req, res, next) => {
       // no cell is double-lit. The time-of-day never dates the day, only
       // breaks ties.
       const playedAt = new Date(`${playedOn}T${new Date().toISOString().slice(11)}`);
-      const created = await SongPlay.create({
-        songUid: song.uid,
-        instrumentUid: instrumentUid || null,
-        instrumentType: trimmedInstrument || null,
-        playedAt,
-      }, { transaction });
 
       // A session carries exactly one instrument (FR7), so feeding the journal
       // requires one. A play without an instrument (bulk mark with no active
-      // filter) is still recorded above, but creates no session.
+      // filter) is still recorded below, but creates no session/entry and stays
+      // standalone (sessionItemUid null).
+      let sessionItemUid = null;
       if (trimmedInstrument) {
         // Deterministic pick when several sessions share the day/instrument
         // (legitimate via manual entry): append to the most recently created.
@@ -285,14 +284,14 @@ const markSongPlayed = async (req, res, next) => {
           }, { transaction });
         }
 
-        // No duplicate entry (AC4): skip if the song is already in the session
-        const existingItem = await SessionItem.findOne({
+        // No duplicate entry (AC4): reuse the entry if the song is already there
+        let item = await SessionItem.findOne({
           where: { sessionUid: session.uid, songUid: song.uid },
           transaction,
         });
-        if (!existingItem) {
+        if (!item) {
           const position = await SessionItem.count({ where: { sessionUid: session.uid }, transaction });
-          await SessionItem.create({
+          item = await SessionItem.create({
             sessionUid: session.uid,
             songUid: song.uid,
             topicUid: null,
@@ -302,9 +301,16 @@ const markSongPlayed = async (req, res, next) => {
             position,
           }, { transaction });
         }
+        sessionItemUid = item.uid;
       }
 
-      return created;
+      return SongPlay.create({
+        songUid: song.uid,
+        instrumentUid: instrumentUid || null,
+        instrumentType: trimmedInstrument || null,
+        playedAt,
+        sessionItemUid, // link to the journal entry (4.2), null when standalone
+      }, { transaction });
     });
 
     // lastPlayed coherence is story 4.2 — left as the existing fallback for now
