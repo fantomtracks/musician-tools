@@ -12,6 +12,9 @@ export interface SongPlay {
 
 export interface MarkPlayedDTO {
   instrumentType?: string;
+  // Client-local day of the play (FR19/FR21): the server no longer dates the
+  // play from its own clock. Always YYYY-MM-DD built from local components.
+  playedOn: string;
 }
 
 export const songPlayService = {

@@ -32,6 +32,19 @@ function renderPage() {
   return render(<MemoryRouter><MyHeatmapPage /></MemoryRouter>);
 }
 
+test('today\'s cell carries a discreet marker, other days do not (field feedback)', async () => {
+  renderPage();
+
+  // "today" is announced in the label, not by the amber outline alone (a11y)
+  const today = await screen.findByLabelText(`${TODAY} — no practice (today)`);
+  expect(today.className).toContain('outline-amber');
+
+  // A different empty day has neither the marker nor the suffix
+  const otherDay = TODAY.endsWith('-01') ? `${YEAR}-01-15` : `${YEAR}-01-01`;
+  const other = screen.getByLabelText(`${otherDay} — no practice`);
+  expect(other.className).not.toContain('outline-amber');
+});
+
 test('renders one gridcell per day of the current year', async () => {
   renderPage();
 
@@ -189,7 +202,7 @@ test('an empty day shows a neutral state with a pre-dated log link (FR18/AC5)', 
   renderPage();
 
   // Today is always a valid (non-future) empty day whatever the run date
-  fireEvent.click(await screen.findByLabelText(`${TODAY} — no practice`));
+  fireEvent.click(await screen.findByLabelText(`${TODAY} — no practice (today)`));
 
   expect(await screen.findByText(`No practice on ${TODAY}.`)).toBeInTheDocument();
   const logLink = screen.getByRole('link', { name: 'Log a session for this day' });
@@ -375,6 +388,39 @@ test('a failed plays fetch keeps the sessions and says so (partial failure)', as
 
   expect(await screen.findByText('Plays could not be loaded.')).toBeInTheDocument();
   expect(within(screen.getByRole('list', { name: 'Day sessions' })).getByText('Bass')).toBeInTheDocument();
+});
+
+test('a song shown as a session entry is not also re-listed under Played (4.1 dedup)', async () => {
+  mockedService.getHeatmap.mockResolvedValue([
+    { date: `${YEAR}-03-10`, totalMinutes: 0, sessionCount: 1, playCount: 1 },
+  ]);
+  mockedService.getAll.mockResolvedValue([
+    {
+      uid: 's1', date: `${YEAR}-03-10`, instrumentType: 'Guitar', durationMinutes: null,
+      items: [{ uid: 'i1', sessionUid: 's1', songUid: 'song-1', label: 'Sweet Child', minutes: null }],
+    },
+  ]);
+  // Three plays that day: (p1) the song already in the GUITAR session → hidden;
+  // (p2) a different song on Bass → shown; (p3) the SAME song but on BASS, which
+  // the session does not cover → must still show (instrument-aware dedup)
+  mockedService.getDayPlays.mockResolvedValue([
+    { uid: 'p1', songUid: 'song-1', title: 'Sweet Child', instrumentType: 'Guitar', playedAt: `${YEAR}-03-10T12:00:00.000Z` },
+    { uid: 'p2', songUid: 'song-2', title: 'Money', instrumentType: 'Bass', playedAt: `${YEAR}-03-10T12:00:00.000Z` },
+    { uid: 'p3', songUid: 'song-1', title: 'Sweet Child', instrumentType: 'Bass', playedAt: `${YEAR}-03-10T13:00:00.000Z` },
+  ]);
+
+  renderPage();
+  fireEvent.click(await screen.findByLabelText(`${YEAR}-03-10 — 0 minutes, 1 session, 1 play`));
+
+  // The Guitar session entry shows Sweet Child; the Guitar play must not repeat
+  // it, but the Bass play of the same song is genuine history and stays
+  await screen.findByRole('list', { name: 'Day sessions' });
+  const plays = await screen.findByRole('list', { name: 'Day plays' });
+  expect(within(plays).getByText('Money')).toBeInTheDocument();
+  // Sweet Child appears once under Played — the Bass play, not the Guitar one
+  expect(within(plays).getAllByText('Sweet Child')).toHaveLength(1);
+  // Two Bass plays survive (Money + the Bass Sweet Child); the Guitar play is gone
+  expect(within(plays).getAllByText(/Bass/)).toHaveLength(2);
 });
 
 test('a failed sessions fetch keeps the loaded plays and says so (the other partial failure)', async () => {

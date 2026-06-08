@@ -9,6 +9,7 @@ import { playlistService, type Playlist } from '../services/playlistService';
 import { ConfirmDialog } from '../components/ConfirmDialog';
 import { instrumentTechniquesMap, instrumentTuningsMap, instrumentTypeOptions } from '../constants/instrumentTypes';
 import { applySongFilters } from '../utils/songFilters';
+import { formatLocalDate } from '../utils/heatmap';
 
 const initialSong: CreateSongDTO = {
   title: '',
@@ -672,9 +673,13 @@ function Songs() {
     try {
       setLoading(true);
       setError(null);
-      await songPlayService.markPlayed(editingUid, { instrumentType });
+      // The play's day is the device's local date (FR19/FR21), never the server clock
+      await songPlayService.markPlayed(editingUid, { instrumentType, playedOn: formatLocalDate(new Date()) });
       const plays = await songPlayService.getPlays(editingUid);
       setEditingSongPlays(plays);
+      // Keep the list-wide plays map in sync too, otherwise the "last played"
+      // sort reads stale data after a mark from the edit panel
+      setSongPlays(prev => new Map(prev).set(editingUid, plays));
       const now = new Date().toISOString();
       await songService.updateSong(editingUid, { lastPlayed: now });
       // Update the song in the list
@@ -757,21 +762,27 @@ function Songs() {
     try {
       setLoading(true);
       setError(null);
-      const now = new Date().toISOString();
+      const playedOn = formatLocalDate(new Date());
       const instrumentTypeForPlay = instrumentFilter || undefined;
-      
-      const newPlays = await Promise.all(
-        Array.from(selectedSongs).map(async uid => {
-          const play = await songPlayService.markPlayed(uid, { instrumentType: instrumentTypeForPlay });
-          await songService.updateSong(uid, { lastPlayed: now });
-          return { songUid: uid, play };
-        })
-      );
-      
-      const updatedSongs = songs.map(song =>
-        selectedSongs.has(song.uid) ? { ...song, lastPlayed: now } : song
-      );
-      setSongs(updatedSongs);
+
+      // Serialize, do NOT Promise.all: concurrent marks for the same day +
+      // instrument each find no session and each create one → duplicate day
+      // sessions (find-or-create has no unique guard, and one cannot be added
+      // since multiple sessions per day/instrument are legitimate). One at a
+      // time also gives each song a distinct lastPlayed so the sort stays
+      // orderable.
+      const newPlays: { songUid: string; play: SongPlay; lastPlayed: string }[] = [];
+      for (const uid of Array.from(selectedSongs)) {
+        const play = await songPlayService.markPlayed(uid, { instrumentType: instrumentTypeForPlay, playedOn });
+        const lastPlayed = new Date().toISOString();
+        await songService.updateSong(uid, { lastPlayed });
+        newPlays.push({ songUid: uid, play, lastPlayed });
+      }
+
+      const lastPlayedByUid = new Map(newPlays.map(({ songUid, lastPlayed }) => [songUid, lastPlayed]));
+      setSongs(songs.map(song =>
+        lastPlayedByUid.has(song.uid) ? { ...song, lastPlayed: lastPlayedByUid.get(song.uid) } : song
+      ));
       setSongPlays(prev => {
         const next = new Map(prev);
         newPlays.forEach(({ songUid, play }) => {
@@ -1295,7 +1306,13 @@ function Songs() {
         const bLastPlayed = getLastPlayedForSong(b.uid);
         const aTime = aLastPlayed ? new Date(aLastPlayed).getTime() : 0;
         const bTime = bLastPlayed ? new Date(bLastPlayed).getTime() : 0;
-        return sortDirection === 'asc' ? aTime - bTime : bTime - aTime;
+        if (aTime !== bTime) return sortDirection === 'asc' ? aTime - bTime : bTime - aTime;
+        // Tiebreak on the denormalized global lastPlayed: it carries distinct
+        // real instants even when older per-instrument plays collide on the
+        // same timestamp, so the sort never looks frozen
+        const aGlobal = a.lastPlayed ? new Date(a.lastPlayed).getTime() : 0;
+        const bGlobal = b.lastPlayed ? new Date(b.lastPlayed).getTime() : 0;
+        return sortDirection === 'asc' ? aGlobal - bGlobal : bGlobal - aGlobal;
       }
 
       let aVal = (a as Record<string, unknown>)[sortColumn];

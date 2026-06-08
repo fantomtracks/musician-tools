@@ -142,6 +142,24 @@ function MyHeatmapPage() {
   const levelFor = useMemo(() => computeLevels(days ?? []), [days]);
   const dayByDate = useMemo(() => new Map((days ?? []).map(d => [d.date, d])), [days]);
 
+  // Since 4.1, a "Mark as Played" creates both a SongPlay and a session entry,
+  // so the same song would appear twice in the panel. Hide a play only when the
+  // SAME song is a session entry on the SAME instrument that day — keyed on
+  // (instrument, songUid). A different-instrument play (e.g. a Bass play of a
+  // song that also sits in a Guitar session) or a no-instrument play stays
+  // visible; it is genuine history, not a mirror of the session entry.
+  const visiblePlays = useMemo(() => {
+    if (!dayPlays) return dayPlays;
+    const sessionKeys = new Set(
+      (daySessions ?? []).flatMap(s =>
+        (s.items ?? [])
+          .filter(i => !!i.songUid)
+          .map(i => `${s.instrumentType}|${i.songUid}`)
+      )
+    );
+    return dayPlays.filter(play => !sessionKeys.has(`${play.instrumentType}|${play.songUid}`));
+  }, [dayPlays, daySessions]);
+
   // Month labels above the columns: shown on the first week containing the 1st
   const monthByWeek = useMemo(() => grid.weeks.map(week => {
     const firstOfMonth = week.find(date => date !== null && date.endsWith('-01'));
@@ -152,19 +170,25 @@ function MyHeatmapPage() {
   // page was mounted): the grid must always keep one tabbable cell
   const tabbableDate = focusedDate && grid.days.includes(focusedDate) ? focusedDate : grid.days[0];
 
+  // A discreet marker on today's cell (northwood field feedback) — an outline,
+  // not a ring, so it stacks with the selection ring instead of replacing it
+  const todayStr = formatLocalDate(new Date());
+
   const labelFor = (date: string): string => {
+    // "today" must not be conveyed by the amber outline alone (a11y/NFR6)
+    const todaySuffix = date === todayStr ? ' (today)' : '';
     const day = dayByDate.get(date);
-    if (!day) return `${date} — no practice`;
+    if (!day) return `${date} — no practice${todaySuffix}`;
     const playCount = day.playCount ?? 0;
     const playsPart = `${playCount} play${playCount === 1 ? '' : 's'}`;
     // Play-only day (FR22 retro-import): presence, not a session
     if (day.sessionCount === 0) {
-      return playCount > 0 ? `${date} — played (${playsPart})` : `${date} — no practice`;
+      return (playCount > 0 ? `${date} — played (${playsPart})` : `${date} — no practice`) + todaySuffix;
     }
     const minutesPart = `${day.totalMinutes} minute${day.totalMinutes === 1 ? '' : 's'}`;
     const sessionsPart = `${day.sessionCount} session${day.sessionCount === 1 ? '' : 's'}`;
     const base = `${date} — ${minutesPart}, ${sessionsPart}`;
-    return playCount > 0 ? `${base}, ${playsPart}` : base;
+    return (playCount > 0 ? `${base}, ${playsPart}` : base) + todaySuffix;
   };
 
   // Roving tabindex (NFR6), APG grid pattern: the DOM rows are weekdays, so
@@ -314,7 +338,7 @@ function MyHeatmapPage() {
                                 // Clicking the selected day again closes the panel
                                 setSelectedDate(prev => (prev === date ? null : date));
                               }}
-                              className={`w-3 h-3 rounded-sm cursor-pointer ${LEVEL_CLASSES[levelFor(date)]} ${date === selectedDate ? 'ring-2 ring-brand-500 dark:ring-brand-400' : ''}`}
+                              className={`w-3 h-3 rounded-sm cursor-pointer ${LEVEL_CLASSES[levelFor(date)]} ${date === selectedDate ? 'ring-2 ring-brand-500 dark:ring-brand-400' : ''} ${date === todayStr ? 'outline outline-1 outline-amber-500 dark:outline-amber-400' : ''}`}
                             />
                           );
                         })}
@@ -420,9 +444,9 @@ function MyHeatmapPage() {
                 no duration, no actions (a play is not an editable session).
                 Independent of dayFailed: loaded plays survive a sessions
                 failure. */}
-            {dayPlays !== null && dayPlays.length > 0 && (
+            {visiblePlays !== null && visiblePlays.length > 0 && (
               <ul aria-label="Day plays" className="space-y-1">
-                {dayPlays.map(play => (
+                {visiblePlays.map(play => (
                   <li key={play.uid} className="text-sm text-gray-700 dark:text-gray-300 pl-3 border-l-2 border-gray-200 dark:border-gray-700 break-words">
                     <span className="font-medium">{play.title}</span>
                     {play.instrumentType ? <span className="text-gray-500 dark:text-gray-400"> — {play.instrumentType}</span> : null}
