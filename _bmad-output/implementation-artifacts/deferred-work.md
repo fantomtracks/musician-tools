@@ -29,3 +29,10 @@
 ## Deferred from: code review of 3-3-ma-grille-a-deja-une-histoire-retro-import (2026-06-07)
 
 - Suppression d'une chanson → CASCADE sur ses SongPlays → la heatmap déjà chargée garde une case allumée (playCount > 0) dont le panneau dit « No practice » jusqu'au prochain refetch (changement d'année ou delete de session). Rare, auto-guéri au refresh. Piste si ça mord : bump de heatmapVersion à l'ouverture d'un panneau vide inattendu, ou refetch au focus de l'onglet.
+
+## Deferred from: code review of 4-1-mark-as-played-remplit-mon-journal (2026-06-08)
+
+- `song.lastPlayed` horodaté serveur + double-écriture front/back + incohérence sur un playedOn rétroactif → cohérence bidirectionnelle traitée en 4.2 (recalcul du dernier joué à la création/suppression/déplacement de session).
+- Course résiduelle find-or-create de session (double-clic multi-appareils) après sérialisation du marquage en masse : couvrable par un verrou applicatif (advisory lock keyed user+date+instrument) si l'échelle le justifie un jour.
+- `markSongPlayed` stocke `instrumentUid` sans vérifier l'ownership (incohérence pré-existante, identique avant 4.1).
+- Anti-doublon d'entrée (AC4) et calcul de `position` via count non atomiques sous concurrence ; pas de contrainte unique car une session peut légitimement contenir deux fois la même chanson (saisie manuelle) et il peut exister plusieurs sessions même jour/instrument.
