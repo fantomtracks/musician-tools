@@ -65,7 +65,7 @@ development_status:
   epic-3-retrospective: done
 
   # Epic 4: La capture sans effort (pont avec l'existant)
-  epic-4: in-progress
+  epic-4: done
   4-1-mark-as-played-remplit-mon-journal-tout-seul: done
-  4-2-mon-dernier-joue-ne-ment-jamais: backlog
+  4-2-mon-dernier-joue-ne-ment-jamais: done
   epic-4-retrospective: optional

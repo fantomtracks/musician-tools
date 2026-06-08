@@ -36,3 +36,9 @@
 - Course résiduelle find-or-create de session (double-clic multi-appareils) après sérialisation du marquage en masse : couvrable par un verrou applicatif (advisory lock keyed user+date+instrument) si l'échelle le justifie un jour.
 - `markSongPlayed` stocke `instrumentUid` sans vérifier l'ownership (incohérence pré-existante, identique avant 4.1).
 - Anti-doublon d'entrée (AC4) et calcul de `position` via count non atomiques sous concurrence ; pas de contrainte unique car une session peut légitimement contenir deux fois la même chanson (saisie manuelle) et il peut exister plusieurs sessions même jour/instrument.
+
+## Deferred from: code review of 4-2-mon-dernier-joue-ne-ment-jamais (2026-06-08)
+
+- Éditer la DATE d'une session aplatit les plays mark-as-played (heure réelle) à midi UTC sur la nouvelle date (perte du départage intra-jour). Rare ; justesse au jour préservée ; le départage global du tri rattrape. Piste si gênant : préserver l'heure d'origine en ne déplaçant que la partie date.
+- Un mark-as-played qui réutilise une entrée existante crée un 2e SongPlay lié au même sessionItemUid (plusieurs events par entrée). Défendable (deux lectures réelles) ; cosmétique dans l'historique des plays.
+- Les plays de journal ne mettent pas à jour Song.lastPlayed (global). Le « dernier joué par instrument » dérivé fait foi ; le global n'est qu'un départage de secours. À unifier si un jour Song.lastPlayed redevient autoritaire.
