@@ -210,7 +210,7 @@ db-backup-prod:
 	fi
 	@mkdir -p $(BACKUP_DIR)
 	@echo "Creating PROD backup to $(BACKUP_DIR)/musician_tools_prod_$(TIMESTAMP).dump"
-	@docker run --rm -e PROD_DB_URL="$(PROD_DB_URL)" -v "$(PWD)/$(BACKUP_DIR):/backups" postgres:15 sh -c 'pg_dump "$$PROD_DB_URL" -F c -f "/backups/musician_tools_prod_$(TIMESTAMP).dump"'
+	@docker run --rm -e PROD_DB_URL="$(PROD_DB_URL)" -v "$(PWD)/$(BACKUP_DIR):/backups" postgres:17 sh -c 'pg_dump "$$PROD_DB_URL" -F c -f "/backups/musician_tools_prod_$(TIMESTAMP).dump"'
 	@echo "PROD backup complete."
 
 db-restore:
