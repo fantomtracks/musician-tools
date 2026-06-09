@@ -1,0 +1,76 @@
+# generated: 2026-06-07
+# last_updated: 2026-06-08
+# project: musician-tools
+# project_key: NOKEY
+# tracking_system: file-system
+# story_location: _bmad-output/implementation-artifacts
+
+# STATUS DEFINITIONS:
+# ==================
+# Epic Status:
+#   - backlog: Epic not yet started
+#   - in-progress: Epic actively being worked on
+#   - done: All stories in epic completed
+#
+# Epic Status Transitions:
+#   - backlog → in-progress: Automatically when first story is created (via create-story)
+#   - in-progress → done: Manually when all stories reach 'done' status
+#
+# Story Status:
+#   - backlog: Story only exists in epic file
+#   - ready-for-dev: Story file created in stories folder
+#   - in-progress: Developer actively working on implementation
+#   - review: Ready for code review (via Dev's code-review workflow)
+#   - done: Story completed
+#
+# Retrospective Status:
+#   - optional: Can be completed but not required
+#   - done: Retrospective has been completed
+#
+# WORKFLOW NOTES:
+# ===============
+# - Epic transitions to 'in-progress' automatically when first story is created
+# - Stories can be worked in parallel if team capacity allows
+# - Developer typically creates next story after previous one is 'done' to incorporate learnings
+# - Dev moves story to 'review', then runs code-review (fresh context, different LLM recommended)
+
+generated: 2026-06-07
+last_updated: 2026-06-08
+project: musician-tools
+project_key: NOKEY
+tracking_system: file-system
+story_location: _bmad-output/implementation-artifacts
+
+development_status:
+  # Epic 1: Ma bibliothèque de sujets de travail
+  epic-1: done
+  1-1-creer-un-sujet-de-travail: done
+  1-2-gerer-ma-bibliotheque-de-sujets: done
+  epic-1-retrospective: optional
+
+  # Epic 2: Mon journal de sessions
+  epic-2: done
+  2-1-creer-une-session-de-pratique: done
+  2-2-detailler-ma-session-avec-des-entrees: done
+  2-3-consulter-mon-historique-de-sessions: done
+  2-4-corriger-mon-journal-a-posteriori: done
+  2-5-logger-en-moins-de-30-secondes: done
+  epic-2-retrospective: done
+
+  # Epic 3: Ma pratique en un coup d'œil (heatmap)
+  epic-3: done
+  3-1-ma-grille-annuelle-de-pratique: done
+  3-2-explorer-ma-pratique-depuis-la-grille: done
+  3-3-ma-grille-a-deja-une-histoire-retro-import: done
+  epic-3-retrospective: done
+
+  # Epic 4: La capture sans effort (pont avec l'existant)
+  epic-4: done
+  4-1-mark-as-played-remplit-mon-journal-tout-seul: done
+  4-2-mon-dernier-joue-ne-ment-jamais: done
+  epic-4-retrospective: done
+
+  # Epic 5: Robustesse / confort (post-PRD, issu des rétros)
+  epic-5: in-progress
+  5-1-session-expiree-re-login-propre: done
+  epic-5-retrospective: optional

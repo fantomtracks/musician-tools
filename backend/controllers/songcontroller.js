@@ -1,7 +1,9 @@
-const { Song, SongPlay } = require('../models');
+const { Song, SongPlay, PracticeSession, SessionItem, sequelize } = require('../models');
 const createError = require('http-errors');
 const logger = require('../logger');
 const { fetchSongMetadata } = require('../services/songMetadataService');
+// Shared FR19 day-validation helpers (same definition as the session controller)
+const { DATE_PATTERN, MIN_DATE, isValidCalendarDate, maxAllowedDate } = require('../utils/sessionDates');
 
 const normalizeCapo = (value) => {
   if (value === undefined) return undefined;
@@ -202,12 +204,28 @@ const deleteSong = async (req, res, next) => {
   }
 };
 
-// POST mark song as played
+// POST mark song as played — also feeds the practice journal (story 4.1, FR21):
+// the click creates or completes the day's session for the played instrument and
+// adds the song as a no-minutes entry. The day is the CLIENT's local date
+// (FR19): the server no longer stamps the day from its own clock.
 const markSongPlayed = async (req, res, next) => {
   try {
     const userId = req.session.user;
     if (!userId) {
       return next(createError(401, 'Unauthorized'));
+    }
+
+    const { instrumentUid, instrumentType, playedOn } = req.body || {};
+
+    // The client-local day is required and validated like a session date (FR19)
+    if (typeof playedOn !== 'string' || !DATE_PATTERN.test(playedOn) || !isValidCalendarDate(playedOn)) {
+      return next(createError(400, 'playedOn (local date) is required as a valid YYYY-MM-DD date'));
+    }
+    if (playedOn < MIN_DATE) {
+      return next(createError(400, 'playedOn must be 1900-01-01 or later'));
+    }
+    if (playedOn > maxAllowedDate()) {
+      return next(createError(400, 'playedOn cannot be in the future'));
     }
 
     const song = await Song.findByPk(req.params.uid);
@@ -220,16 +238,82 @@ const markSongPlayed = async (req, res, next) => {
       return next(createError(403, 'Forbidden'));
     }
 
-    const { instrumentUid, instrumentType } = req.body;
+    let trimmedInstrument = typeof instrumentType === 'string' ? instrumentType.trim() : '';
+    // Defensive: an out-of-range instrument (length / NUL byte) would throw on
+    // PracticeSession.create INSIDE the transaction and roll back the play too,
+    // losing it (pre-4.1 the play was always recorded). Drop the session step
+    // for such input rather than 500 — the play stays durable.
+    if (trimmedInstrument.length > 255 || trimmedInstrument.includes(String.fromCharCode(0))) {
+      trimmedInstrument = '';
+    }
 
-    const songPlay = await SongPlay.create({
-      songUid: song.uid,
-      instrumentUid: instrumentUid || null,
-      instrumentType: instrumentType || null,
-      playedAt: new Date(),
+    // Atomicity: the session, its entry and the linked play move together.
+    // Order (4.2): the session entry is created/found FIRST so the play can
+    // link to it (sessionItemUid) — deleting the session/entry then cascades
+    // the play away, keeping the derived "last played" honest (FR23).
+    const songPlay = await sequelize.transaction(async (transaction) => {
+      // Stamp the play on the CLIENT day (FR19/AC5) but keep the server's
+      // current time-of-day so successive marks stay orderable — the per-
+      // instrument "last played" sort relies on distinct playedAt values.
+      // Using playedOn as the UTC date part guarantees the play's UTC day
+      // (what the 3.3 heatmap projection derives) equals the session day, so
+      // no cell is double-lit. The time-of-day never dates the day, only
+      // breaks ties.
+      const playedAt = new Date(`${playedOn}T${new Date().toISOString().slice(11)}`);
+
+      // A session carries exactly one instrument (FR7), so feeding the journal
+      // requires one. A play without an instrument (bulk mark with no active
+      // filter) is still recorded below, but creates no session/entry and stays
+      // standalone (sessionItemUid null).
+      let sessionItemUid = null;
+      if (trimmedInstrument) {
+        // Deterministic pick when several sessions share the day/instrument
+        // (legitimate via manual entry): append to the most recently created.
+        let session = await PracticeSession.findOne({
+          where: { userUid: userId, date: playedOn, instrumentType: trimmedInstrument },
+          order: [['createdAt', 'DESC']],
+          transaction,
+        });
+        if (!session) {
+          session = await PracticeSession.create({
+            userUid: userId,
+            date: playedOn,
+            instrumentType: trimmedInstrument,
+            durationMinutes: null,
+            note: null,
+          }, { transaction });
+        }
+
+        // No duplicate entry (AC4): reuse the entry if the song is already there
+        let item = await SessionItem.findOne({
+          where: { sessionUid: session.uid, songUid: song.uid },
+          transaction,
+        });
+        if (!item) {
+          const position = await SessionItem.count({ where: { sessionUid: session.uid }, transaction });
+          item = await SessionItem.create({
+            sessionUid: session.uid,
+            songUid: song.uid,
+            topicUid: null,
+            label: song.title, // FR4: server-side snapshot, survives a song deletion
+            minutes: null, // FR21: a mark-as-played entry has no duration
+            note: null,
+            position,
+          }, { transaction });
+        }
+        sessionItemUid = item.uid;
+      }
+
+      return SongPlay.create({
+        songUid: song.uid,
+        instrumentUid: instrumentUid || null,
+        instrumentType: trimmedInstrument || null,
+        playedAt,
+        sessionItemUid, // link to the journal entry (4.2), null when standalone
+      }, { transaction });
     });
 
-    // Also update the song's lastPlayed field as a fallback
+    // lastPlayed coherence is story 4.2 — left as the existing fallback for now
     await song.update({ lastPlayed: new Date() });
 
     res.status(201).json(songPlay);

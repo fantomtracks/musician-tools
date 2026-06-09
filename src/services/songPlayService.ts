@@ -1,3 +1,4 @@
+import { apiFetch } from './apiFetch';
 const API_BASE = '/api/songs';
 
 export interface SongPlay {
@@ -12,11 +13,14 @@ export interface SongPlay {
 
 export interface MarkPlayedDTO {
   instrumentType?: string;
+  // Client-local day of the play (FR19/FR21): the server no longer dates the
+  // play from its own clock. Always YYYY-MM-DD built from local components.
+  playedOn: string;
 }
 
 export const songPlayService = {
   async markPlayed(songUid: string, dto: MarkPlayedDTO): Promise<SongPlay> {
-    const response = await fetch(`${API_BASE}/${songUid}/plays`, {
+    const response = await apiFetch(`${API_BASE}/${songUid}/plays`, {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
@@ -31,7 +35,7 @@ export const songPlayService = {
   },
 
   async getPlays(songUid: string): Promise<SongPlay[]> {
-    const response = await fetch(`${API_BASE}/${songUid}/plays`, {
+    const response = await apiFetch(`${API_BASE}/${songUid}/plays`, {
       credentials: 'include'
     });
     if (!response.ok) {

@@ -76,6 +76,24 @@ function Header() {
                 >
                   Playlists
                 </Link>
+                <Link
+                  to="/my-topics"
+                  className="text-gray-700 hover:text-brand-600 font-medium transition-colors dark:text-gray-300 dark:hover:text-brand-400"
+                >
+                  Topics
+                </Link>
+                <Link
+                  to="/my-sessions"
+                  className="text-gray-700 hover:text-brand-600 font-medium transition-colors dark:text-gray-300 dark:hover:text-brand-400"
+                >
+                  Sessions
+                </Link>
+                <Link
+                  to="/my-heatmap"
+                  className="text-gray-700 hover:text-brand-600 font-medium transition-colors dark:text-gray-300 dark:hover:text-brand-400"
+                >
+                  Heatmap
+                </Link>
               </>
             )}
           </nav>

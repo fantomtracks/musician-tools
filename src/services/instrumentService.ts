@@ -1,3 +1,4 @@
+import { apiFetch } from './apiFetch';
 export type Instrument = {
   uid: string;
   name: string;
@@ -15,14 +16,14 @@ const API_BASE = '/api';
 
 export const instrumentService = {
   async getAll(): Promise<Instrument[]> {
-    const res = await fetch(`${API_BASE}/instruments`, {
+    const res = await apiFetch(`${API_BASE}/instruments`, {
       credentials: 'include'
     });
     if (!res.ok) throw new Error('Failed to fetch instruments');
     return res.json();
   },
   async create(payload: CreateInstrumentDTO): Promise<Instrument> {
-    const res = await fetch(`${API_BASE}/instruments`, {
+    const res = await apiFetch(`${API_BASE}/instruments`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(payload),
@@ -32,7 +33,7 @@ export const instrumentService = {
     return res.json();
   },
   async update(uid: string, payload: UpdateInstrumentDTO): Promise<Instrument> {
-    const res = await fetch(`${API_BASE}/instruments/${uid}`, {
+    const res = await apiFetch(`${API_BASE}/instruments/${uid}`, {
       method: 'PUT',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(payload),
@@ -42,7 +43,7 @@ export const instrumentService = {
     return res.json();
   },
   async remove(uid: string): Promise<void> {
-    const res = await fetch(`${API_BASE}/instruments/${uid}`, { method: 'DELETE', credentials: 'include' });
+    const res = await apiFetch(`${API_BASE}/instruments/${uid}`, { method: 'DELETE', credentials: 'include' });
     if (!res.ok) throw new Error('Failed to delete instrument');
   },
 };
