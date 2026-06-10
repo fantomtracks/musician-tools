@@ -39,6 +39,8 @@ export interface SongsListProps {
   filtersAccordionOpen: boolean;
   playlistAccordionOpen: boolean;
   tuningAccordionOpen: boolean;
+  difficultyAccordionOpen: boolean;
+  capoAccordionOpen: boolean;
   techniqueAccordionOpen: boolean;
   genreAccordionOpen: boolean;
   keyAccordionOpen: boolean;
@@ -87,6 +89,8 @@ export interface SongsListProps {
   setFiltersAccordionOpen: (o: boolean) => void;
   setPlaylistAccordionOpen: (o: boolean) => void;
   setTuningAccordionOpen: (o: boolean) => void;
+  setDifficultyAccordionOpen: (o: boolean) => void;
+  setCapoAccordionOpen: (o: boolean) => void;
   setTechniqueAccordionOpen: (o: boolean) => void;
   setGenreAccordionOpen: (o: boolean) => void;
   setKeyAccordionOpen: (o: boolean) => void;
@@ -126,6 +130,10 @@ export default function SongsList(props: SongsListProps) {
           setPlaylistAccordionOpen={props.setPlaylistAccordionOpen}
           tuningAccordionOpen={props.tuningAccordionOpen}
           setTuningAccordionOpen={props.setTuningAccordionOpen}
+          difficultyAccordionOpen={props.difficultyAccordionOpen}
+          setDifficultyAccordionOpen={props.setDifficultyAccordionOpen}
+          capoAccordionOpen={props.capoAccordionOpen}
+          setCapoAccordionOpen={props.setCapoAccordionOpen}
           techniqueAccordionOpen={props.techniqueAccordionOpen}
           setTechniqueAccordionOpen={props.setTechniqueAccordionOpen}
           genreAccordionOpen={props.genreAccordionOpen}

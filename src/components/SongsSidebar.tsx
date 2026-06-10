@@ -8,6 +8,10 @@ export interface SongsSidebarProps {
   setPlaylistAccordionOpen: (o: boolean) => void;
   tuningAccordionOpen: boolean;
   setTuningAccordionOpen: (o: boolean) => void;
+  difficultyAccordionOpen: boolean;
+  setDifficultyAccordionOpen: (o: boolean) => void;
+  capoAccordionOpen: boolean;
+  setCapoAccordionOpen: (o: boolean) => void;
   techniqueAccordionOpen: boolean;
   setTechniqueAccordionOpen: (o: boolean) => void;
   genreAccordionOpen: boolean;
@@ -219,42 +223,64 @@ export default function SongsSidebar(props: SongsSidebarProps) {
 
           {props.instrumentFilter && (
             <div className="card-base mt-3">
-              <div className="p-4">
-                <div className="text-xs font-semibold text-gray-700 dark:text-gray-300 mb-2">Filter by difficulty (max)</div>
-                <select
-                  value={props.instrumentDifficultyFilter === '' ? '' : props.instrumentDifficultyFilter}
-                  onChange={(e) => {
-                    const val = e.target.value === '' ? '' : Number(e.target.value);
-                    props.setInstrumentDifficultyFilter(val as number | '');
-                  }}
-                  className="input-base text-sm"
-                >
-                  <option value="">All difficulties</option>
-                  {[1,2,3,4,5].map(n => (
-                    <option key={n} value={n}>{`Up to ${n} ★`}</option>
-                  ))}
-                </select>
-              </div>
+              <button
+                type="button"
+                className="w-full flex items-center justify-between p-3 text-sm font-semibold text-gray-800 dark:text-gray-100 hover:bg-gray-50 dark:hover:bg-gray-700 rounded-t-md transition-colors shadow-sm"
+                aria-expanded={props.difficultyAccordionOpen}
+                onClick={() => props.setDifficultyAccordionOpen(!props.difficultyAccordionOpen)}
+              >
+                <span>Difficulty filter</span>
+                <span className="text-xl">{props.difficultyAccordionOpen ? '▾' : '▴'}</span>
+              </button>
+              {props.difficultyAccordionOpen && (
+                <div className="p-4 border-t border-gray-100 dark:border-gray-700">
+                  <div className="text-xs font-semibold text-gray-700 dark:text-gray-300 mb-2">Filter by difficulty (max)</div>
+                  <select
+                    value={props.instrumentDifficultyFilter === '' ? '' : props.instrumentDifficultyFilter}
+                    onChange={(e) => {
+                      const val = e.target.value === '' ? '' : Number(e.target.value);
+                      props.setInstrumentDifficultyFilter(val as number | '');
+                    }}
+                    className="input-base text-sm"
+                  >
+                    <option value="">All difficulties</option>
+                    {[1,2,3,4,5].map(n => (
+                      <option key={n} value={n}>{`Up to ${n} ★`}</option>
+                    ))}
+                  </select>
+                </div>
+              )}
             </div>
           )}
           {props.instrumentFilter === 'Guitar' && (
             <div className="card-base mt-3">
-              <div className="p-4">
-                <div className="text-xs font-semibold text-gray-700 dark:text-gray-300 mb-2">Filter by capo</div>
-                <select
-                  value={props.capoFilter === '' ? '' : props.capoFilter}
-                  onChange={(e) => {
-                    const val = e.target.value === '' ? '' : Number(e.target.value);
-                    props.setCapoFilter(val as number | '');
-                  }}
-                  className="input-base text-sm"
-                >
-                  <option value="">All capo positions</option>
-                  {Array.from({ length: 12 }, (_, idx) => idx + 1).map(n => (
-                    <option key={n} value={n}>{`Capo ${n}`}</option>
-                  ))}
-                </select>
-              </div>
+              <button
+                type="button"
+                className="w-full flex items-center justify-between p-3 text-sm font-semibold text-gray-800 dark:text-gray-100 hover:bg-gray-50 dark:hover:bg-gray-700 rounded-t-md transition-colors shadow-sm"
+                aria-expanded={props.capoAccordionOpen}
+                onClick={() => props.setCapoAccordionOpen(!props.capoAccordionOpen)}
+              >
+                <span>Capo filter</span>
+                <span className="text-xl">{props.capoAccordionOpen ? '▾' : '▴'}</span>
+              </button>
+              {props.capoAccordionOpen && (
+                <div className="p-4 border-t border-gray-100 dark:border-gray-700">
+                  <div className="text-xs font-semibold text-gray-700 dark:text-gray-300 mb-2">Filter by capo</div>
+                  <select
+                    value={props.capoFilter === '' ? '' : props.capoFilter}
+                    onChange={(e) => {
+                      const val = e.target.value === '' ? '' : Number(e.target.value);
+                      props.setCapoFilter(val as number | '');
+                    }}
+                    className="input-base text-sm"
+                  >
+                    <option value="">All capo positions</option>
+                    {Array.from({ length: 12 }, (_, idx) => idx + 1).map(n => (
+                      <option key={n} value={n}>{`Capo ${n}`}</option>
+                    ))}
+                  </select>
+                </div>
+              )}
             </div>
           )}
           {props.showTuningFilters && (
@@ -452,7 +478,7 @@ export default function SongsSidebar(props: SongsSidebarProps) {
                   </span>
                 )}
               </span>
-              <span className={`transition-transform ${props.languageAccordionOpen ? 'rotate-180' : ''}`}>▼</span>
+              <span className="text-xl">{props.languageAccordionOpen ? '▾' : '▴'}</span>
             </button>
             {props.languageAccordionOpen && (
               <div className="p-4 space-y-2 max-h-80 overflow-y-auto">

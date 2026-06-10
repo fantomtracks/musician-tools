@@ -6,8 +6,10 @@ project adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
-_Nothing yet — new changes are accumulated here, then this heading is renamed to
-`X.Y.Z — YYYY-MM-DD` when the version is bumped._
+### Changed
+- **Songlist filters — consistent accordions.** The "Difficulty" and "Capo"
+  filters are now collapsible accordions like the others (state persisted), and
+  the "Language" filter chevron uses the same glyph (`▾`/`▴`) as the rest.
 
 ## [1.3.2] — 2026-06-10
 

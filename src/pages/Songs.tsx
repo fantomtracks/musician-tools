@@ -144,6 +144,14 @@ function Songs() {
     const saved = typeof window !== 'undefined' ? window.localStorage.getItem('songsTuningAccordionOpen') : null;
     return saved === 'false' ? false : true;
   });
+  const [difficultyAccordionOpen, setDifficultyAccordionOpen] = useState<boolean>(() => {
+    const saved = typeof window !== 'undefined' ? window.localStorage.getItem('songsDifficultyAccordionOpen') : null;
+    return saved === 'false' ? false : true;
+  });
+  const [capoAccordionOpen, setCapoAccordionOpen] = useState<boolean>(() => {
+    const saved = typeof window !== 'undefined' ? window.localStorage.getItem('songsCapoAccordionOpen') : null;
+    return saved === 'false' ? false : true;
+  });
   const [keyAccordionOpen, setKeyAccordionOpen] = useState<boolean>(() => {
     const saved = typeof window !== 'undefined' ? window.localStorage.getItem('songsKeyAccordionOpen') : null;
     return saved === 'false' ? false : true;
@@ -424,6 +432,18 @@ function Songs() {
       window.localStorage.setItem('songsTuningAccordionOpen', tuningAccordionOpen ? 'true' : 'false');
     } catch { /* ignore */ }
   }, [tuningAccordionOpen]);
+
+  useEffect(() => {
+    try {
+      window.localStorage.setItem('songsDifficultyAccordionOpen', difficultyAccordionOpen ? 'true' : 'false');
+    } catch { /* ignore */ }
+  }, [difficultyAccordionOpen]);
+
+  useEffect(() => {
+    try {
+      window.localStorage.setItem('songsCapoAccordionOpen', capoAccordionOpen ? 'true' : 'false');
+    } catch { /* ignore */ }
+  }, [capoAccordionOpen]);
 
   useEffect(() => {
     try {
@@ -1449,6 +1469,10 @@ function Songs() {
           setPlaylistAccordionOpen={setPlaylistAccordionOpen}
           tuningAccordionOpen={tuningAccordionOpen}
           setTuningAccordionOpen={setTuningAccordionOpen}
+          difficultyAccordionOpen={difficultyAccordionOpen}
+          setDifficultyAccordionOpen={setDifficultyAccordionOpen}
+          capoAccordionOpen={capoAccordionOpen}
+          setCapoAccordionOpen={setCapoAccordionOpen}
           techniqueAccordionOpen={techniqueAccordionOpen}
           setTechniqueAccordionOpen={setTechniqueAccordionOpen}
           genreAccordionOpen={genreAccordionOpen}
