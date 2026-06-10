@@ -6,6 +6,11 @@ project adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+_Nothing yet — new changes are accumulated here, then this heading is renamed to
+`X.Y.Z — YYYY-MM-DD` when the version is bumped._
+
+## [1.3.2] — 2026-06-10
+
 ### Changed
 - **Songlist — row click opens the song.** Clicking a song row now opens its
   edit form; selecting a song for bulk actions is reserved to the row's checkbox.
@@ -15,6 +20,8 @@ project adheres to [Semantic Versioning](https://semver.org/).
   and the new back button (was "Songs" / "Song list").
 - **Navigation reordered** to: Songlist · Heatmap · Sessions · Playlists · Topics ·
   Instruments.
+- **"Last played" column** shrunk to its content and right-aligned, with a right
+  margin matching the checkbox column on the left.
 
 ## [1.3.1] — 2026-06-10
 
