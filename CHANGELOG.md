@@ -1,4 +1,40 @@
-# Complete Implementation Summary
+# Changelog
+
+All notable changes to this project are documented here.
+Format loosely follows [Keep a Changelog](https://keepachangelog.com/); this
+project adheres to [Semantic Versioning](https://semver.org/).
+
+## [1.3.1] — 2026-06-10
+
+### Changed
+- **Session entries — unified combobox.** The per-row search field and the
+  song/topic dropdown are merged into a single grouped combobox (Recent / Songs /
+  Topics): type to filter (accent-insensitive, also matches the artist), pick with
+  the mouse or ↑/↓ + Enter. Works in both create and edit modes.
+- **Artist shown** next to song titles, both in the session history detail and in
+  the entry picker suggestions.
+- **Entry layout.** Each entry is back on a single line (combobox + minutes +
+  BPM/note + Remove), starting below the "Entries" label.
+- **Spacing.** Larger margin between the session note and the entries section, and
+  extra breathing room between a session's note and its played songs in the history.
+- **Primary action.** "Log session" / "Save session" moved to the bottom of the
+  form, full width.
+- **Remove entry** restyled to solid red, consistent with the Delete buttons.
+
+### Fixed
+- Entry suggestion dropdown was painted behind the history card; it now renders
+  above it (stacking/z-index).
+
+## [1.3.0] — 2026-06-09
+
+- Practice journal (sessions with per-entry songs/topics, minutes and notes).
+- Annual practice heatmap with day detail and deep-links.
+- "Mark as Played" bridge that fills the journal automatically.
+- Clean re-login on an expired session (401 handling).
+
+---
+
+# Complete Implementation Summary (historical — pre-1.3 implementation notes)
 
 ## 🎉 Authentication System Fully Implemented
 

@@ -9,9 +9,8 @@ import { digitsOnly } from '../utils/digitsOnly';
 type EntryDraft = {
   key: number;
   uid?: string; // present when editing an existing entry (diff-by-uid)
-  label?: string; // FR4 snapshot, shown as "Keep ..." for orphan entries
+  label?: string; // FR4 snapshot, kept for orphan entries (refs deleted)
   ref: string; // '' | 'song:<uid>' | 'topic:<uid>'
-  query: string; // instant search filter for the picker (FR12)
   minutes: string;
   note: string;
 };
@@ -20,6 +19,144 @@ type EntryDraft = {
 // match "etude" against "Étude" (NFD strips combining diacritics)
 function foldForSearch(value: string): string {
   return value.toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '');
+}
+
+const formatSongLabel = (song: Song): string =>
+  song.artist ? `${song.title} — ${song.artist}` : song.title;
+
+// FR12 picker as a single combobox (search + selection merged): type to filter,
+// pick from the grouped suggestions below. Replaces the former search-input +
+// native-select pair. Each row owns its open/highlight state, hence a component.
+function EntryRefPicker({
+  index,
+  value,
+  orphanLabel,
+  songs,
+  topics,
+  recentRefs,
+  loading,
+  onPick,
+}: {
+  index: number;
+  value: string; // '' | 'song:<uid>' | 'topic:<uid>'
+  orphanLabel?: string; // FR4 snapshot when the referenced entity was deleted
+  songs: Song[];
+  topics: Topic[];
+  recentRefs: { ref: string; label: string }[];
+  loading: boolean;
+  onPick: (ref: string) => void;
+}) {
+  const [open, setOpen] = useState(false);
+  const [searching, setSearching] = useState(false);
+  const [searchText, setSearchText] = useState('');
+  const [active, setActive] = useState(-1);
+
+  // The label of the current selection. A deleted ref (orphan) falls back to its
+  // FR4 snapshot; an empty ref with no snapshot shows nothing (placeholder).
+  const labelForRef = (ref: string): string => {
+    if (ref.startsWith('song:')) {
+      const song = songs.find(s => `song:${s.uid}` === ref);
+      return song ? formatSongLabel(song) : (orphanLabel ?? '');
+    }
+    if (ref.startsWith('topic:')) {
+      const topic = topics.find(t => `topic:${t.uid}` === ref);
+      return topic ? topic.name : (orphanLabel ?? '');
+    }
+    return orphanLabel ?? '';
+  };
+
+  // While searching the input shows the typed query; otherwise it shows the
+  // selected label — so the field always reflects the actual ref at rest.
+  const display = searching ? searchText : labelForRef(value);
+  const query = searching ? foldForSearch(searchText.trim()) : '';
+  const filterOptions = (options: { value: string; label: string }[]) =>
+    query ? options.filter(o => foldForSearch(o.label).includes(query)) : options;
+
+  // Grouped, in display order (Recent first), empty groups dropped. A running
+  // counter gives each visible option a stable index for keyboard navigation,
+  // robust to the same ref appearing in both Recent and Songs.
+  let counter = 0;
+  const groups = [
+    { label: 'Recent', options: filterOptions(recentRefs.map(r => ({ value: r.ref, label: r.label }))) },
+    { label: 'Songs', options: filterOptions(songs.map(s => ({ value: `song:${s.uid}`, label: formatSongLabel(s) }))) },
+    { label: 'Topics', options: filterOptions(topics.map(t => ({ value: `topic:${t.uid}`, label: t.name }))) },
+  ]
+    .filter(group => group.options.length > 0)
+    .map(group => ({ label: group.label, options: group.options.map(o => ({ ...o, idx: counter++ })) }));
+  const flat = groups.flatMap(group => group.options);
+
+  const pick = (option: { value: string }) => {
+    onPick(option.value);
+    setSearching(false);
+    setSearchText('');
+    setActive(-1);
+    setOpen(false);
+  };
+
+  return (
+    <div className="relative w-full sm:flex-1 min-w-0">
+      <input
+        aria-label={`Entry ${index + 1}`}
+        role="combobox"
+        aria-expanded={open}
+        autoComplete="off"
+        placeholder="Search a song or topic..."
+        value={display}
+        onFocus={e => { setSearching(false); setActive(-1); setOpen(true); e.target.select(); }}
+        onChange={e => { setSearchText(e.target.value); setSearching(true); setActive(-1); setOpen(true); }}
+        onBlur={() => window.setTimeout(() => { setOpen(false); setSearching(false); }, 150)}
+        onKeyDown={e => {
+          if (e.key === 'ArrowDown') {
+            e.preventDefault();
+            setOpen(true);
+            setActive(a => Math.min(a + 1, flat.length - 1));
+          } else if (e.key === 'ArrowUp') {
+            e.preventDefault();
+            setActive(a => Math.max(a - 1, 0));
+          } else if (e.key === 'Enter') {
+            // Never submit the session from the picker — pick the highlighted
+            // option, or just swallow the keystroke
+            e.preventDefault();
+            if (open && active >= 0 && flat[active]) pick(flat[active]);
+          } else if (e.key === 'Escape') {
+            setOpen(false);
+            setActive(-1);
+          }
+        }}
+        className="input-base text-sm"
+        disabled={loading}
+      />
+      {open && groups.length > 0 && (
+        <div
+          role="listbox"
+          aria-label={`Entry ${index + 1} suggestions`}
+          className="absolute z-20 top-full left-0 right-0 mt-1 max-h-64 overflow-y-auto rounded-md border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 shadow-lg"
+        >
+          {groups.map(group => (
+            <div role="group" aria-label={group.label} key={group.label}>
+              <div aria-hidden="true" className="px-3 pt-2 pb-1 text-xs font-semibold uppercase tracking-wide text-gray-500 dark:text-gray-400">
+                {group.label}
+              </div>
+              {group.options.map(option => (
+                <button
+                  key={option.value}
+                  type="button"
+                  role="option"
+                  aria-selected={option.idx === active}
+                  // onMouseDown (not onClick): fire before the input's blur so the
+                  // pick is not cancelled by the dropdown closing
+                  onMouseDown={e => { e.preventDefault(); pick(option); }}
+                  className={`block w-full text-left px-3 py-2 text-sm text-gray-900 dark:text-gray-100 ${option.idx === active ? 'bg-brand-100 dark:bg-brand-900/40' : 'hover:bg-gray-100 dark:hover:bg-gray-600'}`}
+                >
+                  {option.label}
+                </button>
+              ))}
+            </div>
+          ))}
+        </div>
+      )}
+    </div>
+  );
 }
 
 // Anti-chronological: FR19 client-local date first (a retroactive session
@@ -186,7 +323,7 @@ function MySessionsPage() {
   const recentRefs = useMemo(() => {
     if (!sessions) return [];
     const labelByRef = new Map<string, string>();
-    songs.forEach(song => labelByRef.set(`song:${song.uid}`, song.title));
+    songs.forEach(song => labelByRef.set(`song:${song.uid}`, song.artist ? `${song.title} — ${song.artist}` : song.title));
     topics.forEach(topic => labelByRef.set(`topic:${topic.uid}`, topic.name));
     // "Recently logged" = creation order, NOT the date-sorted display list: a
     // retroactive session logged a minute ago sits low in the date sort but
@@ -211,9 +348,18 @@ function MySessionsPage() {
     return result;
   }, [sessions, songs, topics]);
 
+  // The session item only snapshots the FR4 title label, not the artist —
+  // resolve the artist from the live song catalog for display. A deleted song
+  // (orphan entry) or a topic entry has no artist here; the label stands alone.
+  const artistBySongUid = useMemo(() => {
+    const map = new Map<string, string>();
+    songs.forEach(song => { if (song.artist) map.set(song.uid, song.artist); });
+    return map;
+  }, [songs]);
+
   const addEntry = () => {
     entryKeyRef.current += 1;
-    setEntries(prev => [...prev, { key: entryKeyRef.current, ref: '', query: '', minutes: '', note: '' }]);
+    setEntries(prev => [...prev, { key: entryKeyRef.current, ref: '', minutes: '', note: '' }]);
   };
 
   const updateEntry = (key: number, patch: Partial<EntryDraft>) => {
@@ -259,11 +405,11 @@ function MySessionsPage() {
       return {
         key: entryKeyRef.current,
         uid: item.uid,
-        // label is only kept for orphan entries: it powers the Keep "..."
-        // option; non-orphan entries must pick a concrete ref
+        // label is only kept for orphan entries: it is the snapshot the combobox
+        // shows when the ref was deleted; non-orphan entries resolve their label
+        // from the live catalog instead
         label: isOrphan ? item.label : undefined,
         ref: item.songUid ? `song:${item.songUid}` : item.topicUid ? `topic:${item.topicUid}` : '',
-        query: '',
         minutes: item.minutes != null ? String(item.minutes) : '',
         note: item.note ?? '',
       };
@@ -422,7 +568,10 @@ function MySessionsPage() {
       )}
       <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8 space-y-6">
 
-        <div className="card-base glass-effect p-4 sm:p-5 space-y-4">
+        {/* relative z-20: the entry picker dropdown overflows the card bottom —
+            this lifts the whole form card above the History card so the dropdown
+            is not painted under it */}
+        <div className="card-base glass-effect p-4 sm:p-5 space-y-4 relative z-20">
           <div className="flex items-center justify-between">
             <h2 className="text-xl font-semibold text-gray-900 dark:text-gray-100">
               {editingSessionUid ? 'Edit session' : 'New session'}
@@ -450,7 +599,7 @@ function MySessionsPage() {
             </div>
           )}
 
-          <form onSubmit={handleSubmit} className="grid grid-cols-1 md:grid-cols-4 gap-2">
+          <form onSubmit={handleSubmit} className="grid grid-cols-1 md:grid-cols-3 gap-2">
             <div className="flex flex-col gap-1">
               <label htmlFor="session-date" className="text-xs font-semibold uppercase tracking-wide text-gray-600 dark:text-gray-400">
                 Date
@@ -515,16 +664,7 @@ function MySessionsPage() {
                 disabled={loading}
               />
             </div>
-            <div className="flex flex-col justify-end">
-              <button
-                type="submit"
-                className="btn-primary justify-center"
-                disabled={loading || !date || !instrumentType}
-              >
-                {editingSessionUid ? 'Save session' : 'Log session'}
-              </button>
-            </div>
-            <div className="flex flex-col gap-1 md:col-span-4">
+            <div className="flex flex-col gap-1 md:col-span-3">
               <label htmlFor="session-note" className="text-xs font-semibold uppercase tracking-wide text-gray-600 dark:text-gray-400">
                 Note
               </label>
@@ -540,133 +680,81 @@ function MySessionsPage() {
               />
             </div>
 
-            <fieldset className="md:col-span-4 space-y-2">
-              <legend className="float-left text-xs font-semibold uppercase tracking-wide text-gray-600 dark:text-gray-400">
+            <fieldset className="md:col-span-3 space-y-2 mt-12">
+              {/* block (not float): the legend takes its own line so the first
+                  entry row starts below "Entries", not beside it */}
+              <legend className="block w-full mb-2 text-xs font-semibold uppercase tracking-wide text-gray-600 dark:text-gray-400">
                 Entries
               </legend>
-              <div className="flex justify-end">
-                <button
-                  type="button"
-                  className="btn-secondary text-sm"
-                  onClick={addEntry}
-                  disabled={loading}
-                >
-                  Add entry
-                </button>
-              </div>
               {entries.map((entry, index) => {
-                // FR12 instant search: case-insensitive substring filter applied
-                // to all three groups at render time
-                const query = foldForSearch(entry.query.trim());
-                const visibleRecents = query
-                  ? recentRefs.filter(r => foldForSearch(r.label).includes(query))
-                  : recentRefs;
-                const visibleSongs = query
-                  ? songs.filter(song => foldForSearch(song.title).includes(query))
-                  : songs;
-                const visibleTopics = query
-                  ? topics.filter(topic => foldForSearch(topic.name).includes(query))
-                  : topics;
-                // Pin the selected option: a controlled <select> whose value has
-                // no matching option DISPLAYS the wrong option while the state
-                // keeps the old value (2.4 review lesson) — never let the
-                // filter remove the current selection from the DOM
-                const selectionVisible = entry.ref === ''
-                  || visibleSongs.some(song => `song:${song.uid}` === entry.ref)
-                  || visibleTopics.some(topic => `topic:${topic.uid}` === entry.ref)
-                  || visibleRecents.some(r => r.ref === entry.ref);
-                const selectedLabel = songs.find(song => `song:${song.uid}` === entry.ref)?.title
-                  ?? topics.find(topic => `topic:${topic.uid}` === entry.ref)?.name
-                  ?? entry.label
-                  // Catalog failed to load: never show a blank selected option
-                  ?? 'Current selection';
                 return (
-                <div key={entry.key} className="grid grid-cols-1 md:grid-cols-5 gap-2 items-start">
-                  <input
-                    aria-label={`Entry ${index + 1} search`}
-                    placeholder="Search..."
-                    value={entry.query}
-                    onChange={e => updateEntry(entry.key, { query: e.target.value })}
-                    onKeyDown={e => {
-                      // Enter while searching must not submit the session
-                      if (e.key === 'Enter') e.preventDefault();
-                    }}
-                    className="input-base text-sm"
-                    disabled={loading}
-                  />
-                  <select
-                    aria-label={`Entry ${index + 1}`}
+                <div key={entry.key} className="flex flex-col sm:flex-row sm:items-center gap-2">
+                  <EntryRefPicker
+                    index={index}
                     value={entry.ref}
-                    onChange={e => updateEntry(entry.key, { ref: e.target.value })}
-                    className="input-base text-sm"
-                    disabled={loading}
-                  >
-                    {/* Orphan entries (refs deleted) may keep their FR4 snapshot
-                        label; non-orphan existing entries must keep a real ref */}
-                    <option value="" disabled={!!entry.uid && !entry.label}>
-                      {entry.uid && entry.label ? `Keep "${entry.label}"` : 'Select a song or topic'}
-                    </option>
-                    {!selectionVisible && (
-                      <option value={entry.ref}>{selectedLabel}</option>
-                    )}
-                    {visibleRecents.length > 0 && (
-                      <optgroup label="Recent">
-                        {visibleRecents.map(recent => (
-                          <option key={`recent-${recent.ref}`} value={recent.ref}>{recent.label}</option>
-                        ))}
-                      </optgroup>
-                    )}
-                    {visibleSongs.length > 0 && (
-                      <optgroup label="Songs">
-                        {visibleSongs.map(song => (
-                          <option key={song.uid} value={`song:${song.uid}`}>{song.title}</option>
-                        ))}
-                      </optgroup>
-                    )}
-                    {visibleTopics.length > 0 && (
-                      <optgroup label="Topics">
-                        {visibleTopics.map(topic => (
-                          <option key={topic.uid} value={`topic:${topic.uid}`}>{topic.name}</option>
-                        ))}
-                      </optgroup>
-                    )}
-                  </select>
+                    // Only orphan entries (uid + snapshot, ref deleted) carry a
+                    // fallback label; a fresh empty row has none
+                    orphanLabel={entry.uid && entry.label ? entry.label : undefined}
+                    songs={songs}
+                    topics={topics}
+                    recentRefs={recentRefs}
+                    loading={loading}
+                    onPick={ref => updateEntry(entry.key, { ref })}
+                  />
                   <input
                     aria-label={`Entry ${index + 1} minutes`}
                     type="number"
                     inputMode="numeric"
                     min={1}
                     max={1440}
-                    placeholder="Minutes (optional)"
+                    placeholder="Min"
                     value={entry.minutes}
                     onChange={e => updateEntry(entry.key, { minutes: digitsOnly(e.target.value) })}
-                    className="input-base text-sm"
+                    className="input-base text-sm sm:w-20 sm:flex-none"
                     disabled={loading}
                   />
                   <input
                     aria-label={`Entry ${index + 1} note`}
-                    placeholder="e.g. at 30 BPM (optional)"
+                    placeholder="e.g. 30 BPM"
                     value={entry.note}
                     onChange={e => updateEntry(entry.key, { note: e.target.value })}
-                    className="input-base text-sm"
+                    className="input-base text-sm sm:w-40 sm:flex-none"
                     maxLength={1000}
                     disabled={loading}
                   />
-                  <div className="flex justify-end">
-                    <button
-                      type="button"
-                      aria-label={`Remove entry ${index + 1}`}
-                      className="btn-secondary text-sm"
-                      onClick={() => removeEntry(entry.key)}
-                      disabled={loading}
-                    >
-                      Remove
-                    </button>
-                  </div>
+                  <button
+                    type="button"
+                    aria-label={`Remove entry ${index + 1}`}
+                    className="shrink-0 inline-flex items-center justify-center rounded-md bg-red-600 text-white px-3 py-2 hover:bg-red-700 dark:bg-red-700 dark:hover:bg-red-800 disabled:opacity-50 disabled:cursor-not-allowed"
+                    onClick={() => removeEntry(entry.key)}
+                    disabled={loading}
+                  >
+                    Remove
+                  </button>
                 </div>
                 );
               })}
+              <button
+                type="button"
+                className="w-full inline-flex items-center justify-center gap-2 px-4 py-3 rounded-lg border-2 border-dashed border-brand-300 text-brand-700 font-semibold hover:bg-brand-50 transition-colors disabled:opacity-50 disabled:cursor-not-allowed dark:border-brand-600 dark:text-brand-300 dark:hover:bg-brand-900/30"
+                onClick={addEntry}
+                disabled={loading}
+              >
+                <span aria-hidden="true" className="text-lg leading-none">＋</span>
+                Add entry
+              </button>
             </fieldset>
+
+            {/* Primary action at the very bottom, below the entries — full width */}
+            <div className="md:col-span-3 pt-2">
+              <button
+                type="submit"
+                className="btn-primary w-full justify-center"
+                disabled={loading || !date || !instrumentType}
+              >
+                {editingSessionUid ? 'Save session' : 'Log session'}
+              </button>
+            </div>
           </form>
         </div>
 
@@ -728,14 +816,20 @@ function MySessionsPage() {
                     <p className="text-sm text-gray-700 dark:text-gray-300 whitespace-pre-wrap break-words">{session.note}</p>
                   )}
                   {session.items && session.items.length > 0 && (
-                    <ul className="space-y-1">
-                      {session.items.map(item => (
+                    // pt-3 only when a note precedes: extra breathing room between
+                    // the session note and what was played (northwood feedback)
+                    <ul className={`space-y-1${session.note ? ' pt-3' : ''}`}>
+                      {session.items.map(item => {
+                        const artist = item.songUid ? artistBySongUid.get(item.songUid) : undefined;
+                        return (
                         <li key={item.uid} className="text-sm text-gray-700 dark:text-gray-300 pl-3 border-l-2 border-gray-200 dark:border-gray-700 break-words">
                           <span className="font-medium">{item.label}</span>
-                          {item.minutes ? <span className="text-gray-500 dark:text-gray-400"> — {item.minutes} min</span> : null}
+                          {artist ? <span className="text-gray-500 dark:text-gray-400"> — {artist}</span> : null}
+                          {item.minutes ? <span className="text-gray-500 dark:text-gray-400"> · {item.minutes} min</span> : null}
                           {item.note ? <span className="text-gray-500 dark:text-gray-400 italic"> · {item.note}</span> : null}
                         </li>
-                      ))}
+                        );
+                      })}
                     </ul>
                   )}
                 </li>

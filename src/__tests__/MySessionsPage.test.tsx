@@ -51,13 +51,24 @@ beforeEach(() => {
   mockedService.getAll.mockResolvedValue([]);
 });
 
+// The combobox shows suggestions on focus; picking means clicking the option in
+// the open listbox (default fixture: SONG_UID -> "Sweet Child", TOPIC_UID ->
+// "Pentatonic scale").
+const REF_LABELS: Record<string, string> = {
+  [`song:${SONG_UID}`]: 'Sweet Child',
+  [`topic:${TOPIC_UID}`]: 'Pentatonic scale',
+};
+
+async function pickEntry(index: number, label: string) {
+  const input = await screen.findByLabelText(`Entry ${index}`);
+  fireEvent.focus(input);
+  const listbox = await screen.findByRole('listbox', { name: `Entry ${index} suggestions` });
+  fireEvent.mouseDown(within(listbox).getByRole('option', { name: label }));
+}
+
 async function addEntry(index: number, ref: string, minutes?: string) {
   fireEvent.click(screen.getByRole('button', { name: 'Add entry' }));
-  const select = await screen.findByLabelText(`Entry ${index}`);
-  // Wait for the async-loaded catalogs: changing a controlled <select> to a
-  // value with no matching <option> silently falls back to ''
-  await screen.findAllByRole('option', { name: 'Sweet Child' });
-  fireEvent.change(select, { target: { value: ref } });
+  await pickEntry(index, REF_LABELS[ref]);
   if (minutes !== undefined) {
     fireEvent.change(screen.getByLabelText(`Entry ${index} minutes`), { target: { value: minutes } });
   }
@@ -216,17 +227,18 @@ test('the toast live region is mounted before any submission', () => {
   expect(toast).toBeEmptyDOMElement();
 });
 
-test('Add entry shows a picker with Songs and Topics optgroups', async () => {
+test('Add entry shows a combobox with grouped Songs and Topics suggestions', async () => {
   render(<MySessionsPage />);
 
   fireEvent.click(screen.getByRole('button', { name: 'Add entry' }));
 
-  const select = await screen.findByLabelText('Entry 1');
-  expect(select).toBeInTheDocument();
-  expect(screen.getByRole('group', { name: 'Songs' })).toBeInTheDocument();
-  expect(screen.getByRole('group', { name: 'Topics' })).toBeInTheDocument();
-  expect(screen.getByRole('option', { name: 'Sweet Child' })).toBeInTheDocument();
-  expect(screen.getByRole('option', { name: 'Pentatonic scale' })).toBeInTheDocument();
+  const input = await screen.findByLabelText('Entry 1');
+  fireEvent.focus(input);
+  const listbox = await screen.findByRole('listbox', { name: 'Entry 1 suggestions' });
+  expect(within(listbox).getByRole('group', { name: 'Songs' })).toBeInTheDocument();
+  expect(within(listbox).getByRole('group', { name: 'Topics' })).toBeInTheDocument();
+  expect(within(listbox).getByRole('option', { name: 'Sweet Child' })).toBeInTheDocument();
+  expect(within(listbox).getByRole('option', { name: 'Pentatonic scale' })).toBeInTheDocument();
 });
 
 test('submitting with entries sends decoded song/topic items', async () => {
@@ -358,6 +370,33 @@ test('the history lists sessions with date, instrument, duration, notes and entr
   expect(within(history).getByText(/15 min/)).toBeInTheDocument();
   expect(within(history).getByText(/at 30 BPM/)).toBeInTheDocument();
   expect(within(history).getByText(/Pentatonic scale/)).toBeInTheDocument();
+});
+
+test('the history shows the artist next to the song, resolved from the catalog', async () => {
+  mockedSongService.getAllSongs.mockResolvedValue([
+    { uid: SONG_UID, title: 'Sweet Child', artist: "Guns N' Roses" } as never,
+  ]);
+  mockedService.getAll.mockResolvedValue([
+    {
+      uid: 's1',
+      date: '2026-06-05',
+      instrumentType: 'Bass',
+      items: [
+        // songUid drives the artist lookup; the topic item has no artist
+        { uid: 'i1', sessionUid: 's1', songUid: SONG_UID, label: 'Sweet Child', minutes: 15 },
+        { uid: 'i2', sessionUid: 's1', topicUid: TOPIC_UID, label: 'Pentatonic scale', minutes: 25 },
+      ],
+    },
+  ]);
+
+  render(<MySessionsPage />);
+
+  const history = await screen.findByRole('list', { name: 'Session history' });
+  // The artist is appended to the song entry...
+  expect(within(history).getByText(/Guns N' Roses/)).toBeInTheDocument();
+  // ...but the topic entry stays artist-less
+  const topicEntry = within(history).getByText('Pentatonic scale').closest('li')!;
+  expect(topicEntry.textContent).not.toMatch(/Guns N' Roses/);
 });
 
 test('shows the empty history state', async () => {
@@ -517,8 +556,11 @@ test('Edit populates the form, shows the banner, and Save sends a diff-by-uid pa
   expect(screen.getByLabelText('Instrument')).toHaveValue('Bass');
   expect(screen.getByLabelText('Duration')).toHaveValue(40);
   expect(screen.getByLabelText('Note')).toHaveValue('old note');
-  expect(screen.getByLabelText('Entry 1')).toHaveValue(`song:${SONG_UID}`);
+  // The combobox shows the resolved label of the selected song, not its ref
+  expect(screen.getByLabelText('Entry 1')).toHaveValue('Sweet Child');
   expect(screen.getByLabelText('Entry 1 minutes')).toHaveValue(15);
+  // The former separate search box is gone — search is merged into the combobox
+  expect(screen.queryByLabelText('Entry 1 search')).not.toBeInTheDocument();
 
   fireEvent.change(screen.getByLabelText('Note'), { target: { value: 'new note' } });
   fireEvent.click(screen.getByRole('button', { name: 'Save session' }));
@@ -550,7 +592,7 @@ test('Cancel edit restores a blank form without calling the API', async () => {
   expect(screen.queryByLabelText('Entry 1')).not.toBeInTheDocument();
 });
 
-test('an orphan entry shows Keep "label" and is sent back without a ref (FR4)', async () => {
+test('an orphan entry shows its snapshot label and is sent back without a ref (FR4)', async () => {
   const orphanSession = {
     ...editableSession(),
     items: [{ uid: ITEM_UID, sessionUid: 's-edit', songUid: null, topicUid: null, label: 'Ghost topic', minutes: 10, note: null }],
@@ -561,8 +603,8 @@ test('an orphan entry shows Keep "label" and is sent back without a ref (FR4)', 
   render(<MySessionsPage />);
   fireEvent.click(await screen.findByRole('button', { name: 'Edit session of 2026-06-05' }));
 
-  expect(screen.getByRole('option', { name: 'Keep "Ghost topic"' })).toBeInTheDocument();
-  expect(screen.getByLabelText('Entry 1')).toHaveValue('');
+  // The combobox shows the FR4 snapshot as its value; the ref stays empty
+  expect(screen.getByLabelText('Entry 1')).toHaveValue('Ghost topic');
 
   fireEvent.click(screen.getByRole('button', { name: 'Save session' }));
 
@@ -583,8 +625,7 @@ test('reclassifying an orphan entry sends the new topic ref (FR4)', async () => 
 
   render(<MySessionsPage />);
   fireEvent.click(await screen.findByRole('button', { name: 'Edit session of 2026-06-05' }));
-  await screen.findAllByRole('option', { name: 'Pentatonic scale' });
-  fireEvent.change(screen.getByLabelText('Entry 1'), { target: { value: `topic:${TOPIC_UID}` } });
+  await pickEntry(1, 'Pentatonic scale');
   fireEvent.click(screen.getByRole('button', { name: 'Save session' }));
 
   await waitFor(() => {
@@ -650,15 +691,20 @@ test('FR13 in edit mode: clearing the duration persists "no duration"', async ()
   });
 });
 
-test('the Keep option is reserved for orphan entries', async () => {
+test('clearing a non-orphan entry and blurring reverts to its selected song', async () => {
   mockedService.getAll.mockResolvedValue([editableSession()]);
 
   render(<MySessionsPage />);
   fireEvent.click(await screen.findByRole('button', { name: 'Edit session of 2026-06-05' }));
 
-  // Non-orphan entry: no Keep option, and the placeholder is disabled
-  expect(screen.queryByRole('option', { name: /^Keep/ })).not.toBeInTheDocument();
-  expect(screen.getByRole('option', { name: 'Select a song or topic' })).toBeDisabled();
+  const input = screen.getByLabelText('Entry 1');
+  expect(input).toHaveValue('Sweet Child');
+
+  // Typing then leaving without picking must not drop a real ref: the field
+  // snaps back to the current selection
+  fireEvent.change(input, { target: { value: '' } });
+  fireEvent.blur(input);
+  await waitFor(() => expect(input).toHaveValue('Sweet Child'));
 });
 
 test('entering edit mode moves focus to the Date field', async () => {
@@ -749,48 +795,45 @@ test('FR12: recently logged songs and topics appear first, deduplicated, current
   await screen.findAllByText(/Sweet Child/);
   fireEvent.click(screen.getByRole('button', { name: 'Add entry' }));
 
-  const select = await screen.findByLabelText('Entry 1');
-  const recentGroup = within(select).getByRole('group', { name: 'Recent' });
+  fireEvent.focus(await screen.findByLabelText('Entry 1'));
+  const listbox = await screen.findByRole('listbox', { name: 'Entry 1 suggestions' });
+  const recentGroup = within(listbox).getByRole('group', { name: 'Recent' });
   const recentOptions = within(recentGroup).getAllByRole('option');
 
   // Order of first occurrence, deduplicated, current catalog name (not the stale snapshot)
   expect(recentOptions.map(o => o.textContent)).toEqual(['Pentatonic scale', 'Sweet Child']);
   expect(within(recentGroup).queryByText('Ghost topic')).not.toBeInTheDocument();
   // Recent group is rendered before Songs/Topics groups
-  const groups = within(select).getAllByRole('group');
+  const groups = within(listbox).getAllByRole('group');
   expect(groups[0]).toHaveAccessibleName('Recent');
 });
 
-test('FR12: instant search filters the picker options and clearing restores them', async () => {
+test('FR12: instant search filters the picker suggestions and clearing restores them', async () => {
   render(<MySessionsPage />);
   fireEvent.click(screen.getByRole('button', { name: 'Add entry' }));
-  const select = await screen.findByLabelText('Entry 1');
-  await screen.findAllByRole('option', { name: 'Sweet Child' });
+  const input = await screen.findByLabelText('Entry 1');
+  fireEvent.focus(input);
+  const listbox = await screen.findByRole('listbox', { name: 'Entry 1 suggestions' });
 
-  fireEvent.change(screen.getByLabelText('Entry 1 search'), { target: { value: 'penta' } });
+  fireEvent.change(input, { target: { value: 'penta' } });
+  expect(within(listbox).getByRole('option', { name: 'Pentatonic scale' })).toBeInTheDocument();
+  expect(within(listbox).queryByRole('option', { name: 'Sweet Child' })).not.toBeInTheDocument();
 
-  expect(within(select).getByRole('option', { name: 'Pentatonic scale' })).toBeInTheDocument();
-  expect(within(select).queryByRole('option', { name: 'Sweet Child' })).not.toBeInTheDocument();
-
-  fireEvent.change(screen.getByLabelText('Entry 1 search'), { target: { value: '' } });
-  expect(within(select).getByRole('option', { name: 'Sweet Child' })).toBeInTheDocument();
+  fireEvent.change(input, { target: { value: '' } });
+  expect(within(listbox).getByRole('option', { name: 'Sweet Child' })).toBeInTheDocument();
 });
 
-test('FR12: the selected option stays rendered even when filtered out', async () => {
+test('FR12: a mismatched search does not lose the selected ref', async () => {
   mockedService.create.mockResolvedValue({ uid: 's1', date: todayLocalDate(), instrumentType: 'Bass' });
 
   render(<MySessionsPage />);
   fireEvent.change(screen.getByLabelText('Instrument'), { target: { value: 'Bass' } });
   await addEntry(1, `song:${SONG_UID}`);
 
-  // Filter that matches nothing the selection belongs to
-  fireEvent.change(screen.getByLabelText('Entry 1 search'), { target: { value: 'penta' } });
+  // The selection is held in state, not in the field text: a non-matching query
+  // typed afterwards must not drop it
+  fireEvent.change(screen.getByLabelText('Entry 1'), { target: { value: 'penta' } });
 
-  const select = screen.getByLabelText('Entry 1');
-  expect(select).toHaveValue(`song:${SONG_UID}`);
-  expect(within(select).getByRole('option', { name: 'Sweet Child' })).toBeInTheDocument();
-
-  // And the submit still sends the right ref
   fireEvent.click(screen.getByRole('button', { name: 'Log session' }));
   await waitFor(() => {
     expect(mockedService.create).toHaveBeenCalledWith(
@@ -815,8 +858,9 @@ test('FR12: Recent is ordered by creation time, capped at 5', async () => {
   await screen.findByText(todayLocalDate());
   fireEvent.click(screen.getByRole('button', { name: 'Add entry' }));
 
-  const select = await screen.findByLabelText('Entry 1');
-  const recentGroup = within(select).getByRole('group', { name: 'Recent' });
+  fireEvent.focus(await screen.findByLabelText('Entry 1'));
+  const listbox = await screen.findByRole('listbox', { name: 'Entry 1 suggestions' });
+  const recentGroup = within(listbox).getByRole('group', { name: 'Recent' });
   const names = within(recentGroup).getAllByRole('option').map(o => o.textContent);
 
   // 5 max, and the freshly logged session's items fill the slots first
@@ -830,13 +874,14 @@ test('FR12: search is accent-insensitive (French catalog)', async () => {
 
   render(<MySessionsPage />);
   fireEvent.click(screen.getByRole('button', { name: 'Add entry' }));
-  const select = await screen.findByLabelText('Entry 1');
-  await screen.findAllByRole('option', { name: 'Étude en mi' });
+  const input = await screen.findByLabelText('Entry 1');
+  fireEvent.focus(input);
+  const listbox = await screen.findByRole('listbox', { name: 'Entry 1 suggestions' });
 
-  fireEvent.change(screen.getByLabelText('Entry 1 search'), { target: { value: 'etude' } });
+  fireEvent.change(input, { target: { value: 'etude' } });
 
-  expect(within(select).getByRole('option', { name: 'Étude en mi' })).toBeInTheDocument();
-  expect(within(select).queryByRole('option', { name: 'Pentatonic scale' })).not.toBeInTheDocument();
+  expect(within(listbox).getByRole('option', { name: 'Étude en mi' })).toBeInTheDocument();
+  expect(within(listbox).queryByRole('option', { name: 'Pentatonic scale' })).not.toBeInTheDocument();
 });
 
 test('FR12: a legacy instrument absent from the options is never pre-filled', async () => {
@@ -851,12 +896,12 @@ test('FR12: a legacy instrument absent from the options is never pre-filled', as
   expect(screen.getByRole('button', { name: 'Log session' })).toBeDisabled();
 });
 
-test('FR12: Enter in the search field does not submit the session', async () => {
+test('FR12: Enter in the picker does not submit the session', async () => {
   render(<MySessionsPage />);
   fireEvent.change(screen.getByLabelText('Instrument'), { target: { value: 'Bass' } });
   await addEntry(1, `song:${SONG_UID}`);
 
-  fireEvent.keyDown(screen.getByLabelText('Entry 1 search'), { key: 'Enter' });
+  fireEvent.keyDown(screen.getByLabelText('Entry 1'), { key: 'Enter' });
 
   expect(mockedService.create).not.toHaveBeenCalled();
 });
