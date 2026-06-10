@@ -86,6 +86,8 @@ FR20: Epic 3 - Heatmap visible dès le premier jour
 FR21: Epic 4 - « Mark as Played » crée/complète la session du jour de l'instrument
 FR22: Epic 3 - Rétro-import de l'historique de lectures dans la heatmap
 FR23: Epic 4 - Cohérence bidirectionnelle du « dernier joué » (mise à jour + recalcul)
+FR24: Epic 6 - Durée de chanson (champ optionnel) alimentant le pré-remplissage du temps de session
+FR21 (amendé 2026-06-10): Epic 4 + Epic 6 - Mark as Played pré-remplit / incrémente les minutes depuis la durée de chanson
 
 ## Epic List
 
@@ -105,7 +107,18 @@ Je vois ma régularité dans une grille annuelle type GitHub — et ma grille a 
 Je joue comme avant — « Mark as Played » — et mon journal se remplit tout seul, sans jamais fausser mon « dernier joué ».
 **FRs covered:** FR21, FR23
 
-**Dépendances :** E1 → E2 → (E3 ∥ E4). Les epics 3 et 4 sont indépendants l'un de l'autre. Les NFR1-NFR6 transverses s'appliquent aux critères d'acceptation des stories concernées.
+### Epic 5: Robustesse / confort (post-PRD, issu des rétros)
+Petites stories de robustesse et de confort nées des rétros et du terrain (pas dans le PRD initial). Stories : 5.1 re-login 401 (done), 5.2 saisie de session repensée / combobox (done, v1.3.1), 5.3 Songlist & navigation au propre (ready). Détail dans `implementation-artifacts/`.
+
+### Epic 6: Capture enrichie — durée de répertoire
+Je renseigne une durée sur mes chansons et le « Mark as Played » remplit automatiquement le temps de ma session.
+**FRs covered:** FR24, FR21 (amendé)
+
+### Epic 7: Compte utilisateur (HORS PRD initial)
+J'édite mon profil (name, email, mot de passe). **Hors scope du PRD musician-tools** — nécessite un product-brief + design sécurité avant dev (bloqué).
+**FRs covered:** — (à cadrer)
+
+**Dépendances :** E1 → E2 → (E3 ∥ E4). Les epics 3 et 4 sont indépendants l'un de l'autre. E6 dépend d'E4 (pont Mark as Played). E5 et E7 sont transverses. Les NFR1-NFR6 transverses s'appliquent aux critères d'acceptation des stories concernées.
 
 ## Epic 1: Ma bibliothèque de sujets de travail
 
@@ -437,3 +450,59 @@ So that mon usage quotidien — repêcher les morceaux délaissés — reste fia
 **Given** le tri « dernier joué » existant de la liste de chansons
 **When** toutes ces opérations s'exécutent
 **Then** le tri reflète toujours la réalité — aucune régression de l'usage existant (FR23, CM2)
+
+---
+
+## Epic 6: Capture enrichie — durée de répertoire
+
+_Ajouté 2026-06-10 (Correct Course). PRD amendé : FR21 + FR24. Décision : « pré-remplir mais éditable »._
+
+### Story 6.1: Durée de chanson → temps de session auto
+
+As a musicien qui marque ses chansons jouées,
+I want que la durée de la chanson alimente automatiquement le temps de ma session,
+So that mon journal reflète mon temps de pratique sans saisie manuelle.
+
+**Acceptance Criteria:**
+
+**Given** le formulaire chanson
+**When** je renseigne une durée (minutes)
+**Then** elle est persistée ; une chanson sans durée reste valide (FR24, champ nullable)
+
+**Given** une chanson avec une durée
+**When** je clique « Mark as Played Now »
+**Then** l'entrée créée porte cette durée en minutes (FR21 amendé), éditable a posteriori
+
+**Given** une chanson sans durée
+**When** je la marque jouée
+**Then** l'entrée est ajoutée sans minutes (FR21 d'origine)
+
+**Given** la même chanson déjà entrée dans la session du jour
+**When** je la re-marque jouée
+**Then** pas de doublon, mais les minutes de l'entrée existante sont incrémentées de la durée (le temps s'additionne)
+
+**Given** des entrées portant des minutes
+**When** la durée totale de session est calculée
+**Then** elle suit FR13 (somme, surchargeable) — aucune régression de l'édition de session ni du répertoire (CM2)
+
+---
+
+## Epic 7: Compte utilisateur (HORS PRD initial)
+
+_Ajouté 2026-06-10 (Correct Course). **Hors scope du PRD musician-tools** (auth supposée préexistante). **Bloqué** : product-brief + design sécurité requis avant dev (Major, PM/Architect)._
+
+### Story 7.1: Éditer mon profil (name, email, mot de passe)
+
+As a utilisateur,
+I want pouvoir modifier mon nom, mon email et mon mot de passe,
+So that je garde mon compte à jour sans support.
+
+**Acceptance Criteria (esquisse — à raffiner au cadrage) :**
+
+**Given** une page Profil accessible depuis le Header (authentifié)
+**When** je modifie name / email
+**Then** c'est persisté, avec unicité vérifiée hors soi-même (400 explicite sinon)
+
+**Given** un changement de mot de passe
+**When** je le soumets
+**Then** le mot de passe actuel est exigé et vérifié (`validPassword`), le nouveau est confirmé, le hachage passe par le setter bcryptjs, et la réponse ne renvoie jamais le hash

@@ -108,9 +108,10 @@ Fin de mois, Léa ouvre la heatmap : trois semaines denses, une semaine creuse (
 
 ### Groupe D — Pont avec l'existant
 
-- **FR21** : Cliquer « Mark as Played Now » sur une chanson crée la session du jour **pour l'instrument concerné** (si absente) ou la complète : la chanson est ajoutée comme entrée, sans minutes. Le jour est la date locale de l'appareil (cf. FR19).
+- **FR21** _(amendé 2026-06-10 — cf. sprint-change-proposal-2026-06-10)_ : Cliquer « Mark as Played Now » sur une chanson crée la session du jour **pour l'instrument concerné** (si absente) ou la complète. **Si la chanson porte une durée (FR24), l'entrée créée est pré-remplie avec cette durée en minutes (éditable a posteriori via l'édition de session) ; sinon l'entrée est ajoutée sans minutes (comportement d'origine).** Re-marquer la même chanson dans la session du jour **n'ajoute pas d'entrée dupliquée mais incrémente** les minutes de l'entrée existante de la durée de la chanson (le temps s'additionne). La durée totale de session suit FR13. Le jour est la date locale de l'appareil (cf. FR19).
 - **FR22** : **Rétro-import** : l'historique de lectures existant (enregistrements de « Mark as Played » passés) est projeté dans la heatmap — chaque lecture passée allume son jour à l'intensité minimale. La grille a une histoire dès le lancement.
 - **FR23** : La cohérence inverse est maintenue : ajouter une chanson à une session met à jour son « dernier joué » pour l'instrument de la session si la date de la session est plus récente ; éditer la date d'une session ou la supprimer **recalcule** le « dernier joué » des chansons concernées. Le filtre « dernier joué » existant ne ment jamais.
+- **FR24** _(ajouté 2026-06-10)_ : L'utilisateur peut renseigner une **durée optionnelle (minutes)** sur une chanson de son répertoire (champ dans le formulaire chanson). Cette durée alimente le pré-remplissage du temps de session au « Mark as Played » (FR21). Une chanson sans durée se comporte comme avant (CM2 : aucune régression du répertoire existant).
 
 ## 6. Exigences non fonctionnelles
 

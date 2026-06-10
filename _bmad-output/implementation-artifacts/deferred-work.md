@@ -1,5 +1,9 @@
 # Deferred Work
 
+## Note Correct Course (2026-06-10)
+
+- **Nav mobile toujours cassée** : la story 5.3 a réordonné/renommé le menu desktop (« Songlist »), mais la nav reste `hidden md:flex` sans menu hamburger → sur mobile, toujours aucun lien (NFR3). Réordonner ≠ réparer. Dette inchangée, candidate à une story dédiée (nav responsive + hamburger).
+
 ## Deferred from: code review of 2-3-consulter-mon-historique-de-sessions (2026-06-07)
 
 - Ordre de saisie des entrées de session : `bulkCreate` horodate tout le batch au même instant, donc le GET ne peut pas restituer l'ordre de saisie (tiebreak `uid` = déterministe mais arbitraire). Restituer fidèlement l'ordre nécessite une colonne `position` sur `SessionItems` — à considérer avec la story 2.4 (édition des entrées) si l'ordre devient éditable/important.
