@@ -75,6 +75,7 @@ development_status:
   5-1-session-expiree-re-login-propre: done
   5-2-saisie-de-session-repensee-combobox: done       # rétroactif, livré v1.3.1 (f1feee5)
   5-3-songlist-et-navigation-au-propre: done           # committé 8dc2f06
+  5-4-filtres-songlist-coherents: done
   epic-5-retrospective: optional
 
   # Epic 6: Capture enrichie — durée de répertoire (PRD amendé : FR21 + FR24)
