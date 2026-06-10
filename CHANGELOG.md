@@ -6,6 +6,11 @@ project adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+_Nothing yet — new changes are accumulated here, then this heading is renamed to
+`X.Y.Z — YYYY-MM-DD` when the version is bumped._
+
+## [1.3.3] — 2026-06-10
+
 ### Changed
 - **Songlist filters — consistent accordions.** The "Difficulty" and "Capo"
   filters are now collapsible accordions like the others (state persisted), and
