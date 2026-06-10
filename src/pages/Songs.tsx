@@ -1341,12 +1341,12 @@ function Songs() {
 
   const allDisplayedSelected = displayedSongs.length > 0 && displayedSongs.every(song => selectedSongs.has(song.uid));
 
-  const SortHeader = ({ column, label }: { column: string; label: string }) => (
+  const SortHeader = ({ column, label, align = 'left' }: { column: string; label: string; align?: 'left' | 'right' }) => (
     <th
-      className="text-left p-2 border-b dark:border-gray-700 cursor-pointer hover:bg-gray-100 dark:hover:bg-gray-700"
+      className={`p-2 border-b dark:border-gray-700 cursor-pointer hover:bg-gray-100 dark:hover:bg-gray-700 whitespace-nowrap ${align === 'right' ? 'text-right pr-4' : 'text-left'}`}
       onClick={() => handleSort(column)}
     >
-      <div className="flex items-center gap-1">
+      <div className={`flex items-center gap-1 ${align === 'right' ? 'justify-end' : ''}`}>
         {label}
         {sortColumn === column && (
           <span className="text-sm">{sortDirection === 'asc' ? '▲' : '▼'}</span>
@@ -1524,7 +1524,19 @@ function Songs() {
                 <Link to="/" className="text-2xl font-semibold text-gradient">Musician Tools</Link>
                 <p className="text-sm text-gray-600 dark:text-gray-400">{editingUid ? 'Edit a song' : 'Add a song'}</p>
               </div>
-
+              <button
+                type="button"
+                className="btn-secondary text-sm"
+                onClick={() => {
+                  setEditingUid(null);
+                  setForm(initialSong);
+                  setMetadataSource(null);
+                  setPage('list');
+                }}
+                disabled={loading}
+              >
+                <span aria-hidden="true">←</span> Songlist
+              </button>
             </div>
           <SongForm
             mode={editingUid ? 'edit' : 'add'}

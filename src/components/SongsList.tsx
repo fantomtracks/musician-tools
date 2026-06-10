@@ -110,7 +110,7 @@ export interface SongsListProps {
   // Additional handlers
   getLastPlayedForSong: (uid: string) => string | undefined;
   formatLastPlayed: (date: string | undefined) => string;
-  SortHeader: (props: { column: string; label: string }) => ReactNode;
+  SortHeader: (props: { column: string; label: string; align?: 'left' | 'right' }) => ReactNode;
 }
 
 export default function SongsList(props: SongsListProps) {
@@ -195,7 +195,7 @@ export default function SongsList(props: SongsListProps) {
           <div className="card-base glass-effect p-4 sm:p-5">
             <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
               <div>
-                <h2 className="text-xl font-semibold text-gray-900">Song list</h2>
+                <h2 className="text-xl font-semibold text-gray-900">Songlist</h2>
                 <p className="text-sm text-gray-600 dark:text-gray-400">Manage your songs, filters, and playlists.</p>
               </div>
               <button
@@ -345,8 +345,7 @@ export default function SongsList(props: SongsListProps) {
                       </th>
                       <props.SortHeader column="artist" label="Artist" />
                       <props.SortHeader column="title" label="Title" />
-                      <props.SortHeader column="lastPlayed" label="Last played" />
-                      <th className="text-left p-2 border-b dark:border-gray-700">Actions</th>
+                      <props.SortHeader column="lastPlayed" label="Last played" align="right" />
                     </tr>
                   </thead>
                   <tbody>
@@ -354,7 +353,9 @@ export default function SongsList(props: SongsListProps) {
                       <tr
                         key={song.uid}
                         className={`border-b dark:border-gray-700 cursor-pointer ${props.selectedSongs.has(song.uid) ? 'bg-blue-50 hover:bg-blue-100 dark:bg-blue-900 dark:hover:bg-blue-800' : 'hover:bg-gray-50 dark:hover:bg-gray-700'}`}
-                        onClick={() => props.toggleSelectSong(song.uid)}
+                        // Row click opens the song (its edit form); selection is
+                        // reserved to the checkbox, which stops propagation below
+                        onClick={() => props.onEdit(song)}
                       >
                         <td
                           className="p-2 text-center w-12"
@@ -372,18 +373,8 @@ export default function SongsList(props: SongsListProps) {
                         </td>
                         <td className="p-2 align-middle max-w-xs truncate" title={song.artist}>{song.artist}</td>
                         <td className="p-2 align-middle max-w-sm truncate" title={song.title}>{song.title}</td>
-                        <td className="p-2 align-middle max-w-32">
+                        <td className="p-2 pr-4 align-middle text-right whitespace-nowrap w-px">
                           {props.instrumentFilter ? props.formatLastPlayed(props.getLastPlayedForSong(song.uid)) : 'Select instrument'}
-                        </td>
-                        <td className="p-2 align-middle">
-                          <button
-                            type="button"
-                            className="btn-secondary text-xs"
-                            onClick={() => props.onEdit(song)}
-                            disabled={props.loading}
-                          >
-                            Edit
-                          </button>
                         </td>
                       </tr>
                     ))}

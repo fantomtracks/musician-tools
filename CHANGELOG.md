@@ -6,8 +6,15 @@ project adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
-_Nothing yet — new changes are accumulated here, then this heading is renamed to
-`X.Y.Z — YYYY-MM-DD` when the version is bumped._
+### Changed
+- **Songlist — row click opens the song.** Clicking a song row now opens its
+  edit form; selecting a song for bulk actions is reserved to the row's checkbox.
+  The now-redundant "Actions" column (Edit button) was removed.
+- **Song editor** gained a "← Songlist" back button to return to the list.
+- **Wording harmonized to "Songlist"** across the nav menu, the list page title,
+  and the new back button (was "Songs" / "Song list").
+- **Navigation reordered** to: Songlist · Heatmap · Sessions · Playlists · Topics ·
+  Instruments.
 
 ## [1.3.1] — 2026-06-10
 
