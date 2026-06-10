@@ -4,6 +4,11 @@ All notable changes to this project are documented here.
 Format loosely follows [Keep a Changelog](https://keepachangelog.com/); this
 project adheres to [Semantic Versioning](https://semver.org/).
 
+## [Unreleased]
+
+_Nothing yet — new changes are accumulated here, then this heading is renamed to
+`X.Y.Z — YYYY-MM-DD` when the version is bumped._
+
 ## [1.3.1] — 2026-06-10
 
 ### Changed
