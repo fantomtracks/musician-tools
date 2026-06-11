@@ -6,6 +6,11 @@ project adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+_Nothing yet — new changes are accumulated here, then this heading is renamed to
+`X.Y.Z — YYYY-MM-DD` when the version is bumped._
+
+## [1.3.5] — 2026-06-11
+
 ### Changed
 - **Playlists now use a real database link to songs.** A playlist's songs moved
   from a denormalized list of IDs (no integrity) to a proper join table with a
