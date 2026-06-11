@@ -6,8 +6,12 @@ project adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
-_Nothing yet — new changes are accumulated here, then this heading is renamed to
-`X.Y.Z — YYYY-MM-DD` when the version is bumped._
+### Changed
+- **Song labels unified to "Artist - Title".** Session history (entry combobox,
+  "Recent" group, and the read-only entry list) and the heatmap day-detail now
+  display songs as `Artist - Title` (hyphen), consistent with the Playlists view
+  — previously the sessions showed `Title — Artist`. The artist now shares the
+  title's color in the entry list.
 
 ## [1.3.3] — 2026-06-10
 

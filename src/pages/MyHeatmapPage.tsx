@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { Link } from 'react-router-dom';
 import { practiceSessionService, type DayPlay, type HeatmapDay, type PracticeSession } from '../services/practiceSessionService';
+import { songService, type Song } from '../services/songService';
 import { ConfirmDialog } from '../components/ConfirmDialog';
 import { buildYearGrid, computeLevels, formatLocalDate } from '../utils/heatmap';
 
@@ -40,6 +41,10 @@ function MyHeatmapPage() {
   const [deleteInFlight, setDeleteInFlight] = useState(false);
   // Bumped after a deletion: the day's aggregate changed, the grid must refetch
   const [heatmapVersion, setHeatmapVersion] = useState(0);
+  // Song catalog, loaded once: a session item only snapshots the title (FR4),
+  // so the artist is resolved from the live catalog for display — same as the
+  // Sessions history. Purely cosmetic: a load failure just omits the artist.
+  const [songs, setSongs] = useState<Song[]>([]);
   // Mirrors selectedDate for async completions (a slow DELETE must not touch
   // the panel of a day selected afterwards)
   const selectedDateRef = useRef<string | null>(null);
@@ -59,6 +64,22 @@ function MyHeatmapPage() {
     })();
     return () => { cancelled = true; };
   }, [year, heatmapVersion]);
+
+  // Song catalog fetched once on mount: artist is a display-only enrichment of
+  // the day-detail entries (Story 5.5 "Artist - Title" consistency). A failure
+  // is swallowed — the title snapshot still renders without an artist.
+  useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      try {
+        const data = await songService.getAllSongs();
+        if (!cancelled) setSongs(data ?? []);
+      } catch {
+        // Artist is optional: keep songs empty, entries render title-only
+      }
+    })();
+    return () => { cancelled = true; };
+  }, []);
 
   // Day detail (FR16): sessions and projected plays (FR22) fetched in parallel
   // per selected day; a slow response for a previously selected day must not
@@ -147,6 +168,15 @@ function MyHeatmapPage() {
       document.getElementById('heatmap-next-year')?.focus();
     }
   };
+
+  // Resolve artists from the live catalog (the session item only snapshots the
+  // title). Only songs with an artist are mapped — orphan/topic entries and
+  // artist-less songs fall back to title-only, like the Sessions history.
+  const artistBySongUid = useMemo(() => {
+    const map = new Map<string, string>();
+    songs.forEach(song => { if (song.artist) map.set(song.uid, song.artist); });
+    return map;
+  }, [songs]);
 
   const grid = useMemo(() => buildYearGrid(year), [year]);
   const levelFor = useMemo(() => computeLevels(days ?? []), [days]);
@@ -436,13 +466,17 @@ function MyHeatmapPage() {
                     )}
                     {session.items && session.items.length > 0 && (
                       <ul className="space-y-1">
-                        {session.items.map(item => (
+                        {session.items.map(item => {
+                          const artist = item.songUid ? artistBySongUid.get(item.songUid) : undefined;
+                          return (
                           <li key={item.uid} className="text-sm text-gray-700 dark:text-gray-300 pl-3 border-l-2 border-gray-200 dark:border-gray-700 break-words">
+                            {artist ? <span>{artist} - </span> : null}
                             <span className="font-medium">{item.label}</span>
-                            {item.minutes ? <span className="text-gray-500 dark:text-gray-400"> — {item.minutes} min</span> : null}
+                            {item.minutes ? <span className="text-gray-500 dark:text-gray-400"> · {item.minutes} min</span> : null}
                             {item.note ? <span className="text-gray-500 dark:text-gray-400 italic"> · {item.note}</span> : null}
                           </li>
-                        ))}
+                          );
+                        })}
                       </ul>
                     )}
                   </li>

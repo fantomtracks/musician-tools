@@ -2,6 +2,7 @@ import { render, screen, fireEvent, within, act, waitFor } from '@testing-librar
 import { MemoryRouter } from 'react-router-dom';
 import MyHeatmapPage from '../pages/MyHeatmapPage';
 import { practiceSessionService } from '../services/practiceSessionService';
+import { songService } from '../services/songService';
 import { buildYearGrid, formatLocalDate } from '../utils/heatmap';
 
 jest.mock('../services/practiceSessionService', () => ({
@@ -13,7 +14,14 @@ jest.mock('../services/practiceSessionService', () => ({
   },
 }));
 
+jest.mock('../services/songService', () => ({
+  songService: {
+    getAllSongs: jest.fn(),
+  },
+}));
+
 const mockedService = practiceSessionService as jest.Mocked<typeof practiceSessionService>;
+const mockedSongService = songService as jest.Mocked<typeof songService>;
 
 const YEAR = new Date().getFullYear();
 const isLeap = (YEAR % 4 === 0 && YEAR % 100 !== 0) || YEAR % 400 === 0;
@@ -25,6 +33,7 @@ beforeEach(() => {
   mockedService.getHeatmap.mockResolvedValue([]);
   mockedService.getAll.mockResolvedValue([]);
   mockedService.getDayPlays.mockResolvedValue([]);
+  mockedSongService.getAllSongs.mockResolvedValue([]);
 });
 
 // <Link> requires a Router context since 3.2
@@ -174,6 +183,34 @@ test('clicking an active day opens its detail with sessions, entries and an Edit
 
   const editLink = within(panel).getByRole('link', { name: `Edit session of ${YEAR}-03-10` });
   expect(editLink).toHaveAttribute('href', '/my-sessions?edit=s1');
+});
+
+test('Story 5.5: the day-detail shows "Artist - Title" for a song entry', async () => {
+  const SONG_UID = 'aaaaaaa1-aaaa-4aaa-8aaa-aaaaaaaaaaaa';
+  mockedSongService.getAllSongs.mockResolvedValue([
+    { uid: SONG_UID, title: 'Sweet Child', artist: "Guns N' Roses" } as never,
+  ]);
+  mockedService.getHeatmap.mockResolvedValue([
+    { date: `${YEAR}-03-10`, totalMinutes: 40, sessionCount: 1 },
+  ]);
+  mockedService.getAll.mockResolvedValue([
+    {
+      uid: 's1', date: `${YEAR}-03-10`, instrumentType: 'Bass', durationMinutes: 40,
+      items: [{ uid: 'i1', sessionUid: 's1', songUid: SONG_UID, label: 'Sweet Child', minutes: 15 }],
+    },
+  ]);
+
+  renderPage();
+  fireEvent.click(await screen.findByLabelText(`${YEAR}-03-10 — 40 minutes, 1 session`));
+
+  const panel = await screen.findByRole('list', { name: 'Day sessions' });
+  // The artist is resolved from the live catalog (loaded on mount), so wait for it
+  await waitFor(() => {
+    const entry = within(panel).getByText('Sweet Child').closest('li')!;
+    expect(entry.textContent).toMatch(/Guns N' Roses - Sweet Child/);
+  });
+  const entry = within(panel).getByText('Sweet Child').closest('li')!;
+  expect(entry.textContent).not.toMatch(/Sweet Child — Guns N' Roses/);
 });
 
 test('Enter on the focused cell opens the day detail (FR16, keyboard)', async () => {

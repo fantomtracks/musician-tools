@@ -1,5 +1,11 @@
 # Deferred Work
 
+## Deferred from: code review of story-5.5 (2026-06-11)
+
+- **Heatmap day-detail incohérent avec l'historique** : `MyHeatmapPage.tsx:439-444` rend les mêmes `session.items` en titre seul (sans artiste, séparateur `—`). Après 5.5, l'historique de session est en « Artiste - Titre » mais la heatmap reste en « Titre ». Candidate à une story d'extension si « Artiste - Titre partout » doit couvrir la heatmap. *(Statut : décision en attente côté story 5.5 — voir Review Findings.)*
+- **Libellé « Frankenstein » chanson renommée** (`MySessionsPage.tsx:822-827`) : titre = snapshot FR4 figé, artiste = catalogue live → une chanson renommée affiche `ArtisteLive - AncienTitre`. Préexistant ; l'ordre artiste-d'abord le rend plus visible. À traiter seulement si l'on décide de snapshotter aussi l'artiste (gros changement modèle/FR4).
+- **`MyPlaylistsPage` non gardé sur artiste vide** (`MyPlaylistsPage.tsx:132,307-322`) : `${artist} - ${title}` sans garde → artiste `""` affiche un « - Titre » orphelin. Préexistant, hors périmètre 5.5. Aligner sur le pattern gardé de `formatSongLabel` si on touche les playlists.
+
 ## Note Correct Course (2026-06-10)
 
 - **Nav mobile toujours cassée** : la story 5.3 a réordonné/renommé le menu desktop (« Songlist »), mais la nav reste `hidden md:flex` sans menu hamburger → sur mobile, toujours aucun lien (NFR3). Réordonner ≠ réparer. Dette inchangée, candidate à une story dédiée (nav responsive + hamburger).

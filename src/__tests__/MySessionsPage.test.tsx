@@ -372,7 +372,7 @@ test('the history lists sessions with date, instrument, duration, notes and entr
   expect(within(history).getByText(/Pentatonic scale/)).toBeInTheDocument();
 });
 
-test('the history shows the artist next to the song, resolved from the catalog', async () => {
+test('the history shows "Artist - Title", resolved from the catalog', async () => {
   mockedSongService.getAllSongs.mockResolvedValue([
     { uid: SONG_UID, title: 'Sweet Child', artist: "Guns N' Roses" } as never,
   ]);
@@ -392,11 +392,43 @@ test('the history shows the artist next to the song, resolved from the catalog',
   render(<MySessionsPage />);
 
   const history = await screen.findByRole('list', { name: 'Session history' });
-  // The artist is appended to the song entry...
-  expect(within(history).getByText(/Guns N' Roses/)).toBeInTheDocument();
-  // ...but the topic entry stays artist-less
+  // Story 5.5: the song entry reads "Artist - Title" — artist first, hyphen separator
+  const songEntry = within(history).getByText('Sweet Child').closest('li')!;
+  expect(songEntry.textContent).toMatch(/Guns N' Roses - Sweet Child/);
+  expect(songEntry.textContent).not.toMatch(/Sweet Child — Guns N' Roses/);
+  // ...but the topic entry stays artist-less (label stands alone)
   const topicEntry = within(history).getByText('Pentatonic scale').closest('li')!;
   expect(topicEntry.textContent).not.toMatch(/Guns N' Roses/);
+});
+
+test('the picker shows song options as "Artist - Title"', async () => {
+  mockedSongService.getAllSongs.mockResolvedValue([
+    { uid: SONG_UID, title: 'Sweet Child', artist: "Guns N' Roses" } as never,
+  ]);
+
+  render(<MySessionsPage />);
+  fireEvent.click(screen.getByRole('button', { name: 'Add entry' }));
+  fireEvent.focus(await screen.findByLabelText('Entry 1'));
+  const listbox = await screen.findByRole('listbox', { name: 'Entry 1 suggestions' });
+  const songsGroup = within(listbox).getByRole('group', { name: 'Songs' });
+  expect(within(songsGroup).getByRole('option', { name: "Guns N' Roses - Sweet Child" })).toBeInTheDocument();
+});
+
+test('the combobox input shows the SELECTED song as "Artist - Title" at rest (AC1)', async () => {
+  mockedSongService.getAllSongs.mockResolvedValue([
+    { uid: SONG_UID, title: 'Sweet Child', artist: "Guns N' Roses" } as never,
+  ]);
+
+  render(<MySessionsPage />);
+  fireEvent.click(screen.getByRole('button', { name: 'Add entry' }));
+  const input = await screen.findByLabelText('Entry 1');
+  fireEvent.focus(input);
+  const listbox = await screen.findByRole('listbox', { name: 'Entry 1 suggestions' });
+  fireEvent.mouseDown(within(listbox).getByRole('option', { name: "Guns N' Roses - Sweet Child" }));
+
+  // At rest (not searching) the field reflects the selected ref via labelForRef
+  // → formatSongLabel → "Artist - Title"
+  expect(input).toHaveValue("Guns N' Roses - Sweet Child");
 });
 
 test('shows the empty history state', async () => {

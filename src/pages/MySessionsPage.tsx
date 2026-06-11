@@ -22,7 +22,7 @@ function foldForSearch(value: string): string {
 }
 
 const formatSongLabel = (song: Song): string =>
-  song.artist ? `${song.title} — ${song.artist}` : song.title;
+  song.artist ? `${song.artist} - ${song.title}` : song.title;
 
 // FR12 picker as a single combobox (search + selection merged): type to filter,
 // pick from the grouped suggestions below. Replaces the former search-input +
@@ -323,7 +323,7 @@ function MySessionsPage() {
   const recentRefs = useMemo(() => {
     if (!sessions) return [];
     const labelByRef = new Map<string, string>();
-    songs.forEach(song => labelByRef.set(`song:${song.uid}`, song.artist ? `${song.title} — ${song.artist}` : song.title));
+    songs.forEach(song => labelByRef.set(`song:${song.uid}`, formatSongLabel(song)));
     topics.forEach(topic => labelByRef.set(`topic:${topic.uid}`, topic.name));
     // "Recently logged" = creation order, NOT the date-sorted display list: a
     // retroactive session logged a minute ago sits low in the date sort but
@@ -823,8 +823,8 @@ function MySessionsPage() {
                         const artist = item.songUid ? artistBySongUid.get(item.songUid) : undefined;
                         return (
                         <li key={item.uid} className="text-sm text-gray-700 dark:text-gray-300 pl-3 border-l-2 border-gray-200 dark:border-gray-700 break-words">
+                          {artist ? <span>{artist} - </span> : null}
                           <span className="font-medium">{item.label}</span>
-                          {artist ? <span className="text-gray-500 dark:text-gray-400"> — {artist}</span> : null}
                           {item.minutes ? <span className="text-gray-500 dark:text-gray-400"> · {item.minutes} min</span> : null}
                           {item.note ? <span className="text-gray-500 dark:text-gray-400 italic"> · {item.note}</span> : null}
                         </li>

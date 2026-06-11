@@ -1,5 +1,5 @@
 # generated: 2026-06-07
-# last_updated: 2026-06-10
+# last_updated: 2026-06-11
 # project: musician-tools
 # project_key: NOKEY
 # tracking_system: file-system
@@ -35,7 +35,7 @@
 # - Dev moves story to 'review', then runs code-review (fresh context, different LLM recommended)
 
 generated: 2026-06-07
-last_updated: 2026-06-10
+last_updated: 2026-06-11
 project: musician-tools
 project_key: NOKEY
 tracking_system: file-system
@@ -76,6 +76,7 @@ development_status:
   5-2-saisie-de-session-repensee-combobox: done       # rétroactif, livré v1.3.1 (f1feee5)
   5-3-songlist-et-navigation-au-propre: done           # committé 8dc2f06
   5-4-filtres-songlist-coherents: done
+  5-5-libelle-chanson-artiste-titre: done
   epic-5-retrospective: optional
 
   # Epic 6: Capture enrichie — durée de répertoire (PRD amendé : FR21 + FR24)
