@@ -6,8 +6,12 @@ project adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
-_Nothing yet — new changes are accumulated here, then this heading is renamed to
-`X.Y.Z — YYYY-MM-DD` when the version is bumped._
+### Changed
+- **Playlists now use a real database link to songs.** A playlist's songs moved
+  from a denormalized list of IDs (no integrity) to a proper join table with a
+  foreign key. Deleting a song now removes it from every playlist automatically
+  (database-enforced), and a one-time data migration drops any leftover
+  references to already-deleted songs. The API and the UI are unchanged.
 
 ## [1.3.4] — 2026-06-11
 
