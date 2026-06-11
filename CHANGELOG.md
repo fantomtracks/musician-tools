@@ -12,76 +12,65 @@ _Nothing yet — new changes are accumulated here, then this heading is renamed 
 ## [1.3.5] — 2026-06-11
 
 ### Changed
-- **Playlists now use a real database link to songs.** A playlist's songs moved
-  from a denormalized list of IDs (no integrity) to a proper join table with a
-  foreign key. Deleting a song now removes it from every playlist automatically
-  (database-enforced), and a one-time data migration drops any leftover
-  references to already-deleted songs. The API and the UI are unchanged.
+- **Playlists now link to songs in the database**
+  - Songs moved from a loose list of IDs to a proper join table with a foreign key
+  - Deleting a song removes it from every playlist automatically
+  - A one-time migration cleans up leftover references to already-deleted songs
+  - No visible change to the app (same API, same UI)
 
 ## [1.3.4] — 2026-06-11
 
 ### Changed
-- **Song labels unified to "Artist - Title".** Session history (entry combobox,
-  "Recent" group, and the read-only entry list) and the heatmap day-detail now
-  display songs as `Artist - Title` (hyphen), consistent with the Playlists view
-  — previously the sessions showed `Title — Artist`. The artist now shares the
-  title's color in the entry list.
+- **Song labels unified to "Artist - Title"**
+  - Applied to the session history, the entry combobox, the "Recent" group and the heatmap day detail (sessions previously showed "Title — Artist")
+  - The artist now shares the title's color in the entry list
 
 ### Fixed
-- **Deleting a song now removes it from your playlists.** Playlists stored song
-  references with no database link, so a deleted song lingered as a raw UID
-  ("hash") in the playlist. Deletion now strips the song from every playlist of
-  the owner (transactionally), and the Playlists view hides any leftover
-  unresolved reference so a raw UID is never shown.
+- **Deleting a song now removes it from your playlists**
+  - A deleted song no longer lingers as a raw ID ("hash") in a playlist
+  - The Playlists view also hides any leftover unresolved reference, as a safety net
 
 ## [1.3.3] — 2026-06-10
 
 ### Changed
-- **Songlist filters — consistent accordions.** The "Difficulty" and "Capo"
-  filters are now collapsible accordions like the others (state persisted), and
-  the "Language" filter chevron uses the same glyph (`▾`/`▴`) as the rest.
+- **Songlist filters — consistent accordions**
+  - "Difficulty" and "Capo" are now collapsible like the others, with their open/closed state remembered
+  - The "Language" chevron uses the same glyph (`▾`/`▴`) as the rest
 
 ## [1.3.2] — 2026-06-10
 
 ### Changed
-- **Songlist — row click opens the song.** Clicking a song row now opens its
-  edit form; selecting a song for bulk actions is reserved to the row's checkbox.
-  The now-redundant "Actions" column (Edit button) was removed.
-- **Song editor** gained a "← Songlist" back button to return to the list.
-- **Wording harmonized to "Songlist"** across the nav menu, the list page title,
-  and the new back button (was "Songs" / "Song list").
-- **Navigation reordered** to: Songlist · Heatmap · Sessions · Playlists · Topics ·
-  Instruments.
-- **"Last played" column** shrunk to its content and right-aligned, with a right
-  margin matching the checkbox column on the left.
+- **Songlist — row click opens the song**
+  - Clicking a row opens its edit form; the row checkbox is reserved for bulk selection
+  - The now-redundant "Actions" column (Edit button) was removed
+- **Song editor — "← Songlist" back button** to return to the list
+- **Wording harmonized to "Songlist"** across the nav menu, the page title and the back button
+- **Navigation reordered** to Songlist · Heatmap · Sessions · Playlists · Topics · Instruments
+- **"Last played" column** shrunk to its content and right-aligned
 
 ## [1.3.1] — 2026-06-10
 
 ### Changed
-- **Session entries — unified combobox.** The per-row search field and the
-  song/topic dropdown are merged into a single grouped combobox (Recent / Songs /
-  Topics): type to filter (accent-insensitive, also matches the artist), pick with
-  the mouse or ↑/↓ + Enter. Works in both create and edit modes.
-- **Artist shown** next to song titles, both in the session history detail and in
-  the entry picker suggestions.
-- **Entry layout.** Each entry is back on a single line (combobox + minutes +
-  BPM/note + Remove), starting below the "Entries" label.
-- **Spacing.** Larger margin between the session note and the entries section, and
-  extra breathing room between a session's note and its played songs in the history.
-- **Primary action.** "Log session" / "Save session" moved to the bottom of the
-  form, full width.
-- **Remove entry** restyled to solid red, consistent with the Delete buttons.
+- **Session entries — unified combobox**
+  - The per-row search field and the song/topic dropdown merged into one grouped combobox (Recent / Songs / Topics)
+  - Type to filter (accent-insensitive, also matches the artist), pick with the mouse or ↑/↓ + Enter
+  - Works in both create and edit modes
+- **Artist shown next to song titles** in the session history and the entry picker
+- **Entry layout** back on a single line (combobox + minutes + BPM/note + Remove)
+- **Roomier spacing** between the note and the entries, and between a session's note and its played songs
+- **Primary action moved to the bottom** — "Log session" / "Save session", full width
+- **"Remove entry" restyled to solid red**, consistent with the Delete buttons
 
 ### Fixed
-- Entry suggestion dropdown was painted behind the history card; it now renders
-  above it (stacking/z-index).
+- **Entry suggestions dropdown** now renders above the history card (was painted behind it)
 
 ## [1.3.0] — 2026-06-09
 
-- Practice journal (sessions with per-entry songs/topics, minutes and notes).
-- Annual practice heatmap with day detail and deep-links.
-- "Mark as Played" bridge that fills the journal automatically.
-- Clean re-login on an expired session (401 handling).
+### Added
+- **Practice journal** — sessions with per-entry songs/topics, minutes and notes
+- **Annual practice heatmap** with day detail and deep-links
+- **"Mark as Played" bridge** that fills the journal automatically
+- **Clean re-login** on an expired session (401 handling)
 
 ---
 
