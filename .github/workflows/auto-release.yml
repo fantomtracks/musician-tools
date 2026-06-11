@@ -41,10 +41,31 @@ jobs:
             echo "exists=false" >> "$GITHUB_OUTPUT"
           fi
 
+      - name: Extract this version's CHANGELOG section
+        if: steps.tag.outputs.exists == 'false'
+        run: |
+          VERSION="${{ steps.pkg.outputs.version }}"
+          # Lines under "## [VERSION] …" up to the next "## [" heading
+          awk -v ver="$VERSION" '
+            $0 ~ ("^## \\[" ver "\\]") { capture = 1; next }
+            capture && /^## \[/ { exit }
+            capture { print }
+          ' CHANGELOG.md > RELEASE_NOTES.md
+          # Drop leading blank lines
+          sed -i -e '/./,$!d' RELEASE_NOTES.md
+          if [ ! -s RELEASE_NOTES.md ]; then
+            echo "_No curated notes for this version — see CHANGELOG.md._" > RELEASE_NOTES.md
+          fi
+          echo "----- release notes for v$VERSION -----"
+          cat RELEASE_NOTES.md
+
       - name: Create tag and GitHub release
         if: steps.tag.outputs.exists == 'false'
         uses: softprops/action-gh-release@v2
         with:
           tag_name: v${{ steps.pkg.outputs.version }}
           name: "🎵 Musician Tools v${{ steps.pkg.outputs.version }}"
+          # Curated CHANGELOG section first; the auto-generated "Full Changelog"
+          # diff link is appended below it by generate_release_notes.
+          body_path: RELEASE_NOTES.md
           generate_release_notes: true
