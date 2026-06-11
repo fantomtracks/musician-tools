@@ -1,5 +1,11 @@
 # Deferred Work
 
+## Deferred from: code review of story-5.6 (2026-06-11)
+
+- **Édition de playlist ne nettoie pas les orphelins** (`MyPlaylistsPage.tsx:99-107`) : `handleEdit` recopie `songUids` verbatim → un UID orphelin survit à un Update (invisible, pas de case à cocher). Bénin (masqué en lecture, le strip backend reste le vrai GC), cohérent avec « migration différée ». À reprendre si on veut un self-heal côté édition.
+- **API playlist émet encore les orphelins hérités** (`playlistcontroller.js:13-42`) : `getAllPlaylists`/`getPlaylist` renvoient `songUids` brut ; seul l'UI filtre. AC3 résolu côté UX, pas côté donnée. Tout futur consommateur de l'API devra refiltrer — ou alors faire une migration de purge / un filtrage serveur.
+- **`deleteSong` : scan O(playlists) + N updates** (`songcontroller.js:205`) : négligeable à l'échelle actuelle ; envisager une requête JSON ciblée (`song_uids @> ...`) si le nombre de playlists explose.
+
 ## Deferred from: code review of story-5.5 (2026-06-11)
 
 - **Heatmap day-detail incohérent avec l'historique** : `MyHeatmapPage.tsx:439-444` rend les mêmes `session.items` en titre seul (sans artiste, séparateur `—`). Après 5.5, l'historique de session est en « Artiste - Titre » mais la heatmap reste en « Titre ». Candidate à une story d'extension si « Artiste - Titre partout » doit couvrir la heatmap. *(Statut : décision en attente côté story 5.5 — voir Review Findings.)*

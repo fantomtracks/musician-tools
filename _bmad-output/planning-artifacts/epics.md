@@ -108,7 +108,7 @@ Je joue comme avant — « Mark as Played » — et mon journal se remplit tout 
 **FRs covered:** FR21, FR23
 
 ### Epic 5: Robustesse / confort (post-PRD, issu des rétros)
-Petites stories de robustesse et de confort nées des rétros et du terrain (pas dans le PRD initial). Stories : 5.1 re-login 401 (done), 5.2 saisie de session repensée / combobox (done, v1.3.1), 5.3 Songlist & navigation au propre (done), 5.4 filtres Songlist cohérents (done), 5.5 libellé chanson « Artiste - Titre » cohérent partout (ready). Détail dans `implementation-artifacts/`.
+Petites stories de robustesse et de confort nées des rétros et du terrain (pas dans le PRD initial). Stories : 5.1 re-login 401 (done), 5.2 saisie de session repensée / combobox (done, v1.3.1), 5.3 Songlist & navigation au propre (done), 5.4 filtres Songlist cohérents (done), 5.5 libellé chanson « Artiste - Titre » cohérent partout (done), 5.6 suppression de chanson → nettoyer les playlists / UID orphelin (ready, bug). Détail dans `implementation-artifacts/`.
 
 ### Epic 6: Capture enrichie — durée de répertoire
 Je renseigne une durée sur mes chansons et le « Mark as Played » remplit automatiquement le temps de ma session.

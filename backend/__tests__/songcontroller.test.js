@@ -18,13 +18,16 @@ jest.mock('../models', () => {
       create: jest.fn(async (data) => ({ ...data, uid: 'item-uid' })),
       count: jest.fn(async () => 0)
     },
+    Playlist: {
+      findAll: jest.fn(async () => [])
+    },
     sequelize: {
       transaction: jest.fn(async (callback) => callback({ id: 'tx' }))
     }
   };
 });
 
-const { Song, SongPlay, PracticeSession, SessionItem } = require('../models');
+const { Song, SongPlay, PracticeSession, SessionItem, Playlist } = require('../models');
 const controller = require('../controllers/songcontroller');
 
 // A played song the user owns, with a server-side title for the FR4 label snapshot
@@ -301,5 +304,60 @@ describe('songcontroller', () => {
 
       expect(SongPlay.create).not.toHaveBeenCalled();
     });
+  });
+});
+describe('deleteSong (Story 5.6: cleans playlists)', () => {
+  beforeEach(() => {
+    jest.clearAllMocks();
+  });
+
+  function deleteReq() {
+    return { session: { user: 'user-1' }, params: { uid: 'song-1' } };
+  }
+
+  test('removes the song uid from the user playlists that contain it, then destroys the song', async () => {
+    const song = ownedSong({ destroy: jest.fn() });
+    Song.findByPk.mockResolvedValue(song);
+    const withSong = { uid: 'pl-1', songUids: ['x', 'song-1', 'y'], update: jest.fn() };
+    const without = { uid: 'pl-2', songUids: ['a', 'b'], update: jest.fn() };
+    Playlist.findAll.mockResolvedValue([withSong, without]);
+
+    const res = mockRes();
+    await controller.deleteSong(deleteReq(), res, mockNext());
+
+    // Only the owner's playlists are scanned
+    expect(Playlist.findAll).toHaveBeenCalledWith(expect.objectContaining({ where: { userUid: 'user-1' } }));
+    // The containing playlist drops the uid (order preserved); the other is untouched
+    expect(withSong.update).toHaveBeenCalledWith(
+      { songUids: ['x', 'y'] },
+      expect.objectContaining({ transaction: expect.anything() })
+    );
+    expect(without.update).not.toHaveBeenCalled();
+    // The song is destroyed inside the same transaction
+    expect(song.destroy).toHaveBeenCalledWith(expect.objectContaining({ transaction: expect.anything() }));
+    expect(res.json).toHaveBeenCalledWith({ message: 'Song deleted successfully' });
+  });
+
+  test('401 when not authenticated', async () => {
+    const next = mockNext();
+    await controller.deleteSong({ session: {}, params: { uid: 'song-1' } }, mockRes(), next);
+    expect(next.mock.calls[0][0].status).toBe(401);
+  });
+
+  test('404 when the song does not exist', async () => {
+    Song.findByPk.mockResolvedValue(null);
+    const next = mockNext();
+    await controller.deleteSong(deleteReq(), mockRes(), next);
+    expect(next.mock.calls[0][0].status).toBe(404);
+  });
+
+  test('403 for another user — no destroy, playlists untouched', async () => {
+    const song = ownedSong({ userUid: 'someone-else', destroy: jest.fn() });
+    Song.findByPk.mockResolvedValue(song);
+    const next = mockNext();
+    await controller.deleteSong(deleteReq(), mockRes(), next);
+    expect(next.mock.calls[0][0].status).toBe(403);
+    expect(song.destroy).not.toHaveBeenCalled();
+    expect(Playlist.findAll).not.toHaveBeenCalled();
   });
 });

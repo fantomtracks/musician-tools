@@ -77,6 +77,7 @@ development_status:
   5-3-songlist-et-navigation-au-propre: done           # committé 8dc2f06
   5-4-filtres-songlist-coherents: done
   5-5-libelle-chanson-artiste-titre: done
+  5-6-suppression-chanson-nettoie-playlists: done    # bug : UID orphelin dans playlists (signalé 2026-06-11)
   epic-5-retrospective: optional
 
   # Epic 6: Capture enrichie — durée de répertoire (PRD amendé : FR21 + FR24)

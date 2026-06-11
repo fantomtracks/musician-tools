@@ -13,6 +13,13 @@ project adheres to [Semantic Versioning](https://semver.org/).
   — previously the sessions showed `Title — Artist`. The artist now shares the
   title's color in the entry list.
 
+### Fixed
+- **Deleting a song now removes it from your playlists.** Playlists stored song
+  references with no database link, so a deleted song lingered as a raw UID
+  ("hash") in the playlist. Deletion now strips the song from every playlist of
+  the owner (transactionally), and the Playlists view hides any leftover
+  unresolved reference so a raw UID is never shown.
+
 ## [1.3.3] — 2026-06-10
 
 ### Changed

@@ -14,6 +14,10 @@ const initialPlaylist: CreatePlaylistDTO = {
 function MyPlaylistsPage() {
   const [playlists, setPlaylists] = useState<Playlist[]>([]);
   const [songs, setSongs] = useState<Song[]>([]);
+  // Distinguishes "catalog not loaded yet / load failed" from "song genuinely
+  // deleted" — the orphan filter must only hide UIDs once the catalog is known,
+  // otherwise a slow/failed getAllSongs would blank out valid playlist songs.
+  const [songsLoaded, setSongsLoaded] = useState(false);
   const [form, setForm] = useState<CreatePlaylistDTO>(initialPlaylist);
   const [editingUid, setEditingUid] = useState<string | null>(null);
   const [page, setPage] = useState<'list' | 'form'>('list');
@@ -42,7 +46,10 @@ function MyPlaylistsPage() {
       try {
         const data = await songService.getAllSongs();
         setSongs(data);
+        setSongsLoaded(true);
       } catch (err) {
+        // Leave songsLoaded false: we can't tell orphans from valid songs, so
+        // the list falls back to showing the raw UID rather than hiding content
         console.error('Error while loading songs:', err);
       }
     };
@@ -207,7 +214,12 @@ function MyPlaylistsPage() {
                           <td className="p-2 align-middle font-medium text-gray-900 dark:text-gray-100">{playlist.name}</td>
                           <td className="p-2 align-middle max-w-md whitespace-pre-wrap text-gray-700 dark:text-gray-300">{playlist.description || '-'}</td>
                           <td className="p-2 align-middle">
-                            {(playlist.songUids || []).map(uid => (
+                            {/* Defensive: a deleted song can linger as an orphan UID in
+                                songUids (no FK — see Story 5.6). Once the catalog is loaded,
+                                hide unresolved UIDs so a raw hash is never rendered (the
+                                backend now also strips them). Before load / on load failure,
+                                keep them: never blank out valid songs we just can't resolve. */}
+                            {(playlist.songUids || []).filter(uid => !songsLoaded || songs.some(s => s.uid === uid)).map(uid => (
                               <div key={uid} className="text-xs text-gray-700 dark:text-gray-300">{getSongTitle(uid)}</div>
                             ))}
                           </td>
