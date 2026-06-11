@@ -1,5 +1,12 @@
 # Deferred Work
 
+## Deferred from: code review of story-5.7 (2026-06-11)
+
+- **Course concurrente add/remove playlist (lost update)** : `syncPlaylistSongs` fait `destroy`+`bulkCreate` sans `SELECT … FOR UPDATE` sur la playlist parente → 2 écritures concurrentes sur la même playlist = la dernière écrase. Risque quasi nul en mono-utilisateur ; à durcir (lock de ligne) si l'app devient multi-utilisateur/collaborative.
+- **`songcontroller.getSong` sans contrôle d'ownership** (trou pré-existant, `songcontroller.js:65-76`) : 5.7 ne le reproduit pas, mais GET /api/songs/:uid reste accessible sans vérif. À corriger un jour (aligner sur le pattern 401→404→403).
+- **Index `playlist_songs_playlist_uid` redondant** avec l'unique composite `(playlist_uid, song_uid)` : inoffensif, supprimable si on veut alléger.
+- **Note (résolu avant merge, pas une dette)** : la story 5.7 exige un `make migrate` local + vérif que la FK `PlaylistSongs.song_uid` a bien `ON DELETE CASCADE` sur une vraie base (piège sync-first, cf. leçon rétro épic 4 / story 4.2).
+
 ## Deferred from: code review of story-5.6 (2026-06-11)
 
 - **Édition de playlist ne nettoie pas les orphelins** (`MyPlaylistsPage.tsx:99-107`) : `handleEdit` recopie `songUids` verbatim → un UID orphelin survit à un Update (invisible, pas de case à cocher). Bénin (masqué en lecture, le strip backend reste le vrai GC), cohérent avec « migration différée ». À reprendre si on veut un self-heal côté édition.

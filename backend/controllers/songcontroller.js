@@ -1,4 +1,4 @@
-const { Song, SongPlay, PracticeSession, SessionItem, Playlist, sequelize } = require('../models');
+const { Song, SongPlay, PracticeSession, SessionItem, sequelize } = require('../models');
 const createError = require('http-errors');
 const logger = require('../logger');
 const { fetchSongMetadata } = require('../services/songMetadataService');
@@ -196,21 +196,9 @@ const deleteSong = async (req, res, next) => {
       return next(createError(403, 'Forbidden'));
     }
 
-    // Playlists store their songs as a denormalized JSON array of UIDs
-    // (Playlist.songUids) with no foreign key, so deleting a Song does NOT
-    // cascade. Strip the UID from every playlist of this user that holds it,
-    // in the SAME transaction as the delete — otherwise a crash mid-way would
-    // leave an orphan UID that the UI renders as a raw hash (Story 5.6).
-    await sequelize.transaction(async (transaction) => {
-      const playlists = await Playlist.findAll({ where: { userUid: userId }, transaction });
-      for (const playlist of playlists) {
-        const uids = playlist.songUids || [];
-        if (uids.includes(req.params.uid)) {
-          await playlist.update({ songUids: uids.filter((uid) => uid !== req.params.uid) }, { transaction });
-        }
-      }
-      await song.destroy({ transaction });
-    });
+    // Deleting the song cascades to its PlaylistSongs join rows via the FK
+    // (Story 5.7) — no manual playlist cleanup needed anymore (was Story 5.6).
+    await song.destroy();
     res.json({ message: 'Song deleted successfully' });
   } catch (error) {
     logger.error('Error deleting song:', error);

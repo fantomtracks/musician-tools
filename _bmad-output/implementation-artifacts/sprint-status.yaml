@@ -78,7 +78,7 @@ development_status:
   5-4-filtres-songlist-coherents: done
   5-5-libelle-chanson-artiste-titre: done
   5-6-suppression-chanson-nettoie-playlists: done    # bug : UID orphelin dans playlists (signalé 2026-06-11)
-  5-7-playlists-vrai-lien-base-fk: ready    # option B : vrai lien FK playlists↔chansons (décidé rétro 2026-06-11)
+  5-7-playlists-vrai-lien-base-fk: done    # option B : vrai lien FK playlists↔chansons ; migration validée sur dump prod réel (2026-06-11)
   epic-5-retrospective: done
 
   # Epic 6: Capture enrichie — durée de répertoire (PRD amendé : FR21 + FR24)
