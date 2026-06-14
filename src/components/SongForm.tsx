@@ -1,6 +1,6 @@
 import { useEffect, useState, useMemo } from 'react';
 import type React from 'react';
-import type { CreateSongDTO } from '../services/songService';
+import type { CreateSongDTO, Song } from '../services/songService';
 import type { SongPlay } from '../services/songPlayService';
 import { instrumentTypeOptions, instrumentTechniquesMap } from '../constants/instrumentTypes';
 import SongFormInstruments from './SongFormInstruments';
@@ -35,6 +35,11 @@ type SongFormProps = {
   metadataLoading?: boolean;
   metadataSource?: string | null;
   onAutoFillMetadata?: () => Promise<void>;
+  // Add mode: an existing song matching the current title + artist, surfaced
+  // live so the user is told before filling the whole form (and before the
+  // submit guard blocks). onEditDuplicate jumps straight to its edit screen.
+  duplicate?: Song | null;
+  onEditDuplicate?: () => void;
 };
 
 const keyOptions = ['C','C#','Db','D','Eb','E','F','F#','Gb','G','Ab','A','Bb','B'];
@@ -103,7 +108,7 @@ const getAvailableTechniques = (instrumentType: string) => {
 };
 
 export function SongForm(props: SongFormProps) {
-  const { mode, form, loading, onChange, onChangeInstruments, onSetTechniques, onToggleGenre, onToggleLanguage, onSetInstrumentDifficulty, onSetMyInstrumentUid, onSetInstrumentTuning, onToggleTechnique, onSetInstrumentLinksForInstrument, onSetStreamingLinks, onSubmit, onCancel, onDelete, onMarkAsPlayedNow, songPlays, formatLastPlayed, myInstruments, playlistSlot, suggestedAlbums = [], suggestedArtists = [], metadataLoading = false, metadataSource = null, onAutoFillMetadata } = props;
+  const { mode, form, loading, onChange, onChangeInstruments, onSetTechniques, onToggleGenre, onToggleLanguage, onSetInstrumentDifficulty, onSetMyInstrumentUid, onSetInstrumentTuning, onToggleTechnique, onSetInstrumentLinksForInstrument, onSetStreamingLinks, onSubmit, onCancel, onDelete, onMarkAsPlayedNow, songPlays, formatLastPlayed, myInstruments, playlistSlot, suggestedAlbums = [], suggestedArtists = [], metadataLoading = false, metadataSource = null, onAutoFillMetadata, duplicate = null, onEditDuplicate } = props;
   const currentInstruments = useMemo(() => Array.isArray(form.instrument) ? form.instrument : (form.instrument ? [form.instrument] : []), [form.instrument]);
   const currentTechniques = useMemo(() => Array.isArray(form.technique) ? form.technique : [], [form.technique]);
   const currentGenres = Array.isArray(form.genre) ? form.genre : (form.genre ? [form.genre] : []);
@@ -303,6 +308,25 @@ export function SongForm(props: SongFormProps) {
           disabled={loading}
         />
       </div>
+      {mode === 'add' && duplicate && (
+        <div className="rounded-md border border-amber-300 dark:border-amber-700 bg-amber-50 dark:bg-amber-900/30 p-3 text-sm text-amber-800 dark:text-amber-100">
+          <p>
+            <span className="font-medium">"{duplicate.title}"</span>
+            {duplicate.artist ? <> by <span className="font-medium">{duplicate.artist}</span></> : null}
+            {' '}already exists in your songlist.
+          </p>
+          {onEditDuplicate && (
+            <button
+              type="button"
+              onClick={onEditDuplicate}
+              className="mt-1 font-medium text-brand-600 dark:text-brand-400 hover:underline"
+              disabled={loading}
+            >
+              Edit this song →
+            </button>
+          )}
+        </div>
+      )}
       <div className="flex items-center gap-3">
         <button
           type="button"
