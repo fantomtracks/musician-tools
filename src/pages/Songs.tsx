@@ -1619,7 +1619,7 @@ function Songs() {
               setPage('list');
             }}
             duplicate={liveDuplicate}
-            onEditDuplicate={liveDuplicate ? () => openSongForEdit(liveDuplicate, true) : undefined}
+            onEditDuplicate={liveDuplicate ? () => openSongForEdit(liveDuplicate, editingUid === null) : undefined}
             onDelete={editingUid ? () => handleDelete(editingUid) : undefined}
             onMarkAsPlayedNow={editingUid ? handleMarkAsPlayedNow : undefined}
             songPlays={editingUid ? editingSongPlays : undefined}

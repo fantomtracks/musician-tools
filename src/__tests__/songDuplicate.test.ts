@@ -37,9 +37,16 @@ describe('findDuplicateSong', () => {
     ).toBe(songs[0]);
   });
 
-  it('folds diacritics and NFC/NFD encoding differences', () => {
+  it('treats NFC and NFD encodings of the same accented text as equal', () => {
+    const nfc = 'Beyonce\u0301'.normalize('NFC'); // precomposed é
+    const nfd = 'Beyonce\u0301'.normalize('NFD'); // e + combining acute accent
+    const songs = [makeSong({ title: nfc, artist: nfc })];
+    expect(findDuplicateSong(songs, { title: nfd, artist: nfd })).toBe(songs[0]);
+  });
+
+  it('keeps accents distinct from their unaccented form (no folding)', () => {
     const songs = [makeSong({ title: 'Beyoncé', artist: 'Beyoncé' })];
-    expect(findDuplicateSong(songs, { title: 'Beyonce', artist: 'beyonce' })).toBe(songs[0]);
+    expect(findDuplicateSong(songs, { title: 'Beyonce', artist: 'Beyonce' })).toBeNull();
   });
 
   it('returns null when the artist differs (same title, other artist)', () => {
@@ -71,7 +78,7 @@ describe('findDuplicateSong', () => {
     ).toBeNull();
   });
 
-  // The bug this fix addresses: detection scans the whole library, independent
+  // The bug this fix addresses: detection scans the whole songlist, independent
   // of any list filter — so a song hidden from the visible list still matches.
   it('matches regardless of how the visible list is filtered', () => {
     const hidden = makeSong({ uid: 'hidden', instrument: [] }); // no instrument → hidden by an instrument filter

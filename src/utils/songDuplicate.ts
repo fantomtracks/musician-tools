@@ -1,13 +1,13 @@
 import type { Song } from '../services/songService';
 
-// Normalize for comparison: fold case, strip diacritics (NFD-decompose then drop
-// combining marks, which also neutralizes NFC/NFD encoding differences), and
-// collapse internal whitespace. So "Rage  Against" === "Rage Against" and
-// "Beyoncé" === "Beyonce".
+// Normalize for comparison: canonicalize Unicode encoding (NFC, so the two
+// encodings of an accented char compare equal), fold case, and collapse internal
+// whitespace. So "Rage  Against" === "Rage Against". Accents are deliberately
+// KEPT distinct ("Beyoncé" !== "Beyonce") — folding them would hard-block
+// genuinely different titles with no override.
 const norm = (value: string | null | undefined): string =>
   (value ?? '')
-    .normalize('NFD')
-    .replace(/\p{Diacritic}/gu, '')
+    .normalize('NFC')
     .toLowerCase()
     .replace(/\s+/g, ' ')
     .trim();
