@@ -9,6 +9,15 @@ project adheres to [Semantic Versioning](https://semver.org/).
 _Nothing yet — new changes are accumulated here, then this heading is renamed to
 `X.Y.Z — YYYY-MM-DD` when the version is bumped._
 
+## [1.3.6] — 2026-06-14
+
+### Fixed
+- **A song you already own no longer looks "missing" when adding it**
+  - Adding a song now warns "\"Title\" by Artist already exists" live, as soon as the title and artist are filled — no need to fill the whole form first
+  - The warning links straight to that song's edit screen, with a reminder that an active filter (e.g. an instrument filter) may be hiding it from your songlist
+  - Root cause: duplicate detection scans the whole songlist while the visible list is filtered, so a song hidden by a filter looked absent yet still blocked creation
+  - The duplicate check is now a single shared rule, so what blocks the save is exactly what the live warning showed
+
 ## [1.3.5] — 2026-06-11
 
 ### Changed
