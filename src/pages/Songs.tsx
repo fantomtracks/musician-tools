@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { Link, useLocation } from 'react-router-dom';
 import { SongForm } from '../components/SongForm';
 import SongsList from '../components/SongsList';
@@ -9,6 +9,7 @@ import { playlistService, type Playlist } from '../services/playlistService';
 import { ConfirmDialog } from '../components/ConfirmDialog';
 import { instrumentTechniquesMap, instrumentTuningsMap, instrumentTypeOptions } from '../constants/instrumentTypes';
 import { applySongFilters } from '../utils/songFilters';
+import { findDuplicateSong } from '../utils/songDuplicate';
 import { formatLocalDate } from '../utils/heatmap';
 
 const initialSong: CreateSongDTO = {
@@ -60,6 +61,10 @@ function Songs() {
     return saved === 'any' ? 'any' : 'all';
   });
   const [page, setPage] = useState<'list' | 'form'>('list');
+  // True when the edit form was opened by following the "already exists" link
+  // from the add form — drives the "reset your filters" hint, since a song
+  // reached that way is typically hidden from the list by a filter.
+  const [cameFromDuplicate, setCameFromDuplicate] = useState(false);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [selectedSongs, setSelectedSongs] = useState<Set<string>>(() => {
@@ -981,6 +986,44 @@ function Songs() {
 
   // Removed unused handleFetchStreamingLinks
 
+  // Opens a song in the edit form. `fromDuplicate` is set when navigating here
+  // from the add form's "already exists" link, so the edit screen can remind the
+  // user their filters may be hiding it from the list.
+  const openSongForEdit = (song: Song, fromDuplicate = false) => {
+    setEditingUid(song.uid);
+    setForm({
+      ...song,
+      capo: normalizeCapoValue(song.capo),
+      instrument: Array.isArray(song.instrument) ? song.instrument : (song.instrument ? [song.instrument] : []),
+      technique: Array.isArray(song.technique) ? song.technique : [],
+      language: Array.isArray(song.language) ? song.language : (song.language ? [song.language] : []),
+      genre: Array.isArray(song.genre) ? song.genre : (song.genre ? [song.genre] : []),
+    });
+    setMetadataSource(null);
+    setCameFromDuplicate(fromDuplicate);
+    setError(null);
+    setPage('form');
+  };
+
+  // Live "this song already exists" detection. Single source of truth: it drives
+  // both the form warning AND the submit guard, so the two can never disagree.
+  // Gate on title only (findDuplicateSong's own requirement); matching still needs
+  // an exact artist match, so a song that has an artist only warns once that
+  // artist is typed, and artist-less duplicates are covered too.
+  // Works in edit mode as well: excludeUid skips the song being edited, and a
+  // pre-existing twin is ignored while the identity is unchanged — so we only
+  // flag a collision once the user actually renames a song into one.
+  const liveDuplicate = useMemo(() => {
+    if (!form.title?.trim()) return null;
+    const match = findDuplicateSong(songs, { title: form.title, artist: form.artist }, editingUid);
+    if (!match) return null;
+    if (editingUid !== null) {
+      const original = songs.find(song => song.uid === editingUid);
+      if (original && findDuplicateSong([original], { title: form.title, artist: form.artist })) return null;
+    }
+    return match;
+  }, [editingUid, songs, form.title, form.artist]);
+
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
 
@@ -998,18 +1041,12 @@ function Songs() {
       setLoading(true);
       setError(null);
 
-      // Vérifier si la chanson existe déjà (en mode add)
-      if (editingUid === null) {
-        const duplicate = songs.find(
-          song => 
-            song.artist?.toLowerCase().trim() === form.artist?.toLowerCase().trim() &&
-            song.title?.toLowerCase().trim() === form.title?.toLowerCase().trim()
-        );
-        if (duplicate) {
-          setError('This song already exists');
-          setLoading(false);
-          return;
-        }
+      // Duplicate guard (add + rename): reuse liveDuplicate, the exact value that
+      // drives the form warning, so what blocks here is always what the user saw.
+      if (liveDuplicate) {
+        setError('This song already exists in your songlist.');
+        setLoading(false);
+        return;
       }
 
       if (editingUid !== null) {
@@ -1057,6 +1094,7 @@ function Songs() {
 
       setForm(initialSong);
       setMetadataSource(null);
+      setCameFromDuplicate(false);
       setPage('list');
     } catch (err) {
       setError('Error while saving');
@@ -1517,23 +1555,12 @@ function Songs() {
           handleMarkSelectedAsPlayedNow={handleMarkSelectedAsPlayedNow}
           handleDeleteSelected={handleDeleteSelected}
           clearAllFilters={clearAllFilters}
-          onEdit={(song) => {
-            setEditingUid(song.uid);
-            setForm({
-              ...song,
-              capo: normalizeCapoValue(song.capo),
-              instrument: Array.isArray(song.instrument) ? song.instrument : (song.instrument ? [song.instrument] : []),
-              technique: Array.isArray(song.technique) ? song.technique : [],
-              language: Array.isArray(song.language) ? song.language : (song.language ? [song.language] : []),
-              genre: Array.isArray(song.genre) ? song.genre : (song.genre ? [song.genre] : []),
-            });
-            setMetadataSource(null);
-            setPage('form');
-          }}
+          onEdit={(song) => openSongForEdit(song)}
           onAddNew={() => {
             setForm(initialSong);
             setEditingUid(null);
             setMetadataSource(null);
+            setCameFromDuplicate(false);
             setPage('form');
           }}
           getLastPlayedForSong={getLastPlayedForSong}
@@ -1555,6 +1582,7 @@ function Songs() {
                   setEditingUid(null);
                   setForm(initialSong);
                   setMetadataSource(null);
+                  setCameFromDuplicate(false);
                   setPage('list');
                 }}
                 disabled={loading}
@@ -1562,6 +1590,11 @@ function Songs() {
                 <span aria-hidden="true">←</span> Songlist
               </button>
             </div>
+          {editingUid && cameFromDuplicate && (
+            <div className="mb-4 rounded-md border border-blue-300 dark:border-blue-700 bg-blue-50 dark:bg-blue-900/30 p-3 text-sm text-blue-800 dark:text-blue-100">
+              If you couldn't find this song in your songlist, remember to reset your filters.
+            </div>
+          )}
           <SongForm
             mode={editingUid ? 'edit' : 'add'}
             form={form}
@@ -1582,8 +1615,11 @@ function Songs() {
               setEditingUid(null);
               setForm(initialSong);
               setMetadataSource(null);
+              setCameFromDuplicate(false);
               setPage('list');
             }}
+            duplicate={liveDuplicate}
+            onEditDuplicate={liveDuplicate ? () => openSongForEdit(liveDuplicate, editingUid === null) : undefined}
             onDelete={editingUid ? () => handleDelete(editingUid) : undefined}
             onMarkAsPlayedNow={editingUid ? handleMarkAsPlayedNow : undefined}
             songPlays={editingUid ? editingSongPlays : undefined}
