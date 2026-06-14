@@ -17,6 +17,8 @@ _Nothing yet — new changes are accumulated here, then this heading is renamed 
   - The warning links straight to that song's edit screen, with a reminder that an active filter (e.g. an instrument filter) may be hiding it from your songlist
   - Root cause: duplicate detection scans the whole songlist while the visible list is filtered, so a song hidden by a filter looked absent yet still blocked creation
   - The duplicate check is now a single shared rule, so what blocks the save is exactly what the live warning showed
+  - Renaming a song into an exact duplicate of another is now caught the same way (warning + block), instead of silently creating a twin
+  - Duplicate matching now ignores accents and extra spaces, so "Beyoncé" and "Beyonce", or doubled spaces, count as the same song
 
 ## [1.3.5] — 2026-06-11
 

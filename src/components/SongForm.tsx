@@ -35,9 +35,9 @@ type SongFormProps = {
   metadataLoading?: boolean;
   metadataSource?: string | null;
   onAutoFillMetadata?: () => Promise<void>;
-  // Add mode: an existing song matching the current title + artist, surfaced
-  // live so the user is told before filling the whole form (and before the
-  // submit guard blocks). onEditDuplicate jumps straight to its edit screen.
+  // An existing song matching the current title + artist, surfaced live so the
+  // user is told before the submit guard blocks — when adding, or when renaming
+  // a song into a collision. onEditDuplicate jumps straight to its edit screen.
   duplicate?: Song | null;
   onEditDuplicate?: () => void;
 };
@@ -308,7 +308,7 @@ export function SongForm(props: SongFormProps) {
           disabled={loading}
         />
       </div>
-      {mode === 'add' && duplicate && (
+      {duplicate && (
         <div className="rounded-md border border-amber-300 dark:border-amber-700 bg-amber-50 dark:bg-amber-900/30 p-3 text-sm text-amber-800 dark:text-amber-100">
           <p>
             <span className="font-medium">"{duplicate.title}"</span>

@@ -30,6 +30,18 @@ describe('findDuplicateSong', () => {
     expect(hit).toBe(songs[0]);
   });
 
+  it('collapses internal whitespace differences', () => {
+    const songs = [makeSong({ artist: 'Rage  Against the Machine' })]; // double space
+    expect(
+      findDuplicateSong(songs, { title: 'Killing in the Name', artist: 'Rage Against the Machine' }),
+    ).toBe(songs[0]);
+  });
+
+  it('folds diacritics and NFC/NFD encoding differences', () => {
+    const songs = [makeSong({ title: 'Beyoncé', artist: 'Beyoncé' })];
+    expect(findDuplicateSong(songs, { title: 'Beyonce', artist: 'beyonce' })).toBe(songs[0]);
+  });
+
   it('returns null when the artist differs (same title, other artist)', () => {
     const songs = [makeSong({})];
     expect(

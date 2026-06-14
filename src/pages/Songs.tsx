@@ -1005,13 +1005,23 @@ function Songs() {
     setPage('form');
   };
 
-  // Live "this song already exists" detection, add mode only: surfaced once both
-  // title and artist are filled (same rule as the submit guard via the shared
-  // helper, so the two can never disagree).
+  // Live "this song already exists" detection. Single source of truth: it drives
+  // both the form warning AND the submit guard, so the two can never disagree.
+  // Gate on title only (findDuplicateSong's own requirement); matching still needs
+  // an exact artist match, so a song that has an artist only warns once that
+  // artist is typed, and artist-less duplicates are covered too.
+  // Works in edit mode as well: excludeUid skips the song being edited, and a
+  // pre-existing twin is ignored while the identity is unchanged — so we only
+  // flag a collision once the user actually renames a song into one.
   const liveDuplicate = useMemo(() => {
-    if (editingUid !== null) return null;
-    if (!form.title?.trim() || !form.artist?.trim()) return null;
-    return findDuplicateSong(songs, { title: form.title, artist: form.artist });
+    if (!form.title?.trim()) return null;
+    const match = findDuplicateSong(songs, { title: form.title, artist: form.artist }, editingUid);
+    if (!match) return null;
+    if (editingUid !== null) {
+      const original = songs.find(song => song.uid === editingUid);
+      if (original && findDuplicateSong([original], { title: form.title, artist: form.artist })) return null;
+    }
+    return match;
   }, [editingUid, songs, form.title, form.artist]);
 
   const handleSubmit = async (e: React.FormEvent) => {
@@ -1031,16 +1041,12 @@ function Songs() {
       setLoading(true);
       setError(null);
 
-      // Duplicate (add mode): same rule as the form's live warning (shared
-      // helper), so what blocks here is always what the user already saw under
-      // the title field.
-      if (editingUid === null) {
-        const duplicate = findDuplicateSong(songs, { title: form.title, artist: form.artist });
-        if (duplicate) {
-          setError('This song already exists in your songlist.');
-          setLoading(false);
-          return;
-        }
+      // Duplicate guard (add + rename): reuse liveDuplicate, the exact value that
+      // drives the form warning, so what blocks here is always what the user saw.
+      if (liveDuplicate) {
+        setError('This song already exists in your songlist.');
+        setLoading(false);
+        return;
       }
 
       if (editingUid !== null) {

@@ -1,6 +1,16 @@
 import type { Song } from '../services/songService';
 
-const norm = (value: string | null | undefined): string => (value ?? '').toLowerCase().trim();
+// Normalize for comparison: fold case, strip diacritics (NFD-decompose then drop
+// combining marks, which also neutralizes NFC/NFD encoding differences), and
+// collapse internal whitespace. So "Rage  Against" === "Rage Against" and
+// "Beyoncé" === "Beyonce".
+const norm = (value: string | null | undefined): string =>
+  (value ?? '')
+    .normalize('NFD')
+    .replace(/\p{Diacritic}/gu, '')
+    .toLowerCase()
+    .replace(/\s+/g, ' ')
+    .trim();
 
 /**
  * Finds an existing song matching the given title + artist (case- and
