@@ -35,7 +35,7 @@
 # - Dev moves story to 'review', then runs code-review (fresh context, different LLM recommended)
 
 generated: 2026-06-07
-last_updated: 2026-06-11
+last_updated: 2026-06-17
 project: musician-tools
 project_key: NOKEY
 tracking_system: file-system
@@ -71,7 +71,7 @@ development_status:
   epic-4-retrospective: done
 
   # Epic 5: Robustesse / confort (post-PRD, issu des rétros)
-  epic-5: in-progress    # rouvert : 5-7 (dette FK playlists) décidée à la rétro épic 5
+  epic-5: done    # rouvert post-rétro pour 5-7 (dette FK) puis 5-8 (visibilité doublon) ; tout livré
   5-1-session-expiree-re-login-propre: done
   5-2-saisie-de-session-repensee-combobox: done       # rétroactif, livré v1.3.1 (f1feee5)
   5-3-songlist-et-navigation-au-propre: done           # committé 8dc2f06
@@ -79,6 +79,7 @@ development_status:
   5-5-libelle-chanson-artiste-titre: done
   5-6-suppression-chanson-nettoie-playlists: done    # bug : UID orphelin dans playlists (signalé 2026-06-11)
   5-7-playlists-vrai-lien-base-fk: done    # option B : vrai lien FK playlists↔chansons ; migration validée sur dump prod réel (2026-06-11)
+  5-8-songlist-doublon-visibilite: done    # rétroactif, livré v1.3.6 (01b6ffc/c865821/c613dc5) ; détection live + lien, review 3-couches OK
   epic-5-retrospective: done
 
   # Epic 6: Capture enrichie — durée de répertoire (PRD amendé : FR21 + FR24)
