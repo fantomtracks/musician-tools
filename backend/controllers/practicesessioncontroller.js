@@ -355,6 +355,16 @@ const createPracticeSession = async (req, res, next) => {
       }
     }
 
+    // A session total can't be less than the minutes its entries already
+    // account for (the entries are part of the session). It may exceed the sum
+    // (extra un-itemised practice), never undercut it.
+    if (durationMinutes !== undefined && durationMinutes !== null) {
+      const entriesMinutesSum = pendingItems.reduce((sum, it) => sum + (Number.isInteger(it.minutes) ? it.minutes : 0), 0);
+      if (durationMinutes < entriesMinutesSum) {
+        return next(createError(400, `Duration cannot be less than the ${entriesMinutesSum} minutes logged in its entries`));
+      }
+    }
+
     // Ownership-scoped batch resolution (NFR4): two queries total, not one per
     // item. An unknown uid and another user's uid get the same answer — no
     // enumeration oracle. Labels are snapshotted server-side so history
@@ -633,6 +643,19 @@ const updatePracticeSession = async (req, res, next) => {
         .filter(item => !keptUids.has(item.uid))
         .map(item => item.uid);
       itemOps = { rows, toDelete };
+    }
+
+    // A session total can't be less than the minutes its entries account for.
+    // Effective entries = the payload's items when provided, otherwise the
+    // session's existing entries (a duration-only update must still be coherent).
+    if (nextDuration !== null) {
+      const effectiveItemMinutes = itemOps
+        ? itemOps.rows.map(row => row.values.minutes)
+        : practiceSession.items.map(item => item.minutes);
+      const entriesMinutesSum = effectiveItemMinutes.reduce((sum, m) => sum + (Number.isInteger(m) ? m : 0), 0);
+      if (nextDuration < entriesMinutesSum) {
+        return next(createError(400, `Duration cannot be less than the ${entriesMinutesSum} minutes logged in its entries`));
+      }
     }
 
     // Capture before the update so the play sync (4.2) can detect changes.

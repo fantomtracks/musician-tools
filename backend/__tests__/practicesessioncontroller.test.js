@@ -618,6 +618,32 @@ describe('practicesessioncontroller', () => {
       expect(next).not.toHaveBeenCalled();
     });
 
+    test('rejects a session total shorter than the sum of its entries (400)', async () => {
+      const req = {
+        session: { user: 'user-1' },
+        body: { ...baseBody([{ songUid: SONG_UID, minutes: 50 }]), durationMinutes: 10 },
+      };
+      const next = mockNext();
+
+      await controller.createPracticeSession(req, mockRes(), next);
+
+      expect(next.mock.calls[0][0].status).toBe(400);
+      expect(PracticeSession.create).not.toHaveBeenCalled();
+    });
+
+    test('allows a session total that exceeds the entries sum (extra un-itemised practice)', async () => {
+      const req = {
+        session: { user: 'user-1' },
+        body: { ...baseBody([{ songUid: SONG_UID, minutes: 10 }]), durationMinutes: 50 },
+      };
+      const next = mockNext();
+
+      await controller.createPracticeSession(req, mockRes(), next);
+
+      expect(next).not.toHaveBeenCalled();
+      expect(PracticeSession.create).toHaveBeenCalled();
+    });
+
     test('4.2: a linked SongPlay is created for each SONG entry, none for topics', async () => {
       const req = {
         session: { user: 'user-1' },
@@ -811,6 +837,36 @@ describe('practicesessioncontroller', () => {
       const arg = session.update.mock.calls[0][0];
       expect(arg.durationMinutes).toBeNull();
       expect(arg.note).toBeNull();
+    });
+
+    test('rejects a duration-only update that drops below the existing entries sum (400)', async () => {
+      const session = mockExistingSession({ items: [mockItem({ minutes: 50 })] });
+      PracticeSession.findByPk.mockResolvedValue(session);
+
+      const req = { params: { uid: SESSION_UID }, session: { user: 'user-1' }, body: { durationMinutes: 10 } };
+      const next = mockNext();
+
+      await controller.updatePracticeSession(req, mockRes(), next);
+
+      expect(next.mock.calls[0][0].status).toBe(400);
+      expect(session.update).not.toHaveBeenCalled();
+    });
+
+    test('rejects an update whose payload entries sum exceeds the new total (400)', async () => {
+      const session = mockExistingSession();
+      PracticeSession.findByPk.mockResolvedValue(session);
+
+      const req = {
+        params: { uid: SESSION_UID },
+        session: { user: 'user-1' },
+        body: { durationMinutes: 10, items: [{ songUid: SONG_UID, minutes: 50 }] },
+      };
+      const next = mockNext();
+
+      await controller.updatePracticeSession(req, mockRes(), next);
+
+      expect(next.mock.calls[0][0].status).toBe(400);
+      expect(session.update).not.toHaveBeenCalled();
     });
 
     test('rejects invalid or future dates with 400', async () => {

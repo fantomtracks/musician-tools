@@ -35,7 +35,7 @@
 # - Dev moves story to 'review', then runs code-review (fresh context, different LLM recommended)
 
 generated: 2026-06-07
-last_updated: 2026-06-17
+last_updated: 2026-06-18
 project: musician-tools
 project_key: NOKEY
 tracking_system: file-system
@@ -83,9 +83,15 @@ development_status:
   epic-5-retrospective: done
 
   # Epic 6: Capture enrichie — durée de répertoire (PRD amendé : FR21 + FR24)
-  epic-6: backlog
-  6-1-duree-de-chanson-temps-de-session-auto: ready
+  epic-6: done
+  6-1-duree-de-chanson-temps-de-session-auto: done
 
   # Epic 7: Compte utilisateur (HORS PRD initial — bloqué : brief + design sécurité)
   epic-7: backlog
   7-1-editer-mon-profil: backlog
+
+  # Epic 8: Refonte temps de session — « tout est entrée » (Correct Course 2026-06-18 ; PRD amendé FR13/FR15/FR24 + FR25/FR26)
+  epic-8: in-progress
+  8-1-auto-remplissage-minutes-entree-depuis-duree-chanson: done   # Phase A — indépendant, quick win
+  8-2-topic-systeme-free-practice-et-creation-a-la-volee: backlog     # Phase B — prérequis de 8-3 ; trancher seedé vs virtuel
+  8-3-suppression-duree-globale-heatmap-somme-entrees-migration: backlog  # Phase C — après 8-2 ; rollback sync 6.1 + plancher (380e8c4/cbd6676)

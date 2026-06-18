@@ -20,16 +20,16 @@ FR2 : L'utilisateur peut renommer, recatégoriser et supprimer ses propres sujet
 FR3 : L'utilisateur dispose d'une page de gestion simple listant tous ses sujets.
 FR4 : La suppression d'un sujet ne supprime pas l'historique : les sessions passées qui le référencent continuent d'afficher son nom. En rééditant une session, l'utilisateur peut reclasser une entrée vers un autre sujet.
 FR5 : Les sujets de travail sont distincts des « techniques » existantes (métadonnées de chanson) : aucun rapprochement automatique dans cette itération.
-FR6 : L'utilisateur peut créer une session avec : date (défaut : aujourd'hui ; toute date passée autorisée — session rétroactive ; dates futures interdites), instrument, durée totale. Aucune durée minimale.
+FR6 _(amendé 2026-06-18)_ : L'utilisateur peut créer une session avec : date (défaut : aujourd'hui ; toute date passée autorisée — session rétroactive ; dates futures interdites) et instrument. Plus de durée globale saisie (le temps se loggue via les entrées — FR13). Aucune durée minimale.
 FR7 : Une session porte exactement un instrument. Deux instruments le même jour = deux sessions distinctes.
 FR8 : Une session contient zéro ou plusieurs entrées ; chaque entrée référence une chanson ou un sujet, avec minutes (optionnelles) et note libre contextuelle (optionnelle).
 FR9 : Une session porte une note libre globale (optionnelle).
-FR10 : Toute session est éditable a posteriori : date, durée, instrument, entrées, notes.
+FR10 _(amendé 2026-06-18)_ : Toute session est éditable a posteriori : date, instrument, entrées (dont leurs minutes), notes. (Durée totale dérivée des entrées, plus saisie.)
 FR11 : Toute session est supprimable, avec dialogue de confirmation (pattern existant).
 FR12 : La saisie est optimisée pour la vitesse : chansons et sujets récents suggérés en premier, recherche instantanée, instrument par défaut pré-rempli. Cible : session complète saisie en moins de 30 secondes.
-FR13 : [ASSUMPTION] Si toutes les entrées portent des minutes, la durée totale de la session est pré-calculée comme leur somme ; l'utilisateur peut la surcharger.
+FR13 _(amendé 2026-06-18)_ : La durée totale d'une session est toujours la somme des minutes de ses entrées — plus de durée globale surchargeable. Le temps non structuré se loggue via une entrée sur le topic système « Free practice » (FR25).
 FR14 : L'utilisateur peut consulter l'historique de ses sessions (liste antichronologique avec date, durée, instrument, entrées).
-FR15 : Grille annuelle type GitHub, une case par jour ; intensité = minutes totales du jour, échelle relative à l'utilisateur (paliers type quartiles GitHub). Toute session allume le jour quelle que soit sa durée (intensité minimale visible).
+FR15 _(précisé 2026-06-18)_ : Grille annuelle type GitHub, une case par jour ; intensité = minutes totales du jour (= somme des minutes des entrées), échelle relative à l'utilisateur (paliers type quartiles GitHub). Toute session allume le jour quelle que soit sa durée (intensité minimale visible).
 FR16 : Cliquer sur un jour ouvre le détail : sessions de la journée avec leurs entrées et notes.
 FR17 : L'utilisateur peut naviguer entre les années.
 FR18 : Aucune mécanique punitive : pas de compteur de streak cassée, pas de couleur agressive sur les jours vides, pas de notification de relance.
@@ -75,7 +75,7 @@ FR9: Epic 2 - Note libre globale de session
 FR10: Epic 2 - Édition complète a posteriori
 FR11: Epic 2 - Suppression avec confirmation
 FR12: Epic 2 - Saisie < 30 s (suggestions récentes, recherche instantanée, défauts)
-FR13: Epic 2 - Durée pré-calculée = somme des entrées, surchargeable
+FR13: Epic 2 (amendé Epic 8, 2026-06-18) - Durée = somme des entrées, plus de surcharge globale
 FR14: Epic 2 - Historique antichronologique des sessions
 FR15: Epic 3 - Grille annuelle type GitHub, échelle relative, toute session allume le jour
 FR16: Epic 3 - Détail des sessions au clic sur un jour
@@ -86,8 +86,10 @@ FR20: Epic 3 - Heatmap visible dès le premier jour
 FR21: Epic 4 - « Mark as Played » crée/complète la session du jour de l'instrument
 FR22: Epic 3 - Rétro-import de l'historique de lectures dans la heatmap
 FR23: Epic 4 - Cohérence bidirectionnelle du « dernier joué » (mise à jour + recalcul)
-FR24: Epic 6 - Durée de chanson (champ optionnel) alimentant le pré-remplissage du temps de session
+FR24: Epic 6 (étendu Epic 8) - Durée de chanson alimentant le pré-remplissage du temps de session (Mark as Played ET entrée manuelle)
 FR21 (amendé 2026-06-10): Epic 4 + Epic 6 - Mark as Played pré-remplit / incrémente les minutes depuis la durée de chanson
+FR25 (ajouté 2026-06-18): Epic 8 - Topic système « Free practice » épinglé pour le temps non structuré
+FR26 (ajouté 2026-06-18): Epic 8 - Création de topic à la volée dans le sélecteur d'entrée
 
 ## Epic List
 
@@ -227,7 +229,7 @@ So that je sais précisément ce que j'ai travaillé, et avec quel ressenti.
 
 **Given** une session avec entrées « Sweet Child (15 min) » et « Pentatonique (25 min) »
 **When** toutes les entrées portent des minutes
-**Then** la durée totale est pré-calculée à 40 min, et je peux la surcharger (FR13)
+**Then** la durée totale est la somme = 40 min (FR13, amendé 2026-06-18 : dérivée des entrées, plus de surcharge globale)
 
 **Given** une session sans aucune entrée
 **When** je valide
@@ -483,7 +485,7 @@ So that mon journal reflète mon temps de pratique sans saisie manuelle.
 
 **Given** des entrées portant des minutes
 **When** la durée totale de session est calculée
-**Then** elle suit FR13 (somme, surchargeable) — aucune régression de l'édition de session ni du répertoire (CM2)
+**Then** elle suit FR13 (somme des entrées ; surcharge globale retirée par Epic 8, 2026-06-18) — aucune régression de l'édition de session ni du répertoire (CM2)
 
 ---
 
@@ -506,3 +508,73 @@ So that je garde mon compte à jour sans support.
 **Given** un changement de mot de passe
 **When** je le soumets
 **Then** le mot de passe actuel est exigé et vérifié (`validPassword`), le nouveau est confirmé, le hachage passe par le setter bcryptjs, et la réponse ne renvoie jamais le hash
+
+---
+
+## Epic 8: Refonte temps de session — « tout est entrée »
+
+_Ajouté 2026-06-18 (Correct Course — cf. sprint-change-proposal-2026-06-18, issu du brainstorm 2026-06-18). PRD amendé : FR13 (retrait surcharge), FR15 (précision), FR24 (étendu) ; ajouts FR25, FR26._
+
+**Objectif :** supprimer la double source de vérité du temps. La session devient un simple regroupement (jour + instrument) ; la durée totale est **toujours** la somme des minutes des entrées. Le temps non structuré se loggue via une entrée sur le topic système « Free practice ».
+
+**FRs covered:** FR13 (amendé), FR15 (précisé), FR24 (étendu), FR25, FR26
+
+**Décision archi en suspens (à trancher en 8-2/8-3) :** topic « Free practice » seedé par user vs virtuel/built-in.
+
+### Story 8.1: Auto-remplissage des minutes d'entrée depuis la durée chanson (Phase A)
+
+As a musicien qui détaille sa session,
+I want que choisir une chanson ayant une durée pré-remplisse le temps de l'entrée,
+So that je saisis moins.
+
+**Acceptance Criteria (esquisse) :**
+
+**Given** une chanson avec une durée, dans le sélecteur d'entrée d'une session
+**When** je la sélectionne et que le champ minutes de l'entrée est vide
+**Then** les minutes sont pré-remplies avec la durée de la chanson (arrondie), éditable (FR24 étendu)
+
+**Given** une chanson sans durée, ou un champ minutes déjà saisi
+**When** je sélectionne la chanson
+**Then** rien n'est écrasé (pas de régression)
+
+_Indépendant, faible risque — jouable immédiatement._
+
+### Story 8.2: Topic système « Free practice » épinglé + création de topic à la volée (Phase B)
+
+As a musicien qui veut tout logger en entrée,
+I want un topic « Free practice » toujours dispo et pouvoir créer un topic à la volée,
+So that logguer du temps non structuré reste rapide (< 30 s, NFR1).
+
+**Acceptance Criteria (esquisse) :**
+
+**Given** le sélecteur d'entrée
+**Then** un topic système « Free practice » est épinglé en tête, sans avoir à le créer (FR25)
+
+**Given** une recherche sans correspondance dans le sélecteur
+**When** je choisis « Create topic "…" »
+**Then** le topic est créé et sélectionné sans quitter le formulaire (FR26)
+
+_Prérequis de 8.3. Trancher : Free practice seedé vs virtuel._
+
+### Story 8.3: Suppression de la durée globale + heatmap somme des entrées + migration (Phase C)
+
+As a produit,
+I want retirer la durée globale de session,
+So that le temps a une seule source de vérité (les entrées).
+
+**Acceptance Criteria (esquisse) :**
+
+**Given** le formulaire de session
+**Then** plus de champ « Duration » saisi ; le total affiché = somme des entrées (lecture seule) (FR13 amendé)
+
+**Given** le heatmap
+**When** il calcule les minutes d'un jour
+**Then** il somme les `SessionItem.minutes` (au lieu de `PracticeSession.duration_minutes`) (FR15)
+
+**Given** la base existante (beta, 3-4 users)
+**When** la migration s'exécute
+**Then** `duration_minutes` est retirée ; le delta « non détaillé » est accepté perdu OU converti one-shot en entrée « Free practice » (à confirmer au cadrage)
+
+**Et** retrait du code devenu inutile : sync `markSongPlayed → durationMinutes` (story 6.1) et calage/plancher session (commits 380e8c4, cbd6676).
+
+_Démarre après 8.2. Breaking changes tolérés (beta)._

@@ -6,8 +6,19 @@ project adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
-_Nothing yet — new changes are accumulated here, then this heading is renamed to
-`X.Y.Z — YYYY-MM-DD` when the version is bumped._
+### Added
+- **Song duration that fills in your practice time automatically**
+  - A song can now have an optional duration, entered as `m:ss` (e.g. `3:30`) or as whole minutes
+  - When you "Mark as played", the song's duration pre-fills the time of that entry in your session journal (rounded to the minute)
+  - Marking the same song again the same day adds its duration to the existing entry instead of creating a duplicate
+  - Your session total and the practice heatmap now count this time
+  - If you edit a song and click "Mark as played" before saving, the app offers to save first so the new duration is taken into account
+
+### Changed
+- Session history now reads "played during X minutes" for each song — so it's clearly the time you played, not the song's length — with a clearer separator next to the instrument
+
+### Changed
+- The session total now fills in automatically with the time logged in its entries (it follows their sum as you add or edit them) and can only be raised above that sum, never below
 
 ## [1.3.6] — 2026-06-14
 

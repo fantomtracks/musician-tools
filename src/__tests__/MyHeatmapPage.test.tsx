@@ -176,7 +176,7 @@ test('clicking an active day opens its detail with sessions, entries and an Edit
   expect(mockedService.getAll).toHaveBeenCalledWith(`${YEAR}-03-10`);
   const panel = await screen.findByRole('list', { name: 'Day sessions' });
   expect(within(panel).getByText('Bass')).toBeInTheDocument();
-  expect(within(panel).getByText('40 min')).toBeInTheDocument();
+  expect(within(panel).getByText('· 40 min')).toBeInTheDocument();
   expect(within(panel).getByText('solid run')).toBeInTheDocument();
   expect(within(panel).getByText(/Sweet Child/)).toBeInTheDocument();
   expect(within(panel).getByText(/at 30 BPM/)).toBeInTheDocument();
