@@ -5,6 +5,7 @@ import { topicService, type Topic } from '../services/topicService';
 import { ConfirmDialog } from '../components/ConfirmDialog';
 import { instrumentTypeOptions } from '../constants/instrumentTypes';
 import { digitsOnly } from '../utils/digitsOnly';
+import { secondsToWholeMinutes } from '../utils/duration';
 
 type EntryDraft = {
   key: number;
@@ -711,7 +712,18 @@ function MySessionsPage() {
                     topics={topics}
                     recentRefs={recentRefs}
                     loading={loading}
-                    onPick={ref => updateEntry(entry.key, { ref })}
+                    onPick={ref => {
+                      const patch: Partial<EntryDraft> = { ref };
+                      // FR24 (extended): pre-fill the minutes from the song's
+                      // duration, only when the user hasn't typed anything (never
+                      // overwrite). Topics and songs without a duration: nothing.
+                      if (entry.minutes === '' && ref.startsWith('song:')) {
+                        const song = songs.find(s => s.uid === ref.slice('song:'.length));
+                        const mins = secondsToWholeMinutes(song?.durationSeconds);
+                        if (mins !== null) patch.minutes = String(mins);
+                      }
+                      updateEntry(entry.key, patch);
+                    }}
                   />
                   <input
                     aria-label={`Entry ${index + 1} minutes`}

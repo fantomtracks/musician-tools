@@ -320,6 +320,56 @@ test('FR13: the total floors at the sum of the timed entries (partial sum counts
   expect(screen.getByLabelText('Duration')).toHaveValue(15);
 });
 
+test('8.1: selecting a song with a duration pre-fills the entry minutes (rounded)', async () => {
+  mockedSongService.getAllSongs.mockResolvedValue([
+    { uid: SONG_UID, title: 'Sweet Child', durationSeconds: 240 } as never, // 4:00 → 4 min
+  ]);
+  render(<MySessionsPage />);
+
+  await addEntry(1, `song:${SONG_UID}`); // no manual minutes
+
+  expect(screen.getByLabelText('Entry 1 minutes')).toHaveValue(4);
+});
+
+test('8.1: a manually entered minutes value is not overwritten by the song duration', async () => {
+  mockedSongService.getAllSongs.mockResolvedValue([
+    { uid: SONG_UID, title: 'Sweet Child', durationSeconds: 240 } as never,
+  ]);
+  render(<MySessionsPage />);
+
+  fireEvent.click(screen.getByRole('button', { name: 'Add entry' }));
+  fireEvent.change(await screen.findByLabelText('Entry 1 minutes'), { target: { value: '10' } });
+  await pickEntry(1, 'Sweet Child');
+
+  expect(screen.getByLabelText('Entry 1 minutes')).toHaveValue(10); // user value preserved
+});
+
+test('8.1: a pre-filled minutes value stays editable (user edit wins)', async () => {
+  mockedSongService.getAllSongs.mockResolvedValue([
+    { uid: SONG_UID, title: 'Sweet Child', durationSeconds: 240 } as never, // pre-fills to 4
+  ]);
+  render(<MySessionsPage />);
+
+  await addEntry(1, `song:${SONG_UID}`);
+  const minutes = screen.getByLabelText('Entry 1 minutes');
+  expect(minutes).toHaveValue(4); // pre-filled
+
+  fireEvent.change(minutes, { target: { value: '7' } }); // user edits it
+  expect(minutes).toHaveValue(7); // edit wins
+});
+
+test('8.1: a song without a duration leaves the minutes empty', async () => {
+  render(<MySessionsPage />); // default fixture: SONG_UID has no durationSeconds
+  await addEntry(1, `song:${SONG_UID}`);
+  expect(screen.getByLabelText('Entry 1 minutes')).toHaveValue(null);
+});
+
+test('8.1: selecting a topic does not pre-fill minutes', async () => {
+  render(<MySessionsPage />);
+  await addEntry(1, `topic:${TOPIC_UID}`);
+  expect(screen.getByLabelText('Entry 1 minutes')).toHaveValue(null);
+});
+
 test('Remove entry deletes the row', async () => {
   render(<MySessionsPage />);
 

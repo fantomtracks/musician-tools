@@ -35,6 +35,16 @@ export function parseDurationToSeconds(input: string): number | null {
   return seconds;
 }
 
+// Round a stored second-duration to whole minutes for the practice journal,
+// which works in whole minutes. Returns null when there is no usable duration
+// (missing / non-integer / rounds to 0, i.e. under 30s) — same semantics as the
+// backend markSongPlayed pre-fill (story 6.1), kept in sync for consistency.
+export function secondsToWholeMinutes(seconds: number | null | undefined): number | null {
+  if (!Number.isInteger(seconds) || (seconds as number) <= 0) return null;
+  const rounded = Math.round((seconds as number) / 60);
+  return rounded > 0 ? rounded : null;
+}
+
 // Format stored seconds as m:ss for display (e.g. 210 → "3:30").
 export function formatSecondsToMmss(seconds: number | null | undefined): string {
   if (seconds === null || seconds === undefined) return '';

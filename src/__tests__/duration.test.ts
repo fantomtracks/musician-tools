@@ -1,4 +1,25 @@
-import { parseDurationToSeconds, formatSecondsToMmss } from '../utils/duration';
+import { parseDurationToSeconds, formatSecondsToMmss, secondsToWholeMinutes } from '../utils/duration';
+
+describe('secondsToWholeMinutes', () => {
+  test('rounds seconds to the nearest whole minute', () => {
+    expect(secondsToWholeMinutes(240)).toBe(4); // 4:00
+    expect(secondsToWholeMinutes(210)).toBe(4); // 3:30 → round(3.5) = 4
+    expect(secondsToWholeMinutes(150)).toBe(3); // 2:30 → round(2.5) = 3
+  });
+
+  test('returns null for durations that round to nothing (<30s)', () => {
+    expect(secondsToWholeMinutes(20)).toBeNull(); // round(0.33) = 0
+    expect(secondsToWholeMinutes(29)).toBeNull();
+  });
+
+  test('returns null for missing / non-integer / non-positive input', () => {
+    expect(secondsToWholeMinutes(null)).toBeNull();
+    expect(secondsToWholeMinutes(undefined)).toBeNull();
+    expect(secondsToWholeMinutes(0)).toBeNull();
+    expect(secondsToWholeMinutes(-60)).toBeNull();
+    expect(secondsToWholeMinutes(90.5)).toBeNull();
+  });
+});
 
 describe('parseDurationToSeconds', () => {
   test('parses m:ss form', () => {
