@@ -65,7 +65,7 @@ jobs:
         with:
           tag_name: v${{ steps.pkg.outputs.version }}
           name: "🎵 Musician Tools v${{ steps.pkg.outputs.version }}"
-          # Curated CHANGELOG section first; the auto-generated "Full Changelog"
-          # diff link is appended below it by generate_release_notes.
+          # The release body is EXACTLY this version's CHANGELOG section — no
+          # auto-generated commit list or "Full Changelog" diff appended.
           body_path: RELEASE_NOTES.md
-          generate_release_notes: true
+          generate_release_notes: false
