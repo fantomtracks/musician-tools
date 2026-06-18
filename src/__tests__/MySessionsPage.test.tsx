@@ -141,6 +141,18 @@ test('after success, duration and note reset but date and instrument are kept', 
   expect(screen.getByLabelText('Instrument')).toHaveValue('Bass');
 });
 
+test('blocks a manual duration shorter than the sum of the entries', async () => {
+  render(<MySessionsPage />);
+
+  fireEvent.change(screen.getByLabelText('Instrument'), { target: { value: 'Bass' } });
+  await addEntry(1, `song:${SONG_UID}`, '50');
+  fireEvent.change(screen.getByLabelText('Duration'), { target: { value: '10' } });
+  fireEvent.click(screen.getByRole('button', { name: 'Log session' }));
+
+  expect(await screen.findByText(/Session duration can't be less than the 50 min/i)).toBeInTheDocument();
+  expect(mockedService.create).not.toHaveBeenCalled();
+});
+
 test('a session without duration or note is valid (only date + instrument required)', async () => {
   mockedService.create.mockResolvedValue({ uid: 's1', date: todayLocalDate(), instrumentType: 'Guitar' });
 

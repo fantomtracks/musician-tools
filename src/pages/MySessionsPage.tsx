@@ -458,6 +458,14 @@ function MySessionsPage() {
       setError('Each entry needs a song or topic — fill or remove empty entries');
       return;
     }
+    // A session can't be shorter than what its entries already account for: the
+    // entries are part of the session, so the (optional) total may exceed their
+    // sum (extra un-itemised practice) but never undercut it.
+    const enteredMinutesSum = entryMinutes.reduce<number>((sum, m) => sum + (m ?? 0), 0);
+    if (effectiveDuration !== '' && Number(effectiveDuration) < enteredMinutesSum) {
+      setError(`Session duration can't be less than the ${enteredMinutesSum} min already logged in its entries`);
+      return;
+    }
     try {
       setLoading(true);
       submitInFlightRef.current = true;
