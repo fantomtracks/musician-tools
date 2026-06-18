@@ -24,6 +24,7 @@ const baseForm: CreateSongDTO = {
 function renderForm(overrides: Partial<CreateSongDTO> = {}, extraProps: Partial<React.ComponentProps<typeof SongForm>> = {}) {
   const form = { ...baseForm, ...overrides } as CreateSongDTO;
   const onChange = jest.fn();
+  const onSetDurationSeconds = jest.fn();
   const onSubmit = jest.fn((e: React.FormEvent) => e.preventDefault());
   render(
     <SongForm
@@ -31,6 +32,7 @@ function renderForm(overrides: Partial<CreateSongDTO> = {}, extraProps: Partial<
       form={form}
       loading={false}
       onChange={onChange}
+      onSetDurationSeconds={onSetDurationSeconds}
       onToggleGenre={jest.fn()}
       onToggleLanguage={jest.fn()}
       onChangeInstruments={jest.fn()}
@@ -43,7 +45,7 @@ function renderForm(overrides: Partial<CreateSongDTO> = {}, extraProps: Partial<
       suggestedArtists={(extraProps as any).suggestedArtists || ['The Beatles']}
     />
   );
-  return { onChange };
+  return { onChange, onSetDurationSeconds };
 }
 
 test('updates time signature select and calls onChange', () => {
@@ -52,6 +54,82 @@ test('updates time signature select and calls onChange', () => {
   const select = screen.getByLabelText('Time Signature') as HTMLSelectElement;
   fireEvent.change(select, { target: { value: '4/4' } });
   expect(onChange).toHaveBeenCalled();
+});
+
+test('renders the Duration (m:ss) field and shows stored seconds as m:ss', () => {
+  renderForm({ durationSeconds: 210 }); // 3:30
+  fireEvent.click(screen.getByText('Details'));
+  const input = screen.getByLabelText('Duration (m:ss)') as HTMLInputElement;
+  expect(input.value).toBe('3:30');
+});
+
+test('an empty duration renders blank', () => {
+  renderForm({ durationSeconds: null });
+  fireEvent.click(screen.getByText('Details'));
+  const input = screen.getByLabelText('Duration (m:ss)') as HTMLInputElement;
+  expect(input.value).toBe('');
+});
+
+test('parses m:ss input and commits seconds on blur, canonicalising the display', () => {
+  const { onSetDurationSeconds } = renderForm({ durationSeconds: null });
+  fireEvent.click(screen.getByText('Details'));
+  const input = screen.getByLabelText('Duration (m:ss)') as HTMLInputElement;
+  fireEvent.change(input, { target: { value: '3:30' } });
+  fireEvent.blur(input);
+  expect(onSetDurationSeconds).toHaveBeenCalledWith(210);
+  expect(input.value).toBe('3:30');
+});
+
+test('reads a bare number as whole minutes', () => {
+  const { onSetDurationSeconds } = renderForm({ durationSeconds: null });
+  fireEvent.click(screen.getByText('Details'));
+  const input = screen.getByLabelText('Duration (m:ss)') as HTMLInputElement;
+  fireEvent.change(input, { target: { value: '4' } });
+  fireEvent.blur(input);
+  expect(onSetDurationSeconds).toHaveBeenCalledWith(240);
+  expect(input.value).toBe('4:00');
+});
+
+test('a single-digit seconds part is read as tens (3:3 → 3:30)', () => {
+  const { onSetDurationSeconds } = renderForm({ durationSeconds: null });
+  fireEvent.click(screen.getByText('Details'));
+  const input = screen.getByLabelText('Duration (m:ss)') as HTMLInputElement;
+  fireEvent.change(input, { target: { value: '3:3' } });
+  fireEvent.blur(input);
+  expect(onSetDurationSeconds).toHaveBeenCalledWith(210);
+  expect(input.value).toBe('3:30');
+});
+
+test('invalid input shows an error, keeps the text, and does not commit', () => {
+  const { onSetDurationSeconds } = renderForm({ durationSeconds: null });
+  fireEvent.click(screen.getByText('Details'));
+  const input = screen.getByLabelText('Duration (m:ss)') as HTMLInputElement;
+  fireEvent.change(input, { target: { value: '3,3' } });
+  fireEvent.blur(input);
+  expect(onSetDurationSeconds).not.toHaveBeenCalled(); // value left unchanged
+  expect(input.value).toBe('3,3'); // text preserved for correction
+  expect(screen.getByText(/seconds must be 0–59/i)).toBeInTheDocument();
+});
+
+test('seconds over 59 are rejected with an error (3:60)', () => {
+  const { onSetDurationSeconds } = renderForm({ durationSeconds: null });
+  fireEvent.click(screen.getByText('Details'));
+  const input = screen.getByLabelText('Duration (m:ss)') as HTMLInputElement;
+  fireEvent.change(input, { target: { value: '3:60' } });
+  fireEvent.blur(input);
+  expect(onSetDurationSeconds).not.toHaveBeenCalled();
+  expect(screen.getByText(/seconds must be 0–59/i)).toBeInTheDocument();
+});
+
+test('correcting the input clears the error on change', () => {
+  renderForm({ durationSeconds: null });
+  fireEvent.click(screen.getByText('Details'));
+  const input = screen.getByLabelText('Duration (m:ss)') as HTMLInputElement;
+  fireEvent.change(input, { target: { value: '3:60' } });
+  fireEvent.blur(input);
+  expect(screen.getByText(/seconds must be 0–59/i)).toBeInTheDocument();
+  fireEvent.change(input, { target: { value: '3:30' } });
+  expect(screen.queryByText(/seconds must be 0–59/i)).not.toBeInTheDocument();
 });
 
 test('hides artist suggestions when exact single match', () => {

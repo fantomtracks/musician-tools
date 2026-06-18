@@ -789,7 +789,7 @@ function MySessionsPage() {
                     <span className="font-semibold">{session.date}</span>
                     <span className="text-sm text-gray-600 dark:text-gray-400">{session.instrumentType}</span>
                     {session.durationMinutes ? (
-                      <span className="text-sm text-gray-600 dark:text-gray-400">{session.durationMinutes} min</span>
+                      <span className="text-sm text-gray-600 dark:text-gray-400">· {session.durationMinutes} min</span>
                     ) : null}
                     <div className="flex gap-2 ml-auto">
                       <button
@@ -825,7 +825,7 @@ function MySessionsPage() {
                         <li key={item.uid} className="text-sm text-gray-700 dark:text-gray-300 pl-3 border-l-2 border-gray-200 dark:border-gray-700 break-words">
                           {artist ? <span>{artist} - </span> : null}
                           <span className="font-medium">{item.label}</span>
-                          {item.minutes ? <span className="text-gray-500 dark:text-gray-400"> · {item.minutes} min</span> : null}
+                          {item.minutes ? <span className="text-gray-500 dark:text-gray-400"> · played during {item.minutes} {item.minutes > 1 ? 'minutes' : 'minute'}</span> : null}
                           {item.note ? <span className="text-gray-500 dark:text-gray-400 italic"> · {item.note}</span> : null}
                         </li>
                         );

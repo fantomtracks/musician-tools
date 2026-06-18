@@ -27,6 +27,12 @@ module.exports = (sequelize, DataTypes) => {
       allowNull: true,
       defaultValue: null
     },
+    durationSeconds: {
+      type: DataTypes.INTEGER,
+      allowNull: true,
+      defaultValue: null,
+      field: 'duration_seconds'
+    },
     key: {
       type: DataTypes.STRING,
       allowNull: true

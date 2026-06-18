@@ -11,12 +11,13 @@ jest.mock('../models', () => {
     },
     PracticeSession: {
       findOne: jest.fn(async () => null),
-      create: jest.fn(async (data) => ({ ...data, uid: 'session-uid' }))
+      create: jest.fn(async (data) => ({ ...data, uid: 'session-uid', update: jest.fn() }))
     },
     SessionItem: {
       findOne: jest.fn(async () => null),
       create: jest.fn(async (data) => ({ ...data, uid: 'item-uid' })),
-      count: jest.fn(async () => 0)
+      count: jest.fn(async () => 0),
+      sum: jest.fn(async () => 0)
     },
     sequelize: {
       transaction: jest.fn(async (callback) => callback({ id: 'tx' }))
@@ -77,6 +78,24 @@ describe('songcontroller', () => {
     expect(res.json).toHaveBeenCalled();
   });
 
+  test('createSong persists durationSeconds (FR24)', async () => {
+    const req = {
+      session: { user: 'user-1' },
+      body: { title: 'Test Song', durationSeconds: 210 }
+    };
+    await controller.createSong(req, mockRes(), mockNext());
+
+    expect(Song.create.mock.calls[0][0].durationSeconds).toBe(210);
+  });
+
+  test('createSong defaults durationSeconds to null and clears out-of-range values', async () => {
+    await controller.createSong({ session: { user: 'user-1' }, body: { title: 'No Duration' } }, mockRes(), mockNext());
+    expect(Song.create.mock.calls[0][0].durationSeconds).toBeNull();
+
+    await controller.createSong({ session: { user: 'user-1' }, body: { title: 'Bad', durationSeconds: 'abc' } }, mockRes(), mockNext());
+    expect(Song.create.mock.calls[1][0].durationSeconds).toBeNull();
+  });
+
   test('updateSong updates timeSignature and mode', async () => {
     const update = jest.fn();
     Song.findByPk.mockResolvedValue({
@@ -102,6 +121,28 @@ describe('songcontroller', () => {
     expect(arg.timeSignature).toBe('3/4');
     expect(arg.mode).toBe('Minor');
     expect(res.json).toHaveBeenCalled();
+  });
+
+  test('updateSong updates durationSeconds; an absent field leaves it untouched (FR24)', async () => {
+    const update = jest.fn();
+    Song.findByPk.mockResolvedValue({ userUid: 'user-1', durationSeconds: 420, update });
+
+    await controller.updateSong(
+      { params: { uid: 'song-1' }, session: { user: 'user-1' }, body: { durationSeconds: 720 } },
+      mockRes(),
+      mockNext()
+    );
+    expect(update.mock.calls[0][0].durationSeconds).toBe(720);
+
+    // Field absent from the payload → keep the song's current value
+    const update2 = jest.fn();
+    Song.findByPk.mockResolvedValue({ userUid: 'user-1', durationSeconds: 420, update: update2 });
+    await controller.updateSong(
+      { params: { uid: 'song-1' }, session: { user: 'user-1' }, body: { title: 'Renamed' } },
+      mockRes(),
+      mockNext()
+    );
+    expect(update2.mock.calls[0][0].durationSeconds).toBe(420);
   });
 
   describe('markSongPlayed (4.1 — feeds the journal)', () => {
@@ -136,7 +177,7 @@ describe('songcontroller', () => {
 
     test('AC2: reuses an existing same-instrument session that day instead of creating a new one', async () => {
       Song.findByPk.mockResolvedValue(ownedSong());
-      PracticeSession.findOne.mockResolvedValue({ uid: 'existing-session', instrumentType: 'Guitar' });
+      PracticeSession.findOne.mockResolvedValue({ uid: 'existing-session', instrumentType: 'Guitar', durationMinutes: null, update: jest.fn() });
       SessionItem.count.mockResolvedValue(2);
 
       const res = mockRes();
@@ -165,7 +206,7 @@ describe('songcontroller', () => {
 
     test('AC4: re-marking a song already in the day session adds no duplicate entry', async () => {
       Song.findByPk.mockResolvedValue(ownedSong());
-      PracticeSession.findOne.mockResolvedValue({ uid: 'existing-session', instrumentType: 'Guitar' });
+      PracticeSession.findOne.mockResolvedValue({ uid: 'existing-session', instrumentType: 'Guitar', durationMinutes: null, update: jest.fn() });
       SessionItem.findOne.mockResolvedValue({ uid: 'already-there', songUid: 'song-1' });
 
       const res = mockRes();
@@ -177,6 +218,139 @@ describe('songcontroller', () => {
       expect(SongPlay.create.mock.calls[0][0].sessionItemUid).toBe('already-there');
       expect(res.status).toHaveBeenCalledWith(201); // still a success, just idempotent
       expect(next).not.toHaveBeenCalled();
+    });
+
+    test('6.1 AC2 (pre-fill): a song duration (seconds) pre-fills the new entry minutes, rounded (FR21 amended)', async () => {
+      Song.findByPk.mockResolvedValue(ownedSong({ durationSeconds: 240 })); // 4:00
+      PracticeSession.findOne.mockResolvedValue(null);
+      SessionItem.findOne.mockResolvedValue(null); // no existing entry → a new one is created
+
+      const res = mockRes();
+      await controller.markSongPlayed(markReq({ instrumentType: 'Guitar', playedOn: TODAY }), res, mockNext());
+
+      expect(SessionItem.create).toHaveBeenCalledTimes(1);
+      expect(SessionItem.create.mock.calls[0][0].minutes).toBe(4);
+      expect(res.status).toHaveBeenCalledWith(201);
+    });
+
+    test('6.1 AC6 (session total): a new entry sets the session durationMinutes (heatmap + journal)', async () => {
+      Song.findByPk.mockResolvedValue(ownedSong({ durationSeconds: 240 })); // 4 min
+      const session = { uid: 'session-uid', instrumentType: 'Guitar', durationMinutes: null, update: jest.fn() };
+      PracticeSession.findOne.mockResolvedValue(session);
+      SessionItem.findOne.mockResolvedValue(null);
+      SessionItem.sum.mockResolvedValue(0); // no prior minutes on the session
+
+      await controller.markSongPlayed(markReq({ instrumentType: 'Guitar', playedOn: TODAY }), mockRes(), mockNext());
+
+      expect(session.update).toHaveBeenCalledTimes(1);
+      expect(session.update.mock.calls[0][0]).toMatchObject({ durationMinutes: 4 });
+    });
+
+    test('6.1 AC6 (session total): a second played song grows the session total (4 + 5 = 9)', async () => {
+      Song.findByPk.mockResolvedValue(ownedSong({ durationSeconds: 300 })); // +5 min
+      const session = { uid: 'session-uid', instrumentType: 'Guitar', durationMinutes: 4, update: jest.fn() };
+      PracticeSession.findOne.mockResolvedValue(session);
+      SessionItem.findOne.mockResolvedValue(null); // a different song → new entry
+      SessionItem.sum.mockResolvedValue(4); // the first song already contributed 4
+
+      await controller.markSongPlayed(markReq({ instrumentType: 'Guitar', playedOn: TODAY }), mockRes(), mockNext());
+
+      expect(session.update.mock.calls[0][0]).toMatchObject({ durationMinutes: 9 });
+    });
+
+    test('6.1 AC6 (override preserved): a manual session total is never clobbered', async () => {
+      Song.findByPk.mockResolvedValue(ownedSong({ durationSeconds: 240 })); // 4 min
+      // Manual override (60) that does NOT equal the entries' sum (10) → keep it
+      const session = { uid: 'session-uid', instrumentType: 'Guitar', durationMinutes: 60, update: jest.fn() };
+      PracticeSession.findOne.mockResolvedValue(session);
+      SessionItem.findOne.mockResolvedValue(null);
+      SessionItem.sum.mockResolvedValue(10);
+
+      await controller.markSongPlayed(markReq({ instrumentType: 'Guitar', playedOn: TODAY }), mockRes(), mockNext());
+
+      expect(session.update).not.toHaveBeenCalled();
+    });
+
+    test('6.1 AC6 (no duration): a no-duration mark leaves the session total untouched', async () => {
+      Song.findByPk.mockResolvedValue(ownedSong()); // no duration
+      const session = { uid: 'session-uid', instrumentType: 'Guitar', durationMinutes: null, update: jest.fn() };
+      PracticeSession.findOne.mockResolvedValue(session);
+      SessionItem.findOne.mockResolvedValue(null);
+      SessionItem.sum.mockResolvedValue(0);
+
+      await controller.markSongPlayed(markReq({ instrumentType: 'Guitar', playedOn: TODAY }), mockRes(), mockNext());
+
+      expect(session.update).not.toHaveBeenCalled(); // total stays null (no minutes)
+    });
+
+    test('6.1 AC2 (rounding): a 3:30 song (210s) rounds to 4 minutes on the entry', async () => {
+      Song.findByPk.mockResolvedValue(ownedSong({ durationSeconds: 210 })); // 3:30 → round(3.5) = 4
+      PracticeSession.findOne.mockResolvedValue(null);
+      SessionItem.findOne.mockResolvedValue(null);
+
+      await controller.markSongPlayed(markReq({ instrumentType: 'Guitar', playedOn: TODAY }), mockRes(), mockNext());
+
+      expect(SessionItem.create.mock.calls[0][0].minutes).toBe(4);
+    });
+
+    test('6.1 AC3 (no duration): a song without a duration keeps the no-minutes entry (FR21 original)', async () => {
+      Song.findByPk.mockResolvedValue(ownedSong()); // no durationSeconds
+      PracticeSession.findOne.mockResolvedValue(null);
+      SessionItem.findOne.mockResolvedValue(null);
+
+      await controller.markSongPlayed(markReq({ instrumentType: 'Guitar', playedOn: TODAY }), mockRes(), mockNext());
+
+      expect(SessionItem.create.mock.calls[0][0].minutes).toBeNull();
+    });
+
+    test('6.1 AC3 (sub-30s rounds to nothing): a 20s song adds a no-minutes entry', async () => {
+      Song.findByPk.mockResolvedValue(ownedSong({ durationSeconds: 20 })); // round(0.33) = 0 → null
+      PracticeSession.findOne.mockResolvedValue(null);
+      SessionItem.findOne.mockResolvedValue(null);
+
+      await controller.markSongPlayed(markReq({ instrumentType: 'Guitar', playedOn: TODAY }), mockRes(), mockNext());
+
+      expect(SessionItem.create.mock.calls[0][0].minutes).toBeNull();
+    });
+
+    test('6.1 AC4 (cumul): re-marking a song with a duration increments the existing entry minutes, no duplicate', async () => {
+      Song.findByPk.mockResolvedValue(ownedSong({ durationSeconds: 240 })); // 4:00 → 4 min
+      PracticeSession.findOne.mockResolvedValue({ uid: 'existing-session', instrumentType: 'Guitar', durationMinutes: null, update: jest.fn() });
+      const existingItem = { uid: 'already-there', songUid: 'song-1', minutes: 10, update: jest.fn() };
+      SessionItem.findOne.mockResolvedValue(existingItem);
+
+      const res = mockRes();
+      await controller.markSongPlayed(markReq({ instrumentType: 'Guitar', playedOn: TODAY }), res, mockNext());
+
+      expect(SessionItem.create).not.toHaveBeenCalled(); // no duplicate entry (AC4)
+      expect(existingItem.update).toHaveBeenCalledTimes(1);
+      expect(existingItem.update.mock.calls[0][0]).toMatchObject({ minutes: 14 }); // 10 + 4 accrued
+      // The play still links to the same (now incremented) entry
+      expect(SongPlay.create.mock.calls[0][0].sessionItemUid).toBe('already-there');
+      expect(res.status).toHaveBeenCalledWith(201);
+    });
+
+    test('6.1 AC4 (cumul from no minutes): an existing no-minutes entry accrues the duration from zero', async () => {
+      Song.findByPk.mockResolvedValue(ownedSong({ durationSeconds: 300 })); // 5:00 → 5 min
+      PracticeSession.findOne.mockResolvedValue({ uid: 'existing-session', instrumentType: 'Guitar', durationMinutes: null, update: jest.fn() });
+      const existingItem = { uid: 'already-there', songUid: 'song-1', minutes: null, update: jest.fn() };
+      SessionItem.findOne.mockResolvedValue(existingItem);
+
+      await controller.markSongPlayed(markReq({ instrumentType: 'Guitar', playedOn: TODAY }), mockRes(), mockNext());
+
+      expect(existingItem.update.mock.calls[0][0]).toMatchObject({ minutes: 5 });
+    });
+
+    test('6.1 AC4 (no duration): re-marking a song without a duration leaves the existing entry untouched', async () => {
+      Song.findByPk.mockResolvedValue(ownedSong()); // no durationSeconds
+      PracticeSession.findOne.mockResolvedValue({ uid: 'existing-session', instrumentType: 'Guitar', durationMinutes: null, update: jest.fn() });
+      const existingItem = { uid: 'already-there', songUid: 'song-1', minutes: 8, update: jest.fn() };
+      SessionItem.findOne.mockResolvedValue(existingItem);
+
+      await controller.markSongPlayed(markReq({ instrumentType: 'Guitar', playedOn: TODAY }), mockRes(), mockNext());
+
+      expect(existingItem.update).not.toHaveBeenCalled(); // no accrual without a duration
+      expect(SessionItem.create).not.toHaveBeenCalled();
     });
 
     test('AC5 (timestamp): the SongPlay is stamped on the client day (UTC day == playedOn), not the server day', async () => {

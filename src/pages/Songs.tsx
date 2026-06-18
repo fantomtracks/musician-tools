@@ -15,6 +15,7 @@ import { formatLocalDate } from '../utils/heatmap';
 const initialSong: CreateSongDTO = {
   title: '',
   bpm: null,
+  durationSeconds: null,
   key: '',
   capo: null,
   notes: '',
@@ -43,6 +44,12 @@ function Songs() {
   const [songs, setSongs] = useState<Song[]>([]);
   const [form, setForm] = useState<CreateSongDTO>(initialSong);
   const [editingUid, setEditingUid] = useState<string | null>(null);
+  // Snapshot of the form when a song is opened for edit, so we can tell whether
+  // it has unsaved changes (used by the "Mark as Played" save-first guard).
+  const [editBaselineJson, setEditBaselineJson] = useState<string | null>(null);
+  // The instrument awaiting confirmation when "Mark as Played" is clicked with
+  // unsaved changes — non-null while the "save & mark" dialog is open.
+  const [pendingMarkInstrument, setPendingMarkInstrument] = useState<string | null>(null);
   // Removed unused sortByLastPlayed
   const [sortColumn, setSortColumn] = useState<string | null>(() => {
     const saved = typeof window !== 'undefined' ? window.localStorage.getItem('songsSortColumn') : null;
@@ -692,9 +699,39 @@ function Songs() {
     setSelectedPlaylistUids(next);
   };
 
-  const handleMarkAsPlayedNow = async (instrumentType: string) => {
-    if (!editingUid) return;
+  // True when the edited song's form differs from what was last loaded/saved.
+  const isDirty = useMemo(
+    () => editingUid !== null && editBaselineJson !== null && JSON.stringify(form) !== editBaselineJson,
+    [editingUid, editBaselineJson, form],
+  );
 
+  // Persist the current form for the edited song WITHOUT leaving the edit
+  // screen. Returns true on success, false if blocked (duplicate) or on error.
+  const saveSongEdits = async (): Promise<boolean> => {
+    if (editingUid === null) return false;
+    if (liveDuplicate) {
+      setError('This song already exists in your songlist.');
+      return false;
+    }
+    const payload: CreateSongDTO = {
+      ...form,
+      instrument: form.instrument && form.instrument.length > 0 ? form.instrument : null,
+      technique: form.technique && form.technique.length > 0 ? form.technique : [],
+      genre: form.genre && form.genre.length > 0 ? form.genre : [],
+      myInstrumentUid: form.myInstrumentUid ? form.myInstrumentUid : undefined,
+      instrumentDifficulty: form.instrumentDifficulty || {},
+      instrumentTuning: form.instrumentTuning || {},
+    };
+    const updatedSong = await songService.updateSong(editingUid, payload);
+    setSongs(prev => prev.map(song => (song.uid === editingUid ? updatedSong : song)));
+    setEditBaselineJson(JSON.stringify(form)); // the form is now the saved state
+    return true;
+  };
+
+  // The actual mark — reads the song server-side, so the form must be saved
+  // first for fresh fields (e.g. duration) to count.
+  const performMarkAsPlayed = async (instrumentType: string) => {
+    if (!editingUid) return;
     try {
       setLoading(true);
       setError(null);
@@ -708,7 +745,7 @@ function Songs() {
       const now = new Date().toISOString();
       await songService.updateSong(editingUid, { lastPlayed: now });
       // Update the song in the list
-      setSongs(songs.map(song => 
+      setSongs(songs.map(song =>
         song.uid === editingUid ? { ...song, lastPlayed: now } : song
       ));
     } catch (err) {
@@ -717,6 +754,37 @@ function Songs() {
     } finally {
       setLoading(false);
     }
+  };
+
+  // Mark as Played reads the song from the server, so unsaved form fields (e.g.
+  // a freshly typed duration) would be ignored. If there are unsaved changes,
+  // ask to save first; otherwise mark right away.
+  const handleMarkAsPlayedNow = async (instrumentType: string) => {
+    if (!editingUid) return;
+    if (isDirty) {
+      setPendingMarkInstrument(instrumentType); // opens the save-and-mark dialog
+      return;
+    }
+    await performMarkAsPlayed(instrumentType);
+  };
+
+  // Dialog "Save changes and mark as played?" confirmed: save, then mark.
+  const confirmSaveAndMark = async () => {
+    const instrumentType = pendingMarkInstrument;
+    setPendingMarkInstrument(null);
+    if (!editingUid || !instrumentType) return;
+    let saved = false;
+    try {
+      setLoading(true);
+      setError(null);
+      saved = await saveSongEdits();
+    } catch (err) {
+      setError('Error while saving');
+      console.error(err);
+    } finally {
+      setLoading(false);
+    }
+    if (saved) await performMarkAsPlayed(instrumentType);
   };
 
   // Update suggested albums when artist changes
@@ -880,6 +948,12 @@ function Songs() {
     }
   };
 
+  // Song duration is parsed (m:ss or decimal minutes) inside SongForm and
+  // committed here as whole seconds, or null when cleared/unparseable.
+  const setDurationSeconds = (seconds: number | null) => {
+    setForm(prevForm => ({ ...prevForm, durationSeconds: seconds }));
+  };
+
   // Removed unused toggleFormInstrument
 
   const toggleFormTechnique = (technique: string) => {
@@ -991,14 +1065,17 @@ function Songs() {
   // user their filters may be hiding it from the list.
   const openSongForEdit = (song: Song, fromDuplicate = false) => {
     setEditingUid(song.uid);
-    setForm({
+    const builtForm: CreateSongDTO = {
       ...song,
       capo: normalizeCapoValue(song.capo),
       instrument: Array.isArray(song.instrument) ? song.instrument : (song.instrument ? [song.instrument] : []),
       technique: Array.isArray(song.technique) ? song.technique : [],
       language: Array.isArray(song.language) ? song.language : (song.language ? [song.language] : []),
       genre: Array.isArray(song.genre) ? song.genre : (song.genre ? [song.genre] : []),
-    });
+    };
+    setForm(builtForm);
+    // Baseline for the unsaved-changes check (Mark as Played save-first guard)
+    setEditBaselineJson(JSON.stringify(builtForm));
     setMetadataSource(null);
     setCameFromDuplicate(fromDuplicate);
     setError(null);
@@ -1441,6 +1518,16 @@ function Songs() {
         }}
       />
 
+      <ConfirmDialog
+        isOpen={pendingMarkInstrument !== null}
+        title="Unsaved changes"
+        message="This song has unsaved changes. Save them and mark it as played?"
+        confirmText="Save & mark as played"
+        cancelText="Cancel"
+        onConfirm={confirmSaveAndMark}
+        onCancel={() => setPendingMarkInstrument(null)}
+      />
+
       {error && (
         <div className="mx-4 my-4 rounded-md border border-red-300 bg-red-50 text-red-700 p-3 flex items-center justify-between">
           <span>{error}</span>
@@ -1600,6 +1687,7 @@ function Songs() {
             form={form}
             loading={loading}
             onChange={handleChange}
+            onSetDurationSeconds={setDurationSeconds}
             onChangeInstruments={setFormInstruments}
             onSetMyInstrumentUid={setFormMyInstrumentUid}
             onSetTechniques={setFormTechniques}

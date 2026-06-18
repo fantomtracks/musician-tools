@@ -364,10 +364,10 @@ test('the history lists sessions with date, instrument, duration, notes and entr
   const history = await screen.findByRole('list', { name: 'Session history' });
   expect(within(history).getByText('2026-06-05')).toBeInTheDocument();
   expect(within(history).getByText('Bass')).toBeInTheDocument();
-  expect(within(history).getByText('40 min')).toBeInTheDocument();
+  expect(within(history).getByText('· 40 min')).toBeInTheDocument();
   expect(within(history).getByText('great session')).toBeInTheDocument();
   expect(within(history).getByText(/Sweet Child/)).toBeInTheDocument();
-  expect(within(history).getByText(/15 min/)).toBeInTheDocument();
+  expect(within(history).getByText(/played during 15 minutes/)).toBeInTheDocument();
   expect(within(history).getByText(/at 30 BPM/)).toBeInTheDocument();
   expect(within(history).getByText(/Pentatonic scale/)).toBeInTheDocument();
 });

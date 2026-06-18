@@ -3,6 +3,7 @@ export type Song = {
   uid: string;
   title: string;
   bpm: number | null;
+  durationSeconds?: number | null;
   key: string;
   capo?: number | null;
   timeSignature?: string;

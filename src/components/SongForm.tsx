@@ -1,9 +1,10 @@
-import { useEffect, useState, useMemo } from 'react';
+import { useEffect, useRef, useState, useMemo } from 'react';
 import type React from 'react';
 import type { CreateSongDTO, Song } from '../services/songService';
 import type { SongPlay } from '../services/songPlayService';
 import { instrumentTypeOptions, instrumentTechniquesMap } from '../constants/instrumentTypes';
 import SongFormInstruments from './SongFormInstruments';
+import { parseDurationToSeconds, formatSecondsToMmss } from '../utils/duration';
 
 type Mode = 'add' | 'edit';
 
@@ -12,6 +13,7 @@ type SongFormProps = {
   form: CreateSongDTO;
   loading: boolean;
   onChange: (e: React.ChangeEvent<HTMLInputElement | HTMLTextAreaElement | HTMLSelectElement>) => void;
+  onSetDurationSeconds?: (seconds: number | null) => void;
   onToggleGenre: (genre: string) => void;
   onToggleLanguage: (language: string) => void;
   onChangeInstruments: (instruments: string[]) => void;
@@ -108,7 +110,7 @@ const getAvailableTechniques = (instrumentType: string) => {
 };
 
 export function SongForm(props: SongFormProps) {
-  const { mode, form, loading, onChange, onChangeInstruments, onSetTechniques, onToggleGenre, onToggleLanguage, onSetInstrumentDifficulty, onSetMyInstrumentUid, onSetInstrumentTuning, onToggleTechnique, onSetInstrumentLinksForInstrument, onSetStreamingLinks, onSubmit, onCancel, onDelete, onMarkAsPlayedNow, songPlays, formatLastPlayed, myInstruments, playlistSlot, suggestedAlbums = [], suggestedArtists = [], metadataLoading = false, metadataSource = null, onAutoFillMetadata, duplicate = null, onEditDuplicate } = props;
+  const { mode, form, loading, onChange, onSetDurationSeconds, onChangeInstruments, onSetTechniques, onToggleGenre, onToggleLanguage, onSetInstrumentDifficulty, onSetMyInstrumentUid, onSetInstrumentTuning, onToggleTechnique, onSetInstrumentLinksForInstrument, onSetStreamingLinks, onSubmit, onCancel, onDelete, onMarkAsPlayedNow, songPlays, formatLastPlayed, myInstruments, playlistSlot, suggestedAlbums = [], suggestedArtists = [], metadataLoading = false, metadataSource = null, onAutoFillMetadata, duplicate = null, onEditDuplicate } = props;
   const currentInstruments = useMemo(() => Array.isArray(form.instrument) ? form.instrument : (form.instrument ? [form.instrument] : []), [form.instrument]);
   const currentTechniques = useMemo(() => Array.isArray(form.technique) ? form.technique : [], [form.technique]);
   const currentGenres = Array.isArray(form.genre) ? form.genre : (form.genre ? [form.genre] : []);
@@ -116,6 +118,21 @@ export function SongForm(props: SongFormProps) {
   const [selectedInstrumentType, setSelectedInstrumentType] = useState('');
   const [expandedInstruments, setExpandedInstruments] = useState<Set<string>>(new Set(currentInstruments));
   const [detailsAccordionOpen, setDetailsAccordionOpen] = useState(false);
+  // Free-text duration ("3:30" or decimal minutes); committed to the form as
+  // whole seconds on blur. Kept as local state so the user can type freely.
+  const [durationText, setDurationText] = useState(() => formatSecondsToMmss(form.durationSeconds));
+  const [durationError, setDurationError] = useState<string | null>(null);
+  const lastCommittedSeconds = useRef<number | null>(form.durationSeconds ?? null);
+  // Re-seed the text only when the stored value changes from outside (e.g.
+  // loading a song for edit, or our own blur commit canonicalising the format).
+  useEffect(() => {
+    const current = form.durationSeconds ?? null;
+    if (current !== lastCommittedSeconds.current) {
+      lastCommittedSeconds.current = current;
+      setDurationText(formatSecondsToMmss(current));
+      setDurationError(null);
+    }
+  }, [form.durationSeconds]);
   const [genreSearchOpen, setGenreSearchOpen] = useState(false);
   const [genreSearchQuery, setGenreSearchQuery] = useState('');
   const [languageSearchOpen, setLanguageSearchOpen] = useState(false);
@@ -583,7 +600,49 @@ export function SongForm(props: SongFormProps) {
                 </div>
               )}
             </div>
-            <div className="grid grid-cols-2 gap-4">
+            <div className="grid grid-cols-3 gap-4">
+              <div>
+                <label htmlFor="song-duration" className="block text-sm font-medium text-gray-700 dark:text-gray-100">Duration (m:ss)</label>
+                <input
+                  id="song-duration"
+                  className={`mt-1 block w-full rounded-md border ${durationError ? 'border-red-500 dark:border-red-500' : 'border-gray-300 dark:border-gray-600'} p-2 focus:outline-none focus:ring-2 focus:ring-brand-500 dark:bg-gray-700 dark:text-gray-100`}
+                  name="durationSeconds"
+                  type="text"
+                  inputMode="numeric"
+                  value={durationText}
+                  aria-invalid={durationError ? true : undefined}
+                  aria-describedby={durationError ? 'song-duration-error' : undefined}
+                  onChange={(e) => {
+                    setDurationText(e.target.value);
+                    if (durationError) setDurationError(null);
+                  }}
+                  onBlur={() => {
+                    const trimmed = durationText.trim();
+                    if (trimmed === '') {
+                      // Cleared on purpose — no error, commit "no duration".
+                      setDurationError(null);
+                      setDurationText('');
+                      lastCommittedSeconds.current = null;
+                      onSetDurationSeconds?.(null);
+                      return;
+                    }
+                    const seconds = parseDurationToSeconds(durationText);
+                    if (seconds === null) {
+                      // Keep what the user typed and tell them what's wrong.
+                      setDurationError('Use m:ss (e.g. 3:30) or whole minutes; seconds must be 0–59.');
+                      return;
+                    }
+                    setDurationError(null);
+                    setDurationText(formatSecondsToMmss(seconds)); // canonicalise (3:3 → 3:30)
+                    lastCommittedSeconds.current = seconds;
+                    onSetDurationSeconds?.(seconds);
+                  }}
+                  disabled={loading}
+                />
+                {durationError && (
+                  <p id="song-duration-error" className="mt-1 text-sm text-red-600 dark:text-red-400">{durationError}</p>
+                )}
+              </div>
               <div>
                 <label htmlFor="song-bpm" className="block text-sm font-medium text-gray-700 dark:text-gray-100">BPM</label>
                 <input
@@ -613,6 +672,8 @@ export function SongForm(props: SongFormProps) {
                   ))}
                 </select>
               </div>
+            </div>
+            <div className="grid grid-cols-3 gap-4">
               <div>
                 <label htmlFor="song-key" className="block text-sm font-medium text-gray-700 dark:text-gray-100">Key</label>
                 <select
@@ -645,7 +706,7 @@ export function SongForm(props: SongFormProps) {
                   ))}
                 </select>
               </div>
-              <div className="col-span-2">
+              <div>
                 <label htmlFor="song-pitch-standard" className="block text-sm font-medium text-gray-700 dark:text-gray-100">Pitch Standard (Hz)</label>
                 <input
                   id="song-pitch-standard"
