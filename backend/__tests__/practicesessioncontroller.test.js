@@ -73,14 +73,15 @@ describe('practicesessioncontroller', () => {
       expect(arg.userUid).toBe('user-1');
       expect(arg.date).toBe(utcDateString(0)); // stored exactly as sent — never re-stamped server-side (FR19)
       expect(arg.instrumentType).toBe('Bass');
-      expect(arg.durationMinutes).toBeNull();
       expect(arg.note).toBeNull();
       expect(res.status).toHaveBeenCalledWith(201);
       expect(res.json).toHaveBeenCalled();
       expect(next).not.toHaveBeenCalled();
     });
 
-    test('creates a full session with duration and note', async () => {
+    // Epic 8: the global duration is gone — a legacy body still carrying it is
+    // tolerated (no 400) but never written to the session.
+    test('ignores a legacy durationMinutes in the body and still stores the note', async () => {
       const req = {
         session: { user: 'user-1' },
         body: { date: utcDateString(0), instrumentType: 'Bass', durationMinutes: 40, note: '  bridge still rough  ' },
@@ -91,9 +92,10 @@ describe('practicesessioncontroller', () => {
       await controller.createPracticeSession(req, res, next);
 
       const arg = PracticeSession.create.mock.calls[0][0];
-      expect(arg.durationMinutes).toBe(40);
+      expect(arg.durationMinutes).toBeUndefined();
       expect(arg.note).toBe('bridge still rough');
       expect(res.status).toHaveBeenCalledWith(201);
+      expect(next).not.toHaveBeenCalled();
     });
 
     test('accepts retroactive past dates without special treatment', async () => {
@@ -106,20 +108,6 @@ describe('practicesessioncontroller', () => {
         await controller.createPracticeSession(req, res, next);
 
         expect(PracticeSession.create.mock.calls[0][0].date).toBe(date);
-        expect(res.status).toHaveBeenCalledWith(201);
-      }
-    });
-
-    test('accepts tiny durations — no minimum (FR6)', async () => {
-      for (const durationMinutes of [2, 1]) {
-        PracticeSession.create.mockClear();
-        const req = { session: { user: 'user-1' }, body: { date: utcDateString(0), instrumentType: 'Bass', durationMinutes } };
-        const res = mockRes();
-        const next = mockNext();
-
-        await controller.createPracticeSession(req, res, next);
-
-        expect(PracticeSession.create.mock.calls[0][0].durationMinutes).toBe(durationMinutes);
         expect(res.status).toHaveBeenCalledWith(201);
       }
     });
@@ -171,19 +159,6 @@ describe('practicesessioncontroller', () => {
         { date: utcDateString(0), instrumentType: 42 },
       ]) {
         const req = { session: { user: 'user-1' }, body };
-        const res = mockRes();
-        const next = mockNext();
-
-        await controller.createPracticeSession(req, res, next);
-
-        expect(PracticeSession.create).not.toHaveBeenCalled();
-        expect(next.mock.calls[0][0].status).toBe(400);
-      }
-    });
-
-    test('rejects invalid durations with 400', async () => {
-      for (const durationMinutes of [0, -5, 1.5, 'abc', 1441]) {
-        const req = { session: { user: 'user-1' }, body: { date: utcDateString(0), instrumentType: 'Bass', durationMinutes } };
         const res = mockRes();
         const next = mockNext();
 
@@ -380,12 +355,15 @@ describe('practicesessioncontroller', () => {
 
       await controller.getHeatmap(req, res, next);
 
+      // Epic 8: a day's minutes now sum the entries' minutes (LEFT JOIN on
+      // SessionItems), and sessionCount is COUNT(DISTINCT session uid).
       expect(PracticeSession.findAll).toHaveBeenCalledWith({
         attributes: [
           'date',
-          [fn('SUM', col('duration_minutes')), 'totalMinutes'],
-          [fn('COUNT', col('uid')), 'sessionCount'],
+          [fn('SUM', col('items.minutes')), 'totalMinutes'],
+          [fn('COUNT', literal('DISTINCT "PracticeSession"."uid"')), 'sessionCount'],
         ],
+        include: [{ model: SessionItem, as: 'items', attributes: [], required: false }],
         where: { userUid: 'user-1', date: { [Op.between]: ['2026-01-01', '2026-12-31'] } },
         group: ['date'],
         order: [['date', 'ASC']],
@@ -618,32 +596,6 @@ describe('practicesessioncontroller', () => {
       expect(next).not.toHaveBeenCalled();
     });
 
-    test('rejects a session total shorter than the sum of its entries (400)', async () => {
-      const req = {
-        session: { user: 'user-1' },
-        body: { ...baseBody([{ songUid: SONG_UID, minutes: 50 }]), durationMinutes: 10 },
-      };
-      const next = mockNext();
-
-      await controller.createPracticeSession(req, mockRes(), next);
-
-      expect(next.mock.calls[0][0].status).toBe(400);
-      expect(PracticeSession.create).not.toHaveBeenCalled();
-    });
-
-    test('allows a session total that exceeds the entries sum (extra un-itemised practice)', async () => {
-      const req = {
-        session: { user: 'user-1' },
-        body: { ...baseBody([{ songUid: SONG_UID, minutes: 10 }]), durationMinutes: 50 },
-      };
-      const next = mockNext();
-
-      await controller.createPracticeSession(req, mockRes(), next);
-
-      expect(next).not.toHaveBeenCalled();
-      expect(PracticeSession.create).toHaveBeenCalled();
-    });
-
     test('4.2: a linked SongPlay is created for each SONG entry, none for topics', async () => {
       const req = {
         session: { user: 'user-1' },
@@ -818,15 +770,17 @@ describe('practicesessioncontroller', () => {
 
       await controller.updatePracticeSession(req, res, next);
 
+      // Epic 8: durationMinutes is no longer written — the update carries only
+      // date / instrumentType / note.
       expect(session.update).toHaveBeenCalledWith(
-        { date: '2026-05-01', instrumentType: 'Bass', durationMinutes: 30, note: 'old note' },
+        { date: '2026-05-01', instrumentType: 'Bass', note: 'old note' },
         { transaction: { id: 'tx' } }
       );
       expect(res.json).toHaveBeenCalled();
       expect(next).not.toHaveBeenCalled();
     });
 
-    test('explicit nulls clear duration and note', async () => {
+    test('explicit null clears the note (and a legacy durationMinutes is ignored)', async () => {
       const session = mockExistingSession();
       PracticeSession.findByPk.mockResolvedValue(session);
 
@@ -835,38 +789,8 @@ describe('practicesessioncontroller', () => {
       await controller.updatePracticeSession(req, mockRes(), mockNext());
 
       const arg = session.update.mock.calls[0][0];
-      expect(arg.durationMinutes).toBeNull();
+      expect(arg).not.toHaveProperty('durationMinutes');
       expect(arg.note).toBeNull();
-    });
-
-    test('rejects a duration-only update that drops below the existing entries sum (400)', async () => {
-      const session = mockExistingSession({ items: [mockItem({ minutes: 50 })] });
-      PracticeSession.findByPk.mockResolvedValue(session);
-
-      const req = { params: { uid: SESSION_UID }, session: { user: 'user-1' }, body: { durationMinutes: 10 } };
-      const next = mockNext();
-
-      await controller.updatePracticeSession(req, mockRes(), next);
-
-      expect(next.mock.calls[0][0].status).toBe(400);
-      expect(session.update).not.toHaveBeenCalled();
-    });
-
-    test('rejects an update whose payload entries sum exceeds the new total (400)', async () => {
-      const session = mockExistingSession();
-      PracticeSession.findByPk.mockResolvedValue(session);
-
-      const req = {
-        params: { uid: SESSION_UID },
-        session: { user: 'user-1' },
-        body: { durationMinutes: 10, items: [{ songUid: SONG_UID, minutes: 50 }] },
-      };
-      const next = mockNext();
-
-      await controller.updatePracticeSession(req, mockRes(), next);
-
-      expect(next.mock.calls[0][0].status).toBe(400);
-      expect(session.update).not.toHaveBeenCalled();
     });
 
     test('rejects invalid or future dates with 400', async () => {

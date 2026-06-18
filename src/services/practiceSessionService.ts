@@ -23,7 +23,8 @@ export type PracticeSession = {
   uid: string;
   date: string; // YYYY-MM-DD, client-local day (FR19)
   instrumentType: string;
-  durationMinutes?: number | null;
+  // Epic 8: no stored global duration — a session's total is the sum of its
+  // entries' minutes, derived on the client/heatmap (no durationMinutes field).
   note?: string | null;
   items?: SessionItem[];
   createdAt?: string;
@@ -40,7 +41,6 @@ export type CreatePracticeSessionDTO = Omit<PracticeSession, 'uid' | 'items' | '
 export type UpdateSessionItemDTO = CreateSessionItemDTO & { uid?: string };
 
 export type UpdatePracticeSessionDTO = Partial<Omit<CreatePracticeSessionDTO, 'items'>> & {
-  durationMinutes?: number | null;
   note?: string | null;
   items?: UpdateSessionItemDTO[];
 };
@@ -66,6 +66,15 @@ export type DayPlay = {
   instrumentType?: string | null;
   playedAt: string;
 };
+
+// Epic 8: a session's total time is the sum of its entries' minutes (there is
+// no stored global duration). An entry without minutes counts as 0.
+export function sumSessionMinutes(session: Pick<PracticeSession, 'items'>): number {
+  return (session.items ?? []).reduce(
+    (sum, it) => sum + (typeof it.minutes === 'number' ? it.minutes : 0),
+    0,
+  );
+}
 
 const API_BASE = '/api';
 

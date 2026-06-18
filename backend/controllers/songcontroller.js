@@ -316,20 +316,9 @@ const markSongPlayed = async (req, res, next) => {
             userUid: userId,
             date: playedOn,
             instrumentType: trimmedInstrument,
-            durationMinutes: null,
             note: null,
           }, { transaction });
         }
-
-        // FR13: the session total tracks the sum of its entries' minutes, so the
-        // practice time shows in the journal AND counts on the heatmap (which
-        // sums PracticeSession.durationMinutes). Capture the sum BEFORE this mark
-        // and only keep managing the total while it still equals that sum (or is
-        // unset) — a manual override (total ≠ entries' sum) is never clobbered.
-        // Number(): pg returns SUM as a string in some paths — coerce so the
-        // arithmetic below stays numeric (avoids '4' + 5 === '45').
-        const priorTotal = Number(await SessionItem.sum('minutes', { where: { sessionUid: session.uid }, transaction })) || 0;
-        const totalIsAuto = session.durationMinutes == null || session.durationMinutes === priorTotal;
 
         // No duplicate entry (AC4): reuse the entry if the song is already there
         let item = await SessionItem.findOne({
@@ -354,16 +343,9 @@ const markSongPlayed = async (req, res, next) => {
           await item.update({ minutes: current + playedDuration }, { transaction });
         }
         sessionItemUid = item.uid;
-
-        // Sync the managed total: a created entry adds its pre-fill, a re-mark
-        // adds the accrued duration — both equal playedDuration (null → 0). Stay
-        // within the 1..1440 server range; out of range, leave the total as-is.
-        if (totalIsAuto) {
-          const nextTotal = priorTotal + (playedDuration ?? 0);
-          if (nextTotal >= 1 && nextTotal <= 1440 && nextTotal !== session.durationMinutes) {
-            await session.update({ durationMinutes: nextTotal }, { transaction });
-          }
-        }
+        // Epic 8: the session total is no longer a stored field — it derives
+        // from the entries' minutes (heatmap sums SessionItem.minutes). The
+        // entry created/accrued above is all that's needed; nothing else to sync.
       }
 
       return SongPlay.create({

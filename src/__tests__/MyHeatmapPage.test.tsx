@@ -6,6 +6,8 @@ import { songService } from '../services/songService';
 import { buildYearGrid, formatLocalDate } from '../utils/heatmap';
 
 jest.mock('../services/practiceSessionService', () => ({
+  // Keep the real pure helpers (e.g. sumSessionMinutes); only the API object is mocked
+  ...jest.requireActual('../services/practiceSessionService'),
   practiceSessionService: {
     getHeatmap: jest.fn(),
     getAll: jest.fn(),
@@ -165,8 +167,8 @@ test('clicking an active day opens its detail with sessions, entries and an Edit
   ]);
   mockedService.getAll.mockResolvedValue([
     {
-      uid: 's1', date: `${YEAR}-03-10`, instrumentType: 'Bass', durationMinutes: 40, note: 'solid run',
-      items: [{ uid: 'i1', sessionUid: 's1', label: 'Sweet Child', minutes: 15, note: 'at 30 BPM' }],
+      uid: 's1', date: `${YEAR}-03-10`, instrumentType: 'Bass', note: 'solid run',
+      items: [{ uid: 'i1', sessionUid: 's1', label: 'Sweet Child', minutes: 40, note: 'at 30 BPM' }],
     },
   ]);
 
@@ -195,7 +197,7 @@ test('Story 5.5: the day-detail shows "Artist - Title" for a song entry', async 
   ]);
   mockedService.getAll.mockResolvedValue([
     {
-      uid: 's1', date: `${YEAR}-03-10`, instrumentType: 'Bass', durationMinutes: 40,
+      uid: 's1', date: `${YEAR}-03-10`, instrumentType: 'Bass',
       items: [{ uid: 'i1', sessionUid: 's1', songUid: SONG_UID, label: 'Sweet Child', minutes: 15 }],
     },
   ]);
@@ -299,7 +301,7 @@ test('deleting a session from the day detail confirms, removes it and refreshes 
     { date: `${YEAR}-03-10`, totalMinutes: 40, sessionCount: 1 },
   ]);
   mockedService.getAll.mockResolvedValue([
-    { uid: 's1', date: `${YEAR}-03-10`, instrumentType: 'Bass', durationMinutes: 40, items: [] },
+    { uid: 's1', date: `${YEAR}-03-10`, instrumentType: 'Bass', items: [] },
   ]);
   mockedService.remove.mockResolvedValue(undefined);
 
@@ -328,7 +330,7 @@ test('deleting a session refreshes the Played list (its cascaded plays disappear
   ]);
   mockedService.getAll.mockResolvedValue([
     {
-      uid: 's1', date: `${YEAR}-03-10`, instrumentType: 'Guitar', durationMinutes: null,
+      uid: 's1', date: `${YEAR}-03-10`, instrumentType: 'Guitar',
       items: [{ uid: 'i1', sessionUid: 's1', songUid: 'song-1', label: 'Sweet Child', minutes: null }],
     },
   ]);
@@ -379,7 +381,7 @@ test('a failed deletion shows an error and keeps the session listed', async () =
     { date: `${YEAR}-03-10`, totalMinutes: 40, sessionCount: 1 },
   ]);
   mockedService.getAll.mockResolvedValue([
-    { uid: 's1', date: `${YEAR}-03-10`, instrumentType: 'Bass', durationMinutes: 40, items: [] },
+    { uid: 's1', date: `${YEAR}-03-10`, instrumentType: 'Bass', items: [] },
   ]);
   mockedService.remove.mockRejectedValue(new Error('Failed to delete session'));
 
@@ -435,7 +437,7 @@ test('a mixed day shows sessions AND plays, with both in the cell label (FR22/AC
     { date: `${YEAR}-03-10`, totalMinutes: 40, sessionCount: 1, playCount: 1 },
   ]);
   mockedService.getAll.mockResolvedValue([
-    { uid: 's1', date: `${YEAR}-03-10`, instrumentType: 'Bass', durationMinutes: 40, items: [] },
+    { uid: 's1', date: `${YEAR}-03-10`, instrumentType: 'Bass', items: [] },
   ]);
   mockedService.getDayPlays.mockResolvedValue([
     { uid: 'p1', songUid: 'song-1', title: 'Money', instrumentType: null, playedAt: `${YEAR}-03-10T09:00:00.000Z` },
@@ -454,7 +456,7 @@ test('a mixed day shows sessions AND plays, with both in the cell label (FR22/AC
 
 test('a failed plays fetch keeps the sessions and says so (partial failure)', async () => {
   mockedService.getAll.mockResolvedValue([
-    { uid: 's1', date: `${YEAR}-03-10`, instrumentType: 'Bass', durationMinutes: 40, items: [] },
+    { uid: 's1', date: `${YEAR}-03-10`, instrumentType: 'Bass', items: [] },
   ]);
   mockedService.getDayPlays.mockRejectedValue(new Error('Failed to fetch plays'));
 
@@ -471,7 +473,7 @@ test('a song shown as a session entry is not also re-listed under Played (4.1 de
   ]);
   mockedService.getAll.mockResolvedValue([
     {
-      uid: 's1', date: `${YEAR}-03-10`, instrumentType: 'Guitar', durationMinutes: null,
+      uid: 's1', date: `${YEAR}-03-10`, instrumentType: 'Guitar',
       items: [{ uid: 'i1', sessionUid: 's1', songUid: 'song-1', label: 'Sweet Child', minutes: null }],
     },
   ]);

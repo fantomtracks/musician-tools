@@ -20,9 +20,10 @@ project adheres to [Semantic Versioning](https://semver.org/).
 
 ### Changed
 - Session history now reads "played during X minutes" for each song — so it's clearly the time you played, not the song's length — with a clearer separator next to the instrument
-
-### Changed
-- The session total now fills in automatically with the time logged in its entries (it follows their sum as you add or edit them) and can only be raised above that sum, never below
+- **A session's time is now simply the sum of its entries — one source of truth**
+  - The separate "Duration" field is gone; the session form shows a read-only **Total** that adds up your entries' minutes as you go
+  - The practice heatmap now counts the minutes from your entries (instead of a separate session total), so what you log is exactly what lights up your day
+  - Any past "untracked" time (a session whose total was more than its entries) was preserved as a one-time **Free practice** entry, so your history and heatmap totals stay the same
 
 ## [1.3.6] — 2026-06-14
 

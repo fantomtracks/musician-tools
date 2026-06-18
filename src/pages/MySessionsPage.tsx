@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
-import { practiceSessionService, type CreatePracticeSessionDTO, type CreateSessionItemDTO, type UpdateSessionItemDTO, type UpdatePracticeSessionDTO, type PracticeSession } from '../services/practiceSessionService';
+import { practiceSessionService, sumSessionMinutes, type CreatePracticeSessionDTO, type CreateSessionItemDTO, type UpdateSessionItemDTO, type UpdatePracticeSessionDTO, type PracticeSession } from '../services/practiceSessionService';
 import { songService, type Song } from '../services/songService';
 import { topicService, type Topic } from '../services/topicService';
 import { ConfirmDialog } from '../components/ConfirmDialog';
@@ -205,7 +205,6 @@ function todayLocalDate() {
 function MySessionsPage() {
   const [date, setDate] = useState(todayLocalDate());
   const [instrumentType, setInstrumentType] = useState('');
-  const [duration, setDuration] = useState('');
   const [note, setNote] = useState('');
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -223,7 +222,6 @@ function MySessionsPage() {
   // edit mode): the FR12 prefill must never fire after that, even if the
   // sessions response lands late
   const instrumentTouchedRef = useRef(false);
-  const [durationTouched, setDurationTouched] = useState(false);
   const entryKeyRef = useRef(0);
   // Deep-link ?edit=<uid> from the heatmap day detail (3.2): applied once the
   // sessions list has loaded
@@ -326,15 +324,11 @@ function MySessionsPage() {
     })();
   }, []);
 
-  // FR13: the session total FLOORS at the sum of its entries' minutes — the
-  // entries are part of the session, so the total can never fall below them.
-  // The field auto-fills to that sum (a partial sum, when only some entries are
-  // timed, still counts) and the user can only raise it above. A sum outside
-  // the 1..1440 server range is not auto-applied, so the field stays free.
-  const entryMinutes = entries.map(e => (e.minutes === '' ? null : Number(e.minutes)));
-  const enteredMinutesSum = entryMinutes.reduce<number>((sum, m) => sum + (m ?? 0), 0);
-  const autoSum = enteredMinutesSum >= 1 && enteredMinutesSum <= 1440 ? enteredMinutesSum : null;
-  const effectiveDuration = durationTouched ? duration : (autoSum !== null ? String(autoSum) : duration);
+  // FR13 (Epic 8): a session's total is ALWAYS the sum of its entries' minutes —
+  // there is no editable duration anymore. This read-only sum is shown next to
+  // the entries and recomputed live as they change. An entry without minutes
+  // counts as 0.
+  const enteredMinutesSum = entries.reduce<number>((sum, e) => sum + (e.minutes === '' ? 0 : Number(e.minutes)), 0);
 
   // Story 8.2: pin the system "Free practice" topic to the top of the picker's
   // Topics group, keeping the user's own topics in their existing order. Sorted
@@ -439,8 +433,6 @@ function MySessionsPage() {
     setEditingSessionLabel('');
     setDate(todayLocalDate());
     setInstrumentType('');
-    setDuration('');
-    setDurationTouched(false);
     setNote('');
     setEntries([]);
   };
@@ -451,13 +443,6 @@ function MySessionsPage() {
     setEditingSessionLabel(session.date);
     setDate(session.date);
     setInstrumentType(session.instrumentType);
-    // Floor-aware: a stored total that is just the entries' sum (or below it, or
-    // absent) follows the auto floor; only a real override ABOVE the sum sticks.
-    const loadedSum = (session.items ?? []).reduce((sum, it) => sum + (typeof it.minutes === 'number' ? it.minutes : 0), 0);
-    const loadedFloor = loadedSum >= 1 && loadedSum <= 1440 ? loadedSum : null;
-    const storedDuration = session.durationMinutes;
-    setDuration(storedDuration != null ? String(storedDuration) : '');
-    setDurationTouched(storedDuration != null && (loadedFloor === null || storedDuration > loadedFloor));
     setNote(session.note ?? '');
     setEntries((session.items ?? []).map(item => {
       entryKeyRef.current += 1;
@@ -510,21 +495,14 @@ function MySessionsPage() {
       setError('Date cannot be in the future');
       return;
     }
-    // An entry row without a song/topic would be silently dropped (and its
-    // minutes still counted in the auto-sum) — refuse instead of losing data.
-    // Exception: an existing orphan entry (uid + FR4 label, refs deleted)
-    // legitimately has no ref — "no ref" means "keep its snapshot label".
+    // An entry row without a song/topic would be silently dropped — refuse
+    // instead of losing data. Exception: an existing orphan entry (uid + FR4
+    // label, refs deleted) legitimately has no ref — "no ref" means "keep its
+    // snapshot label".
     if (entries.some(e => e.ref === '' && !(e.uid && e.label))) {
       setError('Each entry needs a song or topic — fill or remove empty entries');
       return;
     }
-    // Floor the total at the entries' sum (the entries are part of the session).
-    // effectiveDuration already shows the sum when not overridden; this also
-    // catches an override typed below the sum without blurring (Enter-submit).
-    const typedDuration = effectiveDuration === '' ? null : Number(effectiveDuration);
-    const flooredDuration = autoSum !== null && (typedDuration === null || typedDuration < autoSum)
-      ? autoSum
-      : typedDuration;
     try {
       setLoading(true);
       submitInFlightRef.current = true;
@@ -546,7 +524,6 @@ function MySessionsPage() {
         const payload: UpdatePracticeSessionDTO = {
           date,
           instrumentType,
-          durationMinutes: flooredDuration,
           note: note.trim() || null,
           items,
         };
@@ -566,9 +543,6 @@ function MySessionsPage() {
         const payload: CreatePracticeSessionDTO = {
           date,
           instrumentType,
-          // null means "no duration"; the floored value (entries' sum or the
-          // user's higher override) is sent otherwise
-          durationMinutes: flooredDuration === null ? undefined : flooredDuration,
           note: note.trim() || undefined,
           items: items.length > 0 ? items : undefined,
         };
@@ -578,8 +552,6 @@ function MySessionsPage() {
         // history load must not keep hiding sessions logged since.
         setSessions(prev => sortSessions([created, ...(prev ?? [])]));
         setSessionsFailed(false);
-        setDuration('');
-        setDurationTouched(false);
         setNote('');
         setEntries([]);
         showToast('Session logged');
@@ -703,37 +675,19 @@ function MySessionsPage() {
               </select>
             </div>
             <div className="flex flex-col gap-1">
-              <label htmlFor="session-duration" className="text-xs font-semibold uppercase tracking-wide text-gray-600 dark:text-gray-400">
-                Duration
-              </label>
-              <input
-                id="session-duration"
-                type="number"
-                min={1}
-                max={1440}
-                placeholder="Minutes (optional)"
-                value={effectiveDuration}
-                inputMode="numeric"
-                onChange={e => {
-                  const digits = digitsOnly(e.target.value);
-                  setDuration(digits);
-                  // Typing sets an override; clearing re-arms the auto floor (the
-                  // field falls back to the entries' sum). badInput ('1e'…) reads
-                  // as '' but must NOT re-arm, or it would wipe an override.
-                  setDurationTouched(digits !== '' || (e.target.validity?.badInput ?? false));
-                }}
-                onBlur={() => {
-                  // A value at or below the entries' sum just follows the floor:
-                  // revert to the auto value so the field shows the sum and stays
-                  // in sync as entries change.
-                  if (durationTouched && autoSum !== null && (duration === '' || Number(duration) <= autoSum)) {
-                    setDuration('');
-                    setDurationTouched(false);
-                  }
-                }}
-                className="input-base text-sm"
-                disabled={loading}
-              />
+              {/* Epic 8: the total is no longer entered — it's the read-only sum
+                  of the entries' minutes, recomputed live as entries change. */}
+              <span className="text-xs font-semibold uppercase tracking-wide text-gray-600 dark:text-gray-400">
+                Total
+              </span>
+              <output
+                aria-label="Total minutes"
+                className="text-sm flex items-center min-h-[2.5rem] text-gray-700 dark:text-gray-300"
+              >
+                {/* Neutral dash at 0 (no entries timed yet), matching the history
+                    and heatmap which omit "· X min" when the sum is 0. */}
+                {enteredMinutesSum > 0 ? `${enteredMinutesSum} min` : '—'}
+              </output>
             </div>
             <div className="flex flex-col gap-1 md:col-span-3">
               <label htmlFor="session-note" className="text-xs font-semibold uppercase tracking-wide text-gray-600 dark:text-gray-400">
@@ -864,15 +818,17 @@ function MySessionsPage() {
           </div>
           {!editingSessionUid && !sessionsFailed && sessions !== null && sessions.length > 0 && (
             <ul aria-label="Session history" className="space-y-3">
-              {sessions.map(session => (
+              {sessions.map(session => {
+                const totalMinutes = sumSessionMinutes(session);
+                return (
                 <li key={session.uid} className="rounded-lg border border-gray-200 dark:border-gray-700 p-3 space-y-2">
                   <div className="flex flex-wrap items-baseline gap-x-3 gap-y-1">
                     {/* The DATEONLY string is displayed verbatim: new Date('YYYY-MM-DD')
                         would parse as UTC midnight and shift the day in some timezones */}
                     <span className="font-semibold">{session.date}</span>
                     <span className="text-sm text-gray-600 dark:text-gray-400">{session.instrumentType}</span>
-                    {session.durationMinutes ? (
-                      <span className="text-sm text-gray-600 dark:text-gray-400">· {session.durationMinutes} min</span>
+                    {totalMinutes > 0 ? (
+                      <span className="text-sm text-gray-600 dark:text-gray-400">· {totalMinutes} min</span>
                     ) : null}
                     <div className="flex gap-2 ml-auto">
                       <button
@@ -916,7 +872,8 @@ function MySessionsPage() {
                     </ul>
                   )}
                 </li>
-              ))}
+                );
+              })}
             </ul>
           )}
         </div>

@@ -29,11 +29,6 @@ module.exports = (sequelize, DataTypes) => {
       allowNull: false,
       field: 'instrument_type'
     },
-    durationMinutes: {
-      type: DataTypes.INTEGER,
-      allowNull: true,
-      field: 'duration_minutes'
-    },
     note: {
       type: DataTypes.TEXT,
       allowNull: true

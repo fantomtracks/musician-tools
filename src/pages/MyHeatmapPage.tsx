@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { Link } from 'react-router-dom';
-import { practiceSessionService, type DayPlay, type HeatmapDay, type PracticeSession } from '../services/practiceSessionService';
+import { practiceSessionService, sumSessionMinutes, type DayPlay, type HeatmapDay, type PracticeSession } from '../services/practiceSessionService';
 import { songService, type Song } from '../services/songService';
 import { ConfirmDialog } from '../components/ConfirmDialog';
 import { buildYearGrid, computeLevels, formatLocalDate } from '../utils/heatmap';
@@ -435,12 +435,14 @@ function MyHeatmapPage() {
             )}
             {!dayFailed && daySessions !== null && daySessions.length > 0 && (
               <ul aria-label="Day sessions" className="space-y-3">
-                {daySessions.map(session => (
+                {daySessions.map(session => {
+                  const totalMinutes = sumSessionMinutes(session);
+                  return (
                   <li key={session.uid} className="rounded-lg border border-gray-200 dark:border-gray-700 p-3 space-y-2">
                     <div className="flex flex-wrap items-baseline gap-x-3 gap-y-1">
                       <span className="text-sm text-gray-600 dark:text-gray-400">{session.instrumentType}</span>
-                      {session.durationMinutes ? (
-                        <span className="text-sm text-gray-600 dark:text-gray-400">· {session.durationMinutes} min</span>
+                      {totalMinutes > 0 ? (
+                        <span className="text-sm text-gray-600 dark:text-gray-400">· {totalMinutes} min</span>
                       ) : null}
                       <div className="flex gap-2 ml-auto">
                         <Link
@@ -480,7 +482,8 @@ function MyHeatmapPage() {
                       </ul>
                     )}
                   </li>
-                ))}
+                  );
+                })}
               </ul>
             )}
             {/* Projected play history (FR22), below the real sessions:

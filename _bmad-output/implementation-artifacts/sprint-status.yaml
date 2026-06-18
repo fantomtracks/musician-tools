@@ -95,4 +95,4 @@ development_status:
   epic-8: in-progress
   8-1-auto-remplissage-minutes-entree-depuis-duree-chanson: done   # Phase A — indépendant, quick win
   8-2-topic-systeme-free-practice-et-creation-a-la-volee: done     # Phase B — prérequis de 8-3 ; décision tranchée : Free practice SEEDÉ en base (vrai FK SessionItem.topicUid)
-  8-3-suppression-duree-globale-heatmap-somme-entrees-migration: backlog  # Phase C — après 8-2 ; rollback sync 6.1 + plancher (380e8c4/cbd6676)
+  8-3-suppression-duree-globale-heatmap-somme-entrees-migration: review  # Phase C — après 8-2 ; rollback sync 6.1 + plancher (380e8c4/cbd6676)
