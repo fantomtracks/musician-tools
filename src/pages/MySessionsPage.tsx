@@ -514,6 +514,12 @@ function MySessionsPage() {
         return kind === 'song' ? { songUid: uid } : { topicUid: uid };
       };
 
+      // Epic 8 ("everything is an entry"): a session is never empty. When no
+      // entry is filled, fall back to the system "Free practice" topic so the
+      // logged time is always carried by a real entry instead of a blank
+      // session. Degrades gracefully if the system topic isn't loaded.
+      const freePracticeUid = topics.find(t => t.isSystem)?.uid;
+
       if (editingSessionUid) {
         const items: UpdateSessionItemDTO[] = entries.map(e => ({
           ...(e.uid ? { uid: e.uid } : {}),
@@ -521,6 +527,16 @@ function MySessionsPage() {
           minutes: e.minutes === '' ? undefined : Number(e.minutes),
           note: e.note.trim() || undefined,
         }));
+        if (items.length === 0 && freePracticeUid) {
+          items.push({ topicUid: freePracticeUid });
+        }
+        // Epic 8: a session logged from the form always carries at least 1
+        // minute — a timed practice with no minutes is meaningless here. If no
+        // entry has minutes, floor it to 1 min on the first entry. (Mark as
+        // Played can still create 0-min presence entries; that path is untouched.)
+        if (items.length > 0 && items.every(it => it.minutes === undefined)) {
+          items[0] = { ...items[0], minutes: 1 };
+        }
         const payload: UpdatePracticeSessionDTO = {
           date,
           instrumentType,
@@ -540,6 +556,15 @@ function MySessionsPage() {
             minutes: e.minutes === '' ? undefined : Number(e.minutes),
             note: e.note.trim() || undefined,
           }));
+        const loggedAsFreePractice = items.length === 0 && !!freePracticeUid;
+        if (loggedAsFreePractice) {
+          items.push({ topicUid: freePracticeUid });
+        }
+        // Epic 8: a session logged from the form always carries at least 1
+        // minute. If no entry has minutes, floor it to 1 min on the first entry.
+        if (items.length > 0 && items.every(it => it.minutes === undefined)) {
+          items[0] = { ...items[0], minutes: 1 };
+        }
         const payload: CreatePracticeSessionDTO = {
           date,
           instrumentType,
@@ -554,7 +579,9 @@ function MySessionsPage() {
         setSessionsFailed(false);
         setNote('');
         setEntries([]);
-        showToast('Session logged');
+        // Tell the user we logged unstructured time, not silently — the entry
+        // they didn't add is now visible as a Free practice entry.
+        showToast(loggedAsFreePractice ? 'Logged as Free practice' : 'Session logged');
       }
     } catch (err) {
       const generic = editingSessionUid ? 'Failed to update session' : 'Failed to log session';

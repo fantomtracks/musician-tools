@@ -24,6 +24,8 @@ project adheres to [Semantic Versioning](https://semver.org/).
   - The separate "Duration" field is gone; the session form shows a read-only **Total** that adds up your entries' minutes as you go
   - The practice heatmap now counts the minutes from your entries (instead of a separate session total), so what you log is exactly what lights up your day
   - Any past "untracked" time (a session whose total was more than its entries) was preserved as a one-time **Free practice** entry, so your history and heatmap totals stay the same
+  - Logging a session with nothing filled in now records it as a **Free practice** entry instead of an empty session
+  - A logged session always carries **at least 1 minute** — no more zero-time practice sessions
 
 ## [1.3.6] — 2026-06-14
 
