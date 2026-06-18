@@ -25,6 +25,15 @@ module.exports = (sequelize, DataTypes) => {
     category: {
       type: DataTypes.STRING,
       allowNull: true
+    },
+    // Story 8.2: marks the per-user "Free practice" topic. System topics are
+    // pinned in the entry picker and cannot be renamed or deleted. Never set
+    // from client input — only the registration seed / backfill flips it true.
+    isSystem: {
+      type: DataTypes.BOOLEAN,
+      allowNull: false,
+      defaultValue: false,
+      field: 'is_system'
     }
   }, {
     tableName: 'Topics',

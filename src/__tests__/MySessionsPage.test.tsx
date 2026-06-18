@@ -21,6 +21,7 @@ jest.mock('../services/songService', () => ({
 jest.mock('../services/topicService', () => ({
   topicService: {
     getAll: jest.fn(),
+    create: jest.fn(),
   },
 }));
 
@@ -367,6 +368,113 @@ test('8.1: a song without a duration leaves the minutes empty', async () => {
 test('8.1: selecting a topic does not pre-fill minutes', async () => {
   render(<MySessionsPage />);
   await addEntry(1, `topic:${TOPIC_UID}`);
+  expect(screen.getByLabelText('Entry 1 minutes')).toHaveValue(null);
+});
+
+const FREE_UID = 'cccccccc-cccc-4ccc-8ccc-cccccccccccc';
+
+test('8.2: the Free practice system topic is pinned to the top of the Topics group', async () => {
+  // Returned AFTER the user topic, yet it must be pinned first in the group
+  mockedTopicService.getAll.mockResolvedValue([
+    { uid: TOPIC_UID, name: 'Pentatonic scale' },
+    { uid: FREE_UID, name: 'Free practice', isSystem: true },
+  ]);
+
+  render(<MySessionsPage />);
+  fireEvent.click(screen.getByRole('button', { name: 'Add entry' }));
+  fireEvent.focus(await screen.findByLabelText('Entry 1'));
+  const listbox = await screen.findByRole('listbox', { name: 'Entry 1 suggestions' });
+  const topicsGroup = within(listbox).getByRole('group', { name: 'Topics' });
+  const options = within(topicsGroup).getAllByRole('option').map(o => o.textContent);
+
+  expect(options[0]).toBe('Free practice');
+  expect(options).toEqual(['Free practice', 'Pentatonic scale']);
+});
+
+test('8.2: search still surfaces the Free practice topic (matches "free")', async () => {
+  mockedTopicService.getAll.mockResolvedValue([
+    { uid: TOPIC_UID, name: 'Pentatonic scale' },
+    { uid: FREE_UID, name: 'Free practice', isSystem: true },
+  ]);
+
+  render(<MySessionsPage />);
+  fireEvent.click(screen.getByRole('button', { name: 'Add entry' }));
+  const input = await screen.findByLabelText('Entry 1');
+  fireEvent.focus(input);
+  const listbox = await screen.findByRole('listbox', { name: 'Entry 1 suggestions' });
+
+  fireEvent.change(input, { target: { value: 'free' } });
+  // AC4: the system topic stays searchable like any other (same filterOptions)
+  expect(within(listbox).getByRole('option', { name: 'Free practice' })).toBeInTheDocument();
+});
+
+test('8.2: typing an unknown name offers "Create topic", which creates and selects it', async () => {
+  mockedTopicService.create.mockResolvedValue({ uid: 'new-topic-uid', name: 'Sweep picking', isSystem: false });
+
+  render(<MySessionsPage />);
+  fireEvent.click(screen.getByRole('button', { name: 'Add entry' }));
+  const input = await screen.findByLabelText('Entry 1');
+  fireEvent.focus(input);
+  fireEvent.change(input, { target: { value: 'Sweep picking' } });
+
+  const listbox = await screen.findByRole('listbox', { name: 'Entry 1 suggestions' });
+  const createGroup = within(listbox).getByRole('group', { name: 'Create' });
+  fireEvent.mouseDown(within(createGroup).getByRole('option', { name: 'Create topic "Sweep picking"' }));
+
+  await waitFor(() => {
+    expect(mockedTopicService.create).toHaveBeenCalledWith({ name: 'Sweep picking' });
+  });
+  // The created topic is added to state and selected: the field reflects it at rest
+  await waitFor(() => expect(screen.getByLabelText('Entry 1')).toHaveValue('Sweep picking'));
+});
+
+test('8.2: no "Create topic" option for a name that already matches a topic exactly', async () => {
+  render(<MySessionsPage />); // default fixture: "Pentatonic scale"
+  fireEvent.click(screen.getByRole('button', { name: 'Add entry' }));
+  const input = await screen.findByLabelText('Entry 1');
+  fireEvent.focus(input);
+  const listbox = await screen.findByRole('listbox', { name: 'Entry 1 suggestions' });
+
+  // Case/accent-insensitive exact match → no Create offered
+  fireEvent.change(input, { target: { value: 'pentatonic scale' } });
+  expect(within(listbox).queryByRole('group', { name: 'Create' })).not.toBeInTheDocument();
+});
+
+test('8.2: a 409 on create selects the existing topic instead of erroring (AC10)', async () => {
+  // The client offered Create (no match in its stale catalog), but the server
+  // already has the topic → 409. We reload, find it, and select it silently.
+  mockedTopicService.create.mockRejectedValue(new Error('Topic already exists'));
+  mockedTopicService.getAll
+    .mockResolvedValueOnce([]) // initial page load: empty catalog
+    .mockResolvedValueOnce([{ uid: 'server-uid', name: 'Sweep picking' }]); // reload after 409
+
+  render(<MySessionsPage />);
+  fireEvent.click(screen.getByRole('button', { name: 'Add entry' }));
+  const input = await screen.findByLabelText('Entry 1');
+  fireEvent.focus(input);
+  fireEvent.change(input, { target: { value: 'Sweep picking' } });
+
+  const listbox = await screen.findByRole('listbox', { name: 'Entry 1 suggestions' });
+  const createGroup = within(listbox).getByRole('group', { name: 'Create' });
+  fireEvent.mouseDown(within(createGroup).getByRole('option', { name: 'Create topic "Sweep picking"' }));
+
+  await waitFor(() => expect(mockedTopicService.create).toHaveBeenCalled());
+  // The reloaded existing topic is selected; no blocking error toast appears
+  await waitFor(() => expect(screen.getByLabelText('Entry 1')).toHaveValue('Sweep picking'));
+  expect(screen.queryByText('Could not add topic')).not.toBeInTheDocument();
+});
+
+test('8.2: selecting the Free practice topic does not pre-fill minutes (8.1 preserved)', async () => {
+  mockedTopicService.getAll.mockResolvedValue([
+    { uid: FREE_UID, name: 'Free practice', isSystem: true },
+  ]);
+
+  render(<MySessionsPage />);
+  fireEvent.click(screen.getByRole('button', { name: 'Add entry' }));
+  fireEvent.focus(await screen.findByLabelText('Entry 1'));
+  const listbox = await screen.findByRole('listbox', { name: 'Entry 1 suggestions' });
+  fireEvent.mouseDown(within(listbox).getByRole('option', { name: 'Free practice' }));
+
   expect(screen.getByLabelText('Entry 1 minutes')).toHaveValue(null);
 });
 

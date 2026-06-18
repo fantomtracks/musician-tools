@@ -7,6 +7,10 @@ project adheres to [Semantic Versioning](https://semver.org/).
 ## [Unreleased]
 
 ### Added
+- **A "Free practice" topic, always there, plus create-a-topic-on-the-fly when logging**
+  - Everyone now has a built-in **Free practice** topic, so you can log unstructured "I just played" time as a normal entry without creating anything first — it sits at the top of the entry picker
+  - From the entry picker you can now **create a new topic on the spot**: type a name that doesn't exist yet and pick "Create topic …" — it's created and selected without leaving the session form
+  - The Free practice topic can't be renamed or deleted (it shows a discreet "System" tag on the topics page instead of Edit/Delete)
 - **Song duration that fills in your practice time automatically**
   - A song can now have an optional duration, entered as `m:ss` (e.g. `3:30`) or as whole minutes
   - When you "Mark as played", the song's duration pre-fills the time of that entry in your session journal (rounded to the minute)

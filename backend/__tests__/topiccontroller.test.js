@@ -317,6 +317,20 @@ describe('topiccontroller', () => {
       expect(Topic.findByPk).not.toHaveBeenCalled();
       expect(next.mock.calls[0][0].status).toBe(401);
     });
+
+    test('returns 403 and does not update the system topic (story 8.2)', async () => {
+      const topic = mockTopic({ isSystem: true });
+      Topic.findByPk.mockResolvedValue(topic);
+
+      const req = { params: { uid: '11111111-1111-4111-8111-111111111111' }, session: { user: 'user-1' }, body: { name: 'Renamed' } };
+      const res = mockRes();
+      const next = mockNext();
+
+      await controller.updateTopic(req, res, next);
+
+      expect(topic.update).not.toHaveBeenCalled();
+      expect(next.mock.calls[0][0].status).toBe(403);
+    });
   });
 
   describe('deleteTopic', () => {
@@ -380,6 +394,20 @@ describe('topiccontroller', () => {
 
       expect(Topic.findByPk).not.toHaveBeenCalled();
       expect(next.mock.calls[0][0].status).toBe(401);
+    });
+
+    test('returns 403 and does not delete the system topic (story 8.2)', async () => {
+      const topic = { userUid: 'user-1', isSystem: true, destroy: jest.fn() };
+      Topic.findByPk.mockResolvedValue(topic);
+
+      const req = { params: { uid: '11111111-1111-4111-8111-111111111111' }, session: { user: 'user-1' } };
+      const res = mockRes();
+      const next = mockNext();
+
+      await controller.deleteTopic(req, res, next);
+
+      expect(topic.destroy).not.toHaveBeenCalled();
+      expect(next.mock.calls[0][0].status).toBe(403);
     });
   });
 });

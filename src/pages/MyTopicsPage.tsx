@@ -232,26 +232,35 @@ function MyTopicsPage() {
                           <td className="p-2 align-middle">{item.name}</td>
                           <td className="p-2 align-middle">{item.category || '-'}</td>
                           <td className="p-2 align-middle text-right">
-                            <div className="flex justify-end gap-2">
-                              <button
-                                type="button"
-                                aria-label={`Edit ${item.name}`}
-                                className="btn-secondary text-sm"
-                                onClick={() => startEdit(item)}
-                                disabled={loading}
-                              >
-                                Edit
-                              </button>
-                              <button
-                                type="button"
-                                aria-label={`Delete ${item.name}`}
-                                className="inline-flex items-center rounded-md bg-red-600 text-white px-3 py-1.5 hover:bg-red-700 dark:bg-red-700 dark:hover:bg-red-800 disabled:opacity-50"
-                                onClick={() => setDeleteUid(item.uid)}
-                                disabled={loading}
-                              >
-                                Delete
-                              </button>
-                            </div>
+                            {/* Story 8.2: the system "Free practice" topic can't be
+                                renamed or deleted (the backend blocks it too) —
+                                show a discreet badge instead of the actions. */}
+                            {item.isSystem ? (
+                              <span className="inline-flex items-center rounded-md px-2 py-1 text-xs font-medium text-gray-500 dark:text-gray-400 bg-gray-100 dark:bg-gray-800">
+                                System
+                              </span>
+                            ) : (
+                              <div className="flex justify-end gap-2">
+                                <button
+                                  type="button"
+                                  aria-label={`Edit ${item.name}`}
+                                  className="btn-secondary text-sm"
+                                  onClick={() => startEdit(item)}
+                                  disabled={loading}
+                                >
+                                  Edit
+                                </button>
+                                <button
+                                  type="button"
+                                  aria-label={`Delete ${item.name}`}
+                                  className="inline-flex items-center rounded-md bg-red-600 text-white px-3 py-1.5 hover:bg-red-700 dark:bg-red-700 dark:hover:bg-red-800 disabled:opacity-50"
+                                  onClick={() => setDeleteUid(item.uid)}
+                                  disabled={loading}
+                                >
+                                  Delete
+                                </button>
+                              </div>
+                            )}
                           </td>
                         </tr>
                       )

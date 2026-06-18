@@ -37,6 +37,7 @@ function EntryRefPicker({
   recentRefs,
   loading,
   onPick,
+  onCreate,
 }: {
   index: number;
   value: string; // '' | 'song:<uid>' | 'topic:<uid>'
@@ -46,6 +47,7 @@ function EntryRefPicker({
   recentRefs: { ref: string; label: string }[];
   loading: boolean;
   onPick: (ref: string) => void;
+  onCreate: (rawText: string) => void; // story 8.2: create a topic on the fly
 }) {
   const [open, setOpen] = useState(false);
   const [searching, setSearching] = useState(false);
@@ -73,21 +75,39 @@ function EntryRefPicker({
   const filterOptions = (options: { value: string; label: string }[]) =>
     query ? options.filter(o => foldForSearch(o.label).includes(query)) : options;
 
+  // Story 8.2: `topics` arrives already pinned (system "Free practice" first,
+  // user topics keep their order) — sorted once in the parent, not per row.
+
+  // Story 8.2: when searching a non-empty text that no existing topic matches
+  // exactly (accent/case-insensitive), offer to create it as a new topic.
+  const rawCreateText = searchText.trim();
+  const hasExactTopic = topics.some(t => foldForSearch(t.name) === query);
+  const showCreate = searching && rawCreateText !== '' && !hasExactTopic;
+
   // Grouped, in display order (Recent first), empty groups dropped. A running
   // counter gives each visible option a stable index for keyboard navigation,
-  // robust to the same ref appearing in both Recent and Songs.
+  // robust to the same ref appearing in both Recent and Songs. The Create
+  // option lives in its own group at the very bottom and gets an idx too, so it
+  // is keyboard-navigable like the rest.
   let counter = 0;
   const groups = [
     { label: 'Recent', options: filterOptions(recentRefs.map(r => ({ value: r.ref, label: r.label }))) },
     { label: 'Songs', options: filterOptions(songs.map(s => ({ value: `song:${s.uid}`, label: formatSongLabel(s) }))) },
     { label: 'Topics', options: filterOptions(topics.map(t => ({ value: `topic:${t.uid}`, label: t.name }))) },
+    { label: 'Create', options: showCreate ? [{ value: `create:${rawCreateText}`, label: `Create topic "${rawCreateText}"` }] : [] },
   ]
     .filter(group => group.options.length > 0)
     .map(group => ({ label: group.label, options: group.options.map(o => ({ ...o, idx: counter++ })) }));
   const flat = groups.flatMap(group => group.options);
 
   const pick = (option: { value: string }) => {
-    onPick(option.value);
+    // Story 8.2: the Create sentinel routes to the parent's create handler
+    // instead of selecting an existing ref.
+    if (option.value.startsWith('create:')) {
+      onCreate(option.value.slice('create:'.length));
+    } else {
+      onPick(option.value);
+    }
     setSearching(false);
     setSearchText('');
     setActive(-1);
@@ -316,6 +336,14 @@ function MySessionsPage() {
   const autoSum = enteredMinutesSum >= 1 && enteredMinutesSum <= 1440 ? enteredMinutesSum : null;
   const effectiveDuration = durationTouched ? duration : (autoSum !== null ? String(autoSum) : duration);
 
+  // Story 8.2: pin the system "Free practice" topic to the top of the picker's
+  // Topics group, keeping the user's own topics in their existing order. Sorted
+  // once here (stable, system-first) and shared by every entry row's picker.
+  const pinnedTopics = useMemo(
+    () => [...topics].sort((a, b) => Number(b.isSystem ?? false) - Number(a.isSystem ?? false)),
+    [topics],
+  );
+
   // FR12: refs recently logged, first occurrence over the anti-chronological
   // session list, deduplicated, capped at 5. Deleted refs (absent from the
   // loaded catalogs) are excluded — they cannot be referenced again. Labels
@@ -368,6 +396,36 @@ function MySessionsPage() {
 
   const removeEntry = (key: number) => {
     setEntries(prev => prev.filter(e => e.key !== key));
+  };
+
+  // Story 8.2 (FR26): create a topic from the entry picker and select it for the
+  // current entry, without closing or submitting the session form. A 409 (the
+  // topic already exists, case/accents aside) is not an error — we select the
+  // existing one instead, reloading the catalog if it isn't in state yet.
+  const handleCreateTopic = async (key: number, rawText: string) => {
+    const name = rawText.trim();
+    if (!name) return;
+    try {
+      const created = await topicService.create({ name });
+      setTopics(prev => [created, ...prev]);
+      updateEntry(key, { ref: `topic:${created.uid}` });
+    } catch (err) {
+      if (err instanceof Error && err.message === 'Topic already exists') {
+        // The picker only offers Create when no loaded topic folds to this name,
+        // so the existing one is, by construction, absent from `topics` here —
+        // reload the catalog to find it (no point checking the stale state).
+        try {
+          const all = await topicService.getAll();
+          setTopics(all);
+          const found = all.find(t => foldForSearch(t.name) === foldForSearch(name));
+          if (found) updateEntry(key, { ref: `topic:${found.uid}` });
+        } catch {
+          showToast('Could not add topic');
+        }
+      } else {
+        showToast('Could not add topic');
+      }
+    }
   };
 
   const showToast = (message: string) => {
@@ -709,7 +767,7 @@ function MySessionsPage() {
                     // fallback label; a fresh empty row has none
                     orphanLabel={entry.uid && entry.label ? entry.label : undefined}
                     songs={songs}
-                    topics={topics}
+                    topics={pinnedTopics}
                     recentRefs={recentRefs}
                     loading={loading}
                     onPick={ref => {
@@ -724,6 +782,7 @@ function MySessionsPage() {
                       }
                       updateEntry(entry.key, patch);
                     }}
+                    onCreate={rawText => handleCreateTopic(entry.key, rawText)}
                   />
                   <input
                     aria-label={`Entry ${index + 1} minutes`}

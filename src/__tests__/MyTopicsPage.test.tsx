@@ -205,3 +205,22 @@ test('cancelling the confirmation dialog keeps the topic', async () => {
   expect(mockedService.remove).not.toHaveBeenCalled();
   expect(screen.getByText('Pentatonic scale')).toBeInTheDocument();
 });
+
+test('8.2: the system topic shows no Edit/Delete actions, just a System badge', async () => {
+  mockedService.getAll.mockResolvedValue([
+    { uid: 'sys', name: 'Free practice', category: null, isSystem: true },
+    existingTopic,
+  ]);
+
+  render(<MyTopicsPage />);
+  await screen.findByText('Free practice');
+
+  // The system row exposes neither action...
+  expect(screen.queryByRole('button', { name: 'Edit Free practice' })).not.toBeInTheDocument();
+  expect(screen.queryByRole('button', { name: 'Delete Free practice' })).not.toBeInTheDocument();
+  expect(screen.getByText('System')).toBeInTheDocument();
+
+  // ...while a normal topic keeps both
+  expect(screen.getByRole('button', { name: 'Edit Pentatonic scale' })).toBeInTheDocument();
+  expect(screen.getByRole('button', { name: 'Delete Pentatonic scale' })).toBeInTheDocument();
+});
