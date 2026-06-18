@@ -6,6 +6,8 @@ project adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+## [1.4.0] — 2026-06-18
+
 ### Added
 - **A "Free practice" topic, always there, plus create-a-topic-on-the-fly when logging**
   - Everyone now has a built-in **Free practice** topic, so you can log unstructured "I just played" time as a normal entry without creating anything first — it sits at the top of the entry picker
