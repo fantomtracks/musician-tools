@@ -87,19 +87,19 @@ Fin de mois, Léa ouvre la heatmap : trois semaines denses, une semaine creuse (
 
 ### Groupe B — Journal de sessions
 
-- **FR6** : L'utilisateur peut créer une session avec : date (défaut : aujourd'hui ; toute date passée autorisée — session rétroactive ; dates futures interdites), instrument, durée totale. **Aucune durée minimale** : une session de 1 à 3 minutes (« 3 minutes de pentatonique ») est une session à part entière.
+- **FR6** _(amendé 2026-06-18)_ : L'utilisateur peut créer une session avec : date (défaut : aujourd'hui ; toute date passée autorisée — session rétroactive ; dates futures interdites) et instrument. **Plus de durée globale saisie** : le temps se loggue via les entrées (cf. FR13). **Aucune durée minimale** : une session de 1 à 3 minutes (« 3 minutes de pentatonique ») est une session à part entière.
 - **FR7** : Une session porte **exactement un instrument**. Deux instruments le même jour = deux sessions distinctes.
 - **FR8** : Une session contient zéro ou plusieurs entrées ; chaque entrée référence **une chanson ou un sujet**, avec minutes (optionnelles) et note libre contextuelle (optionnelle, ex. « à 30 BPM »).
 - **FR9** : Une session porte une note libre globale (optionnelle, ex. « le pont coince encore »).
-- **FR10** : Toute session est éditable a posteriori : date, durée, instrument, entrées, notes.
+- **FR10** _(amendé 2026-06-18)_ : Toute session est éditable a posteriori : date, instrument, entrées (dont leurs minutes), notes. (La durée totale n'est plus un champ saisi — elle dérive des entrées, cf. FR13.)
 - **FR11** : Toute session est supprimable, avec dialogue de confirmation (pattern existant).
 - **FR12** : La saisie est optimisée pour la vitesse : chansons et sujets récents suggérés en premier, recherche instantanée dans le répertoire et les sujets, instrument par défaut pré-rempli. Cible : session complète saisie en moins de 30 secondes (cf. M2).
-- **FR13** : `[ASSUMPTION]` Si toutes les entrées portent des minutes, la durée totale de la session est pré-calculée comme leur somme ; l'utilisateur peut la surcharger.
-- **FR14** : L'utilisateur peut consulter l'historique de ses sessions (liste antichronologique avec date, durée, instrument, entrées).
+- **FR13** _(amendé 2026-06-18 — retrait du « surchargeable », cf. sprint-change-proposal-2026-06-18)_ : La durée totale d'une session est **toujours** la somme des minutes de ses entrées — **pas de durée globale surchargeable**. Le temps non structuré se loggue comme une **entrée** sur le topic système « Free practice » (FR25). Une entrée sans minutes compte 0.
+- **FR14** _(amendé 2026-06-18)_ : L'utilisateur peut consulter l'historique de ses sessions (liste antichronologique avec date, durée **(= somme des entrées, dérivée)**, instrument, entrées).
 
 ### Groupe C — Heatmap
 
-- **FR15** : Une grille annuelle type GitHub affiche une case par jour ; l'intensité visuelle reflète les minutes totales pratiquées ce jour-là. L'échelle est **relative à l'utilisateur** (paliers calculés sur sa propre distribution, à la façon des quartiles GitHub). Comme sur GitHub, **toute session allume le jour** quelle que soit sa durée : une session sans durée ou de quelques minutes s'affiche à l'intensité minimale visible.
+- **FR15** _(précisé 2026-06-18)_ : Une grille annuelle type GitHub affiche une case par jour ; l'intensité visuelle reflète les **minutes totales** pratiquées ce jour-là (= **somme des minutes des entrées** des sessions de ce jour). L'échelle est **relative à l'utilisateur** (paliers calculés sur sa propre distribution, à la façon des quartiles GitHub). Comme sur GitHub, **toute session allume le jour** quelle que soit sa durée : une session sans minutes (ex. « Mark as Played » sans durée) s'affiche à l'intensité minimale visible.
 - **FR16** : Cliquer sur un jour ouvre le détail : sessions de la journée avec leurs entrées et notes.
 - **FR17** : L'utilisateur peut naviguer entre les années.
 - **FR18** : Aucune mécanique punitive : pas de compteur de série (« streak ») cassée, pas de couleur agressive sur les jours vides, pas de notification de relance. La grille constate, ne juge pas.
@@ -111,7 +111,9 @@ Fin de mois, Léa ouvre la heatmap : trois semaines denses, une semaine creuse (
 - **FR21** _(amendé 2026-06-10 — cf. sprint-change-proposal-2026-06-10)_ : Cliquer « Mark as Played Now » sur une chanson crée la session du jour **pour l'instrument concerné** (si absente) ou la complète. **Si la chanson porte une durée (FR24), l'entrée créée est pré-remplie avec cette durée en minutes (éditable a posteriori via l'édition de session) ; sinon l'entrée est ajoutée sans minutes (comportement d'origine).** Re-marquer la même chanson dans la session du jour **n'ajoute pas d'entrée dupliquée mais incrémente** les minutes de l'entrée existante de la durée de la chanson (le temps s'additionne). La durée totale de session suit FR13. Le jour est la date locale de l'appareil (cf. FR19).
 - **FR22** : **Rétro-import** : l'historique de lectures existant (enregistrements de « Mark as Played » passés) est projeté dans la heatmap — chaque lecture passée allume son jour à l'intensité minimale. La grille a une histoire dès le lancement.
 - **FR23** : La cohérence inverse est maintenue : ajouter une chanson à une session met à jour son « dernier joué » pour l'instrument de la session si la date de la session est plus récente ; éditer la date d'une session ou la supprimer **recalcule** le « dernier joué » des chansons concernées. Le filtre « dernier joué » existant ne ment jamais.
-- **FR24** _(ajouté 2026-06-10)_ : L'utilisateur peut renseigner une **durée optionnelle (minutes)** sur une chanson de son répertoire (champ dans le formulaire chanson). Cette durée alimente le pré-remplissage du temps de session au « Mark as Played » (FR21). Une chanson sans durée se comporte comme avant (CM2 : aucune régression du répertoire existant).
+- **FR24** _(ajouté 2026-06-10 ; étendu 2026-06-18)_ : L'utilisateur peut renseigner une **durée optionnelle** sur une chanson de son répertoire (champ dans le formulaire chanson). Cette durée alimente le pré-remplissage du temps de session au « Mark as Played » (FR21) **et le pré-remplissage des minutes d'une entrée créée manuellement** quand on sélectionne cette chanson dans une session (valeur initiale, éditable). Une chanson sans durée se comporte comme avant (CM2 : aucune régression du répertoire existant).
+- **FR25** _(ajouté 2026-06-18)_ : Un topic **système « Free practice »** est fourni d'office et **épinglé en tête** du sélecteur d'entrée, pour logguer du temps de pratique non structuré sans créer de topic.
+- **FR26** _(ajouté 2026-06-18)_ : Depuis le sélecteur d'entrée, l'utilisateur peut **créer un nouveau topic à la volée** (quand sa recherche ne correspond à aucun topic existant), sans quitter le formulaire de session.
 
 ## 6. Exigences non fonctionnelles
 
