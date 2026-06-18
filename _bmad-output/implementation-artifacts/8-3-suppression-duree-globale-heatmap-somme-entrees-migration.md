@@ -5,7 +5,7 @@ arch_decision: "Delta « non détaillé » des sessions existantes (durée globa
 
 # Story 8.3: Suppression de la durée globale + heatmap somme des entrées + migration
 
-Status: review
+Status: done
 
 <!-- Note: Validation is optional. Run validate-create-story for quality check before dev-story. -->
 

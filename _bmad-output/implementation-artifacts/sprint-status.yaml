@@ -92,7 +92,7 @@ development_status:
   7-1-editer-mon-profil: backlog
 
   # Epic 8: Refonte temps de session — « tout est entrée » (Correct Course 2026-06-18 ; PRD amendé FR13/FR15/FR24 + FR25/FR26)
-  epic-8: in-progress
+  epic-8: done
   8-1-auto-remplissage-minutes-entree-depuis-duree-chanson: done   # Phase A — indépendant, quick win
   8-2-topic-systeme-free-practice-et-creation-a-la-volee: done     # Phase B — prérequis de 8-3 ; décision tranchée : Free practice SEEDÉ en base (vrai FK SessionItem.topicUid)
-  8-3-suppression-duree-globale-heatmap-somme-entrees-migration: review  # Phase C — après 8-2 ; rollback sync 6.1 + plancher (380e8c4/cbd6676)
+  8-3-suppression-duree-globale-heatmap-somme-entrees-migration: done  # Phase C — après 8-2 ; rollback sync 6.1 + plancher (380e8c4/cbd6676)
