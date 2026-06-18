@@ -1155,7 +1155,52 @@ describe('heatmap deep-links (3.2)', () => {
   });
 });
 
-test('a session with zero entries stays valid (no items in payload)', async () => {
+test('Epic 8 (option B): logging with no entry falls back to a Free practice entry + toast', async () => {
+  // The default fixture has no system topic; provide one here.
+  mockedTopicService.getAll.mockResolvedValue([
+    { uid: TOPIC_UID, name: 'Pentatonic scale' },
+    { uid: FREE_UID, name: 'Free practice', isSystem: true },
+  ]);
+  mockedService.create.mockResolvedValue({ uid: 's1', date: todayLocalDate(), instrumentType: 'Guitar' });
+
+  render(<MySessionsPage />);
+  // Wait for topics (incl. the system one) to load before submitting
+  await screen.findByText('No sessions logged yet.');
+
+  fireEvent.change(screen.getByLabelText('Instrument'), { target: { value: 'Guitar' } });
+  fireEvent.click(screen.getByRole('button', { name: 'Log session' }));
+
+  await waitFor(() => {
+    // No song/topic chosen → a single Free practice entry, floored to 1 minute
+    // (a logged session always carries at least 1 min)
+    expect(mockedService.create).toHaveBeenCalledWith(
+      expect.objectContaining({ items: [{ topicUid: FREE_UID, minutes: 1 }] })
+    );
+  });
+  expect(await screen.findByText('Logged as Free practice')).toBeInTheDocument();
+});
+
+test('Epic 8: a session whose entries have no minutes is floored to 1 minute on the first entry', async () => {
+  mockedService.create.mockResolvedValue({ uid: 's1', date: todayLocalDate(), instrumentType: 'Bass' });
+
+  render(<MySessionsPage />);
+  fireEvent.change(screen.getByLabelText('Instrument'), { target: { value: 'Bass' } });
+  await addEntry(1, `song:${SONG_UID}`); // a song entry, but no minutes entered
+
+  // The read-only Total still shows the live (pre-floor) sum of 0 → neutral dash
+  expect(screen.getByLabelText('Total minutes')).toHaveTextContent('—');
+
+  fireEvent.click(screen.getByRole('button', { name: 'Log session' }));
+  await waitFor(() => {
+    // On submit, the timeless session is floored to 1 min on its first entry
+    expect(mockedService.create).toHaveBeenCalledWith(
+      expect.objectContaining({ items: [{ songUid: SONG_UID, minutes: 1 }] })
+    );
+  });
+});
+
+test('logging with no entry and no system topic available degrades to an empty session', async () => {
+  // Default fixture: only a normal topic, no isSystem → nothing to fall back to
   mockedService.create.mockResolvedValue({ uid: 's1', date: todayLocalDate(), instrumentType: 'Guitar' });
 
   render(<MySessionsPage />);
@@ -1168,4 +1213,5 @@ test('a session with zero entries stays valid (no items in payload)', async () =
       expect.objectContaining({ items: undefined })
     );
   });
+  expect(await screen.findByText('Session logged')).toBeInTheDocument();
 });
