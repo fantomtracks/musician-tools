@@ -17,8 +17,8 @@ project adheres to [Semantic Versioning](https://semver.org/).
 ### Changed
 - Session history now reads "played during X minutes" for each song — so it's clearly the time you played, not the song's length — with a clearer separator next to the instrument
 
-### Fixed
-- A session's total time can no longer be set shorter than the minutes already logged in its entries
+### Changed
+- The session total now fills in automatically with the time logged in its entries (it follows their sum as you add or edit them) and can only be raised above that sum, never below
 
 ## [1.3.6] — 2026-06-14
 

@@ -305,15 +305,14 @@ function MySessionsPage() {
     })();
   }, []);
 
-  // FR13: when every entry has minutes, the total duration is pre-computed as
-  // their sum — unless the user typed a duration manually (override wins).
-  // A sum beyond the 1440 server cap is never auto-applied: the feature must
-  // not manufacture an invalid value the user did not type.
+  // FR13: the session total FLOORS at the sum of its entries' minutes — the
+  // entries are part of the session, so the total can never fall below them.
+  // The field auto-fills to that sum (a partial sum, when only some entries are
+  // timed, still counts) and the user can only raise it above. A sum outside
+  // the 1..1440 server range is not auto-applied, so the field stays free.
   const entryMinutes = entries.map(e => (e.minutes === '' ? null : Number(e.minutes)));
-  const rawSum = entries.length > 0 && entryMinutes.every(m => m !== null && Number.isFinite(m))
-    ? entryMinutes.reduce((total, m) => (total as number) + (m as number), 0)
-    : null;
-  const autoSum = rawSum !== null && rawSum >= 1 && rawSum <= 1440 ? rawSum : null;
+  const enteredMinutesSum = entryMinutes.reduce<number>((sum, m) => sum + (m ?? 0), 0);
+  const autoSum = enteredMinutesSum >= 1 && enteredMinutesSum <= 1440 ? enteredMinutesSum : null;
   const effectiveDuration = durationTouched ? duration : (autoSum !== null ? String(autoSum) : duration);
 
   // FR12: refs recently logged, first occurrence over the anti-chronological
@@ -393,11 +392,13 @@ function MySessionsPage() {
     setEditingSessionLabel(session.date);
     setDate(session.date);
     setInstrumentType(session.instrumentType);
-    setDuration(session.durationMinutes != null ? String(session.durationMinutes) : '');
-    // FR13 is a capture-time aid only: in edit mode the auto-sum must never
-    // assign or overwrite a duration (a deliberately duration-less session
-    // must stay that way, and clearing the field must mean "no duration")
-    setDurationTouched(true);
+    // Floor-aware: a stored total that is just the entries' sum (or below it, or
+    // absent) follows the auto floor; only a real override ABOVE the sum sticks.
+    const loadedSum = (session.items ?? []).reduce((sum, it) => sum + (typeof it.minutes === 'number' ? it.minutes : 0), 0);
+    const loadedFloor = loadedSum >= 1 && loadedSum <= 1440 ? loadedSum : null;
+    const storedDuration = session.durationMinutes;
+    setDuration(storedDuration != null ? String(storedDuration) : '');
+    setDurationTouched(storedDuration != null && (loadedFloor === null || storedDuration > loadedFloor));
     setNote(session.note ?? '');
     setEntries((session.items ?? []).map(item => {
       entryKeyRef.current += 1;
@@ -458,14 +459,13 @@ function MySessionsPage() {
       setError('Each entry needs a song or topic — fill or remove empty entries');
       return;
     }
-    // A session can't be shorter than what its entries already account for: the
-    // entries are part of the session, so the (optional) total may exceed their
-    // sum (extra un-itemised practice) but never undercut it.
-    const enteredMinutesSum = entryMinutes.reduce<number>((sum, m) => sum + (m ?? 0), 0);
-    if (effectiveDuration !== '' && Number(effectiveDuration) < enteredMinutesSum) {
-      setError(`Session duration can't be less than the ${enteredMinutesSum} min already logged in its entries`);
-      return;
-    }
+    // Floor the total at the entries' sum (the entries are part of the session).
+    // effectiveDuration already shows the sum when not overridden; this also
+    // catches an override typed below the sum without blurring (Enter-submit).
+    const typedDuration = effectiveDuration === '' ? null : Number(effectiveDuration);
+    const flooredDuration = autoSum !== null && (typedDuration === null || typedDuration < autoSum)
+      ? autoSum
+      : typedDuration;
     try {
       setLoading(true);
       submitInFlightRef.current = true;
@@ -487,7 +487,7 @@ function MySessionsPage() {
         const payload: UpdatePracticeSessionDTO = {
           date,
           instrumentType,
-          durationMinutes: effectiveDuration === '' ? null : Number(effectiveDuration),
+          durationMinutes: flooredDuration,
           note: note.trim() || null,
           items,
         };
@@ -507,9 +507,9 @@ function MySessionsPage() {
         const payload: CreatePracticeSessionDTO = {
           date,
           instrumentType,
-          // '' means "no duration"; anything typed (including 0) is sent so the
-          // server can reject invalid values instead of silently dropping them
-          durationMinutes: effectiveDuration === '' ? undefined : Number(effectiveDuration),
+          // null means "no duration"; the floored value (entries' sum or the
+          // user's higher override) is sent otherwise
+          durationMinutes: flooredDuration === null ? undefined : flooredDuration,
           note: note.trim() || undefined,
           items: items.length > 0 ? items : undefined,
         };
@@ -658,15 +658,19 @@ function MySessionsPage() {
                 onChange={e => {
                   const digits = digitsOnly(e.target.value);
                   setDuration(digits);
-                  // Typing freezes the auto-sum; truly clearing the field
-                  // re-arms it (create mode only — in edit mode "cleared"
-                  // must persist as "no duration"). badInput ('1e'…) reads
+                  // Typing sets an override; clearing re-arms the auto floor (the
+                  // field falls back to the entries' sum). badInput ('1e'…) reads
                   // as '' but must NOT re-arm, or it would wipe an override.
-                  setDurationTouched(
-                    digits !== ''
-                    || (e.target.validity?.badInput ?? false)
-                    || editingSessionUid !== null
-                  );
+                  setDurationTouched(digits !== '' || (e.target.validity?.badInput ?? false));
+                }}
+                onBlur={() => {
+                  // A value at or below the entries' sum just follows the floor:
+                  // revert to the auto value so the field shows the sum and stays
+                  // in sync as entries change.
+                  if (durationTouched && autoSum !== null && (duration === '' || Number(duration) <= autoSum)) {
+                    setDuration('');
+                    setDurationTouched(false);
+                  }
                 }}
                 className="input-base text-sm"
                 disabled={loading}

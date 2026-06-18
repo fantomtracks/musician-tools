@@ -141,16 +141,22 @@ test('after success, duration and note reset but date and instrument are kept', 
   expect(screen.getByLabelText('Instrument')).toHaveValue('Bass');
 });
 
-test('blocks a manual duration shorter than the sum of the entries', async () => {
+test('floors a manual duration typed below the entries sum back up to the sum', async () => {
+  mockedService.create.mockResolvedValue({ uid: 's1', date: todayLocalDate(), instrumentType: 'Bass' });
   render(<MySessionsPage />);
 
   fireEvent.change(screen.getByLabelText('Instrument'), { target: { value: 'Bass' } });
   await addEntry(1, `song:${SONG_UID}`, '50');
-  fireEvent.change(screen.getByLabelText('Duration'), { target: { value: '10' } });
-  fireEvent.click(screen.getByRole('button', { name: 'Log session' }));
+  const duration = screen.getByLabelText('Duration');
+  fireEvent.change(duration, { target: { value: '10' } });
+  fireEvent.blur(duration);
 
-  expect(await screen.findByText(/Session duration can't be less than the 50 min/i)).toBeInTheDocument();
-  expect(mockedService.create).not.toHaveBeenCalled();
+  expect(duration).toHaveValue(50); // snapped up to the entries floor
+
+  fireEvent.click(screen.getByRole('button', { name: 'Log session' }));
+  await waitFor(() => {
+    expect(mockedService.create).toHaveBeenCalledWith(expect.objectContaining({ durationMinutes: 50 }));
+  });
 });
 
 test('a session without duration or note is valid (only date + instrument required)', async () => {
@@ -305,13 +311,13 @@ test('FR13: a manual duration override wins over the auto-sum', async () => {
   });
 });
 
-test('FR13: no auto-sum when an entry has no minutes', async () => {
+test('FR13: the total floors at the sum of the timed entries (partial sum counts)', async () => {
   render(<MySessionsPage />);
 
   await addEntry(1, `song:${SONG_UID}`, '15');
-  await addEntry(2, `topic:${TOPIC_UID}`);
+  await addEntry(2, `topic:${TOPIC_UID}`); // no minutes — still floors to 15
 
-  expect(screen.getByLabelText('Duration')).toHaveValue(null);
+  expect(screen.getByLabelText('Duration')).toHaveValue(15);
 });
 
 test('Remove entry deletes the row', async () => {
@@ -703,31 +709,55 @@ test('FR13 in edit mode: the existing duration is not overwritten by the auto-su
   expect(screen.getByLabelText('Duration')).toHaveValue(40);
 });
 
-test('FR13 in edit mode: a duration-less session does not get the auto-sum assigned', async () => {
+test('FR13 in edit mode: a total-less session with timed entries floors to their sum', async () => {
   mockedService.getAll.mockResolvedValue([{ ...editableSession(), durationMinutes: null }]);
-  mockedService.update.mockResolvedValue({ ...editableSession(), durationMinutes: null });
+  mockedService.update.mockResolvedValue({ ...editableSession(), durationMinutes: 15 });
 
   render(<MySessionsPage />);
   fireEvent.click(await screen.findByRole('button', { name: 'Edit session of 2026-06-05' }));
 
-  // The entry has 15 min but the session deliberately has no duration
-  expect(screen.getByLabelText('Duration')).toHaveValue(null);
+  // The entry has 15 min and the session had no total → the field floors to 15
+  expect(screen.getByLabelText('Duration')).toHaveValue(15);
 
   fireEvent.click(screen.getByRole('button', { name: 'Save session' }));
   await waitFor(() => {
-    expect(mockedService.update).toHaveBeenCalledWith('s-edit', expect.objectContaining({ durationMinutes: null }));
+    expect(mockedService.update).toHaveBeenCalledWith('s-edit', expect.objectContaining({ durationMinutes: 15 }));
   });
 });
 
-test('FR13 in edit mode: clearing the duration persists "no duration"', async () => {
-  mockedService.getAll.mockResolvedValue([editableSession()]);
+test('FR13 in edit mode: clearing an over-the-floor total reverts to the entries floor', async () => {
+  mockedService.getAll.mockResolvedValue([editableSession()]); // total 40, one 15-min entry
   mockedService.update.mockResolvedValue(editableSession());
 
   render(<MySessionsPage />);
   fireEvent.click(await screen.findByRole('button', { name: 'Edit session of 2026-06-05' }));
   fireEvent.change(screen.getByLabelText('Duration'), { target: { value: '' } });
 
-  expect(screen.getByLabelText('Duration')).toHaveValue(null);
+  // Clearing no longer means "no duration" when entries are timed — it floors to 15
+  expect(screen.getByLabelText('Duration')).toHaveValue(15);
+
+  fireEvent.click(screen.getByRole('button', { name: 'Save session' }));
+  await waitFor(() => {
+    expect(mockedService.update).toHaveBeenCalledWith('s-edit', expect.objectContaining({ durationMinutes: 15 }));
+  });
+});
+
+test('FR13 in edit mode: a session with no timed entries can still be cleared to no duration', async () => {
+  const untimed = {
+    ...editableSession(),
+    durationMinutes: 30,
+    items: [{ uid: ITEM_UID, sessionUid: 's-edit', songUid: SONG_UID, topicUid: null, label: 'Sweet Child', minutes: null, note: null }],
+  };
+  mockedService.getAll.mockResolvedValue([untimed]);
+  mockedService.update.mockResolvedValue(untimed);
+
+  render(<MySessionsPage />);
+  fireEvent.click(await screen.findByRole('button', { name: 'Edit session of 2026-06-05' }));
+  const duration = screen.getByLabelText('Duration');
+  fireEvent.change(duration, { target: { value: '' } });
+  fireEvent.blur(duration);
+
+  expect(duration).toHaveValue(null); // no floor (no timed entries) → stays empty
 
   fireEvent.click(screen.getByRole('button', { name: 'Save session' }));
   await waitFor(() => {
