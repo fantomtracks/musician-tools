@@ -4,6 +4,8 @@ import { digitsOnly } from '../utils/digitsOnly';
 import { practiceSessionService, type PracticeSession } from '../services/practiceSessionService';
 
 jest.mock('../services/practiceSessionService', () => ({
+  // Keep the real pure helpers (e.g. sumSessionMinutes); only the API object is mocked
+  ...jest.requireActual('../services/practiceSessionService'),
   practiceSessionService: {
     create: jest.fn(),
     getAll: jest.fn(),
@@ -82,7 +84,9 @@ test('renders a labelled form with today (local) pre-filled and future dates blo
   expect(dateInput).toHaveValue(todayLocalDate());
   expect(dateInput).toHaveAttribute('max', todayLocalDate());
   expect(screen.getByLabelText('Instrument')).toBeInTheDocument();
-  expect(screen.getByLabelText('Duration')).toBeInTheDocument();
+  // Epic 8: no editable Duration field anymore — a read-only Total is shown.
+  expect(screen.queryByLabelText('Duration')).not.toBeInTheDocument();
+  expect(screen.getByLabelText('Total minutes')).toBeInTheDocument();
   expect(screen.getByLabelText('Note')).toBeInTheDocument();
 });
 
@@ -96,12 +100,11 @@ test('submit is disabled until an instrument is selected', () => {
   expect(submit).not.toBeDisabled();
 });
 
-test('submitting sends the payload and shows a confirmation toast', async () => {
+test('submitting sends the payload (no durationMinutes) and shows a confirmation toast', async () => {
   const created: PracticeSession = {
     uid: 's1',
     date: todayLocalDate(),
     instrumentType: 'Bass',
-    durationMinutes: 40,
     note: 'bridge still rough',
   };
   mockedService.create.mockResolvedValue(created);
@@ -109,54 +112,54 @@ test('submitting sends the payload and shows a confirmation toast', async () => 
   render(<MySessionsPage />);
 
   fireEvent.change(screen.getByLabelText('Instrument'), { target: { value: 'Bass' } });
-  fireEvent.change(screen.getByLabelText('Duration'), { target: { value: '40' } });
   fireEvent.change(screen.getByLabelText('Note'), { target: { value: 'bridge still rough' } });
   fireEvent.click(screen.getByRole('button', { name: 'Log session' }));
 
   await waitFor(() => {
+    // Epic 8: the payload no longer carries durationMinutes
     expect(mockedService.create).toHaveBeenCalledWith({
       date: todayLocalDate(),
       instrumentType: 'Bass',
-      durationMinutes: 40,
       note: 'bridge still rough',
+      items: undefined,
     });
   });
   expect(await screen.findByText('Session logged')).toBeInTheDocument();
 });
 
-test('after success, duration and note reset but date and instrument are kept', async () => {
+test('after success, note resets but date and instrument are kept', async () => {
   mockedService.create.mockResolvedValue({ uid: 's1', date: todayLocalDate(), instrumentType: 'Bass' });
 
   render(<MySessionsPage />);
 
   fireEvent.change(screen.getByLabelText('Instrument'), { target: { value: 'Bass' } });
-  fireEvent.change(screen.getByLabelText('Duration'), { target: { value: '40' } });
   fireEvent.change(screen.getByLabelText('Note'), { target: { value: 'quick run' } });
   fireEvent.click(screen.getByRole('button', { name: 'Log session' }));
 
   await screen.findByText('Session logged');
 
-  expect(screen.getByLabelText('Duration')).toHaveValue(null);
   expect(screen.getByLabelText('Note')).toHaveValue('');
   expect(screen.getByLabelText('Date')).toHaveValue(todayLocalDate());
   expect(screen.getByLabelText('Instrument')).toHaveValue('Bass');
 });
 
-test('floors a manual duration typed below the entries sum back up to the sum', async () => {
+test('the read-only Total reflects the sum of the entries minutes', async () => {
   mockedService.create.mockResolvedValue({ uid: 's1', date: todayLocalDate(), instrumentType: 'Bass' });
   render(<MySessionsPage />);
 
   fireEvent.change(screen.getByLabelText('Instrument'), { target: { value: 'Bass' } });
   await addEntry(1, `song:${SONG_UID}`, '50');
-  const duration = screen.getByLabelText('Duration');
-  fireEvent.change(duration, { target: { value: '10' } });
-  fireEvent.blur(duration);
 
-  expect(duration).toHaveValue(50); // snapped up to the entries floor
+  // The Total is derived, never typed — it shows the entries' sum
+  expect(screen.getByLabelText('Total minutes')).toHaveTextContent('50 min');
 
   fireEvent.click(screen.getByRole('button', { name: 'Log session' }));
   await waitFor(() => {
-    expect(mockedService.create).toHaveBeenCalledWith(expect.objectContaining({ durationMinutes: 50 }));
+    expect(mockedService.create).toHaveBeenCalledWith(
+      expect.objectContaining({ items: [expect.objectContaining({ songUid: SONG_UID, minutes: 50 })] })
+    );
+    // No durationMinutes key in the payload
+    expect(mockedService.create.mock.calls[0][0]).not.toHaveProperty('durationMinutes');
   });
 });
 
@@ -172,8 +175,8 @@ test('a session without duration or note is valid (only date + instrument requir
     expect(mockedService.create).toHaveBeenCalledWith({
       date: todayLocalDate(),
       instrumentType: 'Guitar',
-      durationMinutes: undefined,
       note: undefined,
+      items: undefined,
     });
   });
 });
@@ -220,23 +223,6 @@ test('blocks future dates client-side without calling the API', async () => {
   expect(mockedService.create).not.toHaveBeenCalled();
 });
 
-test('typed duration "0" is sent to the server, not silently dropped', async () => {
-  mockedService.create.mockRejectedValue(new Error('Duration must be a whole number of minutes between 1 and 1440'));
-
-  render(<MySessionsPage />);
-
-  fireEvent.change(screen.getByLabelText('Instrument'), { target: { value: 'Bass' } });
-  fireEvent.change(screen.getByLabelText('Duration'), { target: { value: '0' } });
-  // Bypass native min={1} validation to exercise the JS path
-  fireEvent.submit(screen.getByLabelText('Duration').closest('form')!);
-
-  await waitFor(() => {
-    expect(mockedService.create).toHaveBeenCalledWith(
-      expect.objectContaining({ durationMinutes: 0 })
-    );
-  });
-  expect(await screen.findByText('Duration must be a whole number of minutes between 1 and 1440')).toBeInTheDocument();
-});
 
 test('the toast live region is mounted before any submission', () => {
   render(<MySessionsPage />);
@@ -283,42 +269,22 @@ test('submitting with entries sends decoded song/topic items', async () => {
   });
 });
 
-test('FR13: duration auto-fills with the sum when every entry has minutes', async () => {
+test('FR13 (Epic 8): the read-only Total is the sum when every entry has minutes', async () => {
   render(<MySessionsPage />);
 
   await addEntry(1, `song:${SONG_UID}`, '15');
   await addEntry(2, `topic:${TOPIC_UID}`, '25');
 
-  expect(screen.getByLabelText('Duration')).toHaveValue(40);
+  expect(screen.getByLabelText('Total minutes')).toHaveTextContent('40 min');
 });
 
-test('FR13: a manual duration override wins over the auto-sum', async () => {
-  mockedService.create.mockResolvedValue({ uid: 's1', date: todayLocalDate(), instrumentType: 'Bass' });
-
-  render(<MySessionsPage />);
-
-  fireEvent.change(screen.getByLabelText('Instrument'), { target: { value: 'Bass' } });
-  await addEntry(1, `song:${SONG_UID}`, '15');
-  fireEvent.change(screen.getByLabelText('Duration'), { target: { value: '50' } });
-  await addEntry(2, `topic:${TOPIC_UID}`, '25');
-
-  expect(screen.getByLabelText('Duration')).toHaveValue(50);
-
-  fireEvent.click(screen.getByRole('button', { name: 'Log session' }));
-  await waitFor(() => {
-    expect(mockedService.create).toHaveBeenCalledWith(
-      expect.objectContaining({ durationMinutes: 50 })
-    );
-  });
-});
-
-test('FR13: the total floors at the sum of the timed entries (partial sum counts)', async () => {
+test('FR13 (Epic 8): the Total counts a partial sum (entries without minutes = 0)', async () => {
   render(<MySessionsPage />);
 
   await addEntry(1, `song:${SONG_UID}`, '15');
-  await addEntry(2, `topic:${TOPIC_UID}`); // no minutes — still floors to 15
+  await addEntry(2, `topic:${TOPIC_UID}`); // no minutes — counts as 0
 
-  expect(screen.getByLabelText('Duration')).toHaveValue(15);
+  expect(screen.getByLabelText('Total minutes')).toHaveTextContent('15 min');
 });
 
 test('8.1: selecting a song with a duration pre-fills the entry minutes (rounded)', async () => {
@@ -499,34 +465,23 @@ test('an entry row without a song/topic blocks submission instead of being dropp
   expect(mockedService.create).not.toHaveBeenCalled();
 });
 
-test('FR13: an auto-sum beyond 1440 is never auto-applied', async () => {
+test('FR13 (Epic 8): the Total shows the raw entries sum even above 1440 (no cap)', async () => {
   render(<MySessionsPage />);
 
   await addEntry(1, `song:${SONG_UID}`, '800');
   await addEntry(2, `topic:${TOPIC_UID}`, '800');
 
-  expect(screen.getByLabelText('Duration')).toHaveValue(null);
+  // The total is purely derived now — it is not auto-applied to a field, so the
+  // old "out of 1..1440 range → leave the field free" rule no longer applies.
+  expect(screen.getByLabelText('Total minutes')).toHaveTextContent('1600 min');
 });
 
-test('FR13: clearing a manual override re-arms the auto-sum', async () => {
-  render(<MySessionsPage />);
-
-  await addEntry(1, `song:${SONG_UID}`, '15');
-  await addEntry(2, `topic:${TOPIC_UID}`, '25');
-  fireEvent.change(screen.getByLabelText('Duration'), { target: { value: '50' } });
-  expect(screen.getByLabelText('Duration')).toHaveValue(50);
-
-  fireEvent.change(screen.getByLabelText('Duration'), { target: { value: '' } });
-  expect(screen.getByLabelText('Duration')).toHaveValue(40);
-});
-
-test('the history lists sessions with date, instrument, duration, notes and entries', async () => {
+test('the history lists sessions with date, instrument, the entries-sum minutes, notes and entries', async () => {
   mockedService.getAll.mockResolvedValue([
     {
       uid: 's1',
       date: '2026-06-05',
       instrumentType: 'Bass',
-      durationMinutes: 40,
       note: 'great session',
       items: [
         { uid: 'i1', sessionUid: 's1', label: 'Sweet Child', minutes: 15, note: 'at 30 BPM' },
@@ -540,6 +495,7 @@ test('the history lists sessions with date, instrument, duration, notes and entr
   const history = await screen.findByRole('list', { name: 'Session history' });
   expect(within(history).getByText('2026-06-05')).toBeInTheDocument();
   expect(within(history).getByText('Bass')).toBeInTheDocument();
+  // 15 + 25 = 40, summed from the entries (no stored durationMinutes)
   expect(within(history).getByText('· 40 min')).toBeInTheDocument();
   expect(within(history).getByText('great session')).toBeInTheDocument();
   expect(within(history).getByText(/Sweet Child/)).toBeInTheDocument();
@@ -744,7 +700,6 @@ function editableSession() {
     uid: 's-edit',
     date: '2026-06-05',
     instrumentType: 'Bass',
-    durationMinutes: 40,
     note: 'old note',
     items: [
       { uid: ITEM_UID, sessionUid: 's-edit', songUid: SONG_UID, topicUid: null, label: 'Sweet Child', minutes: 15, note: 'at 30 BPM' },
@@ -762,7 +717,8 @@ test('Edit populates the form, shows the banner, and Save sends a diff-by-uid pa
   expect(screen.getByText('Editing session of 2026-06-05')).toBeInTheDocument();
   expect(screen.getByLabelText('Date')).toHaveValue('2026-06-05');
   expect(screen.getByLabelText('Instrument')).toHaveValue('Bass');
-  expect(screen.getByLabelText('Duration')).toHaveValue(40);
+  // Total is the read-only sum of the entries (the single entry has 15 min)
+  expect(screen.getByLabelText('Total minutes')).toHaveTextContent('15 min');
   expect(screen.getByLabelText('Note')).toHaveValue('old note');
   // The combobox shows the resolved label of the selected song, not its ref
   expect(screen.getByLabelText('Entry 1')).toHaveValue('Sweet Child');
@@ -777,7 +733,6 @@ test('Edit populates the form, shows the banner, and Save sends a diff-by-uid pa
     expect(mockedService.update).toHaveBeenCalledWith('s-edit', {
       date: '2026-06-05',
       instrumentType: 'Bass',
-      durationMinutes: 40,
       note: 'new note',
       items: [{ uid: ITEM_UID, songUid: SONG_UID, minutes: 15, note: 'at 30 BPM' }],
     });
@@ -857,69 +812,23 @@ test('removing an entry in edit mode omits it from the payload', async () => {
   });
 });
 
-test('FR13 in edit mode: the existing duration is not overwritten by the auto-sum', async () => {
+test('FR13 (Epic 8) in edit mode: the Total tracks the entries and never sends durationMinutes', async () => {
   mockedService.getAll.mockResolvedValue([editableSession()]);
-
-  render(<MySessionsPage />);
-  fireEvent.click(await screen.findByRole('button', { name: 'Edit session of 2026-06-05' }));
-
-  // The single entry has 15 min; the session duration is 40 — it must stay 40
-  expect(screen.getByLabelText('Duration')).toHaveValue(40);
-});
-
-test('FR13 in edit mode: a total-less session with timed entries floors to their sum', async () => {
-  mockedService.getAll.mockResolvedValue([{ ...editableSession(), durationMinutes: null }]);
-  mockedService.update.mockResolvedValue({ ...editableSession(), durationMinutes: 15 });
-
-  render(<MySessionsPage />);
-  fireEvent.click(await screen.findByRole('button', { name: 'Edit session of 2026-06-05' }));
-
-  // The entry has 15 min and the session had no total → the field floors to 15
-  expect(screen.getByLabelText('Duration')).toHaveValue(15);
-
-  fireEvent.click(screen.getByRole('button', { name: 'Save session' }));
-  await waitFor(() => {
-    expect(mockedService.update).toHaveBeenCalledWith('s-edit', expect.objectContaining({ durationMinutes: 15 }));
-  });
-});
-
-test('FR13 in edit mode: clearing an over-the-floor total reverts to the entries floor', async () => {
-  mockedService.getAll.mockResolvedValue([editableSession()]); // total 40, one 15-min entry
   mockedService.update.mockResolvedValue(editableSession());
 
   render(<MySessionsPage />);
   fireEvent.click(await screen.findByRole('button', { name: 'Edit session of 2026-06-05' }));
-  fireEvent.change(screen.getByLabelText('Duration'), { target: { value: '' } });
 
-  // Clearing no longer means "no duration" when entries are timed — it floors to 15
-  expect(screen.getByLabelText('Duration')).toHaveValue(15);
-
-  fireEvent.click(screen.getByRole('button', { name: 'Save session' }));
-  await waitFor(() => {
-    expect(mockedService.update).toHaveBeenCalledWith('s-edit', expect.objectContaining({ durationMinutes: 15 }));
-  });
-});
-
-test('FR13 in edit mode: a session with no timed entries can still be cleared to no duration', async () => {
-  const untimed = {
-    ...editableSession(),
-    durationMinutes: 30,
-    items: [{ uid: ITEM_UID, sessionUid: 's-edit', songUid: SONG_UID, topicUid: null, label: 'Sweet Child', minutes: null, note: null }],
-  };
-  mockedService.getAll.mockResolvedValue([untimed]);
-  mockedService.update.mockResolvedValue(untimed);
-
-  render(<MySessionsPage />);
-  fireEvent.click(await screen.findByRole('button', { name: 'Edit session of 2026-06-05' }));
-  const duration = screen.getByLabelText('Duration');
-  fireEvent.change(duration, { target: { value: '' } });
-  fireEvent.blur(duration);
-
-  expect(duration).toHaveValue(null); // no floor (no timed entries) → stays empty
+  // The single entry has 15 min → Total shows 15, recomputed live as it changes
+  expect(screen.getByLabelText('Total minutes')).toHaveTextContent('15 min');
+  fireEvent.change(screen.getByLabelText('Entry 1 minutes'), { target: { value: '20' } });
+  expect(screen.getByLabelText('Total minutes')).toHaveTextContent('20 min');
 
   fireEvent.click(screen.getByRole('button', { name: 'Save session' }));
   await waitFor(() => {
-    expect(mockedService.update).toHaveBeenCalledWith('s-edit', expect.objectContaining({ durationMinutes: null }));
+    expect(mockedService.update).toHaveBeenCalled();
+    // No durationMinutes key is ever sent
+    expect(mockedService.update.mock.calls[0][1]).not.toHaveProperty('durationMinutes');
   });
 });
 

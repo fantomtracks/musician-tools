@@ -141,11 +141,16 @@ const getHeatmap = async (req, res, next) => {
     // equivalent to PLAY_DAY_EXPR BETWEEN Jan 1 and Dec 31 of the year.
     const [rows, playRows] = await Promise.all([
       PracticeSession.findAll({
+        // Epic 8: a day's minutes = SUM of its sessions' entries' minutes (the
+        // total is no longer a stored column). LEFT JOIN so a session WITHOUT
+        // entries still lights its day (0 min, but counted). The join multiplies
+        // rows per session, so sessionCount MUST be COUNT(DISTINCT session uid).
         attributes: [
           'date',
-          [fn('SUM', col('duration_minutes')), 'totalMinutes'],
-          [fn('COUNT', col('uid')), 'sessionCount']
+          [fn('SUM', col('items.minutes')), 'totalMinutes'],
+          [fn('COUNT', literal('DISTINCT "PracticeSession"."uid"')), 'sessionCount']
         ],
+        include: [{ model: SessionItem, as: 'items', attributes: [], required: false }],
         where: { userUid: userId, date: { [Op.between]: [`${year}-01-01`, `${year}-12-31`] } },
         group: ['date'],
         order: [['date', 'ASC']],
@@ -244,8 +249,10 @@ const createPracticeSession = async (req, res, next) => {
       return next(createError(401, 'Unauthorized'));
     }
 
-    // req.body is undefined when the request body is not JSON — treat as empty
-    const { date, instrumentType, durationMinutes, note, items } = req.body || {};
+    // req.body is undefined when the request body is not JSON — treat as empty.
+    // durationMinutes is no longer read (Epic 8: the total is the sum of the
+    // entries' minutes); a legacy body still carrying it is tolerated, ignored.
+    const { date, instrumentType, note, items } = req.body || {};
 
     if (typeof date !== 'string' || !DATE_PATTERN.test(date) || !isValidCalendarDate(date)) {
       return next(createError(400, 'Date must be a valid YYYY-MM-DD date'));
@@ -266,13 +273,6 @@ const createPracticeSession = async (req, res, next) => {
     }
     if (trimmedInstrument.includes('\u0000')) {
       return next(createError(400, 'Instrument contains invalid characters'));
-    }
-
-    if (durationMinutes !== undefined && durationMinutes !== null) {
-      if (typeof durationMinutes !== 'number' || !Number.isInteger(durationMinutes)
-        || durationMinutes < 1 || durationMinutes > MAX_DURATION_MINUTES) {
-        return next(createError(400, 'Duration must be a whole number of minutes between 1 and 1440'));
-      }
     }
 
     let trimmedNote = null;
@@ -355,16 +355,6 @@ const createPracticeSession = async (req, res, next) => {
       }
     }
 
-    // A session total can't be less than the minutes its entries already
-    // account for (the entries are part of the session). It may exceed the sum
-    // (extra un-itemised practice), never undercut it.
-    if (durationMinutes !== undefined && durationMinutes !== null) {
-      const entriesMinutesSum = pendingItems.reduce((sum, it) => sum + (Number.isInteger(it.minutes) ? it.minutes : 0), 0);
-      if (durationMinutes < entriesMinutesSum) {
-        return next(createError(400, `Duration cannot be less than the ${entriesMinutesSum} minutes logged in its entries`));
-      }
-    }
-
     // Ownership-scoped batch resolution (NFR4): two queries total, not one per
     // item. An unknown uid and another user's uid get the same answer — no
     // enumeration oracle. Labels are snapshotted server-side so history
@@ -395,7 +385,6 @@ const createPracticeSession = async (req, res, next) => {
       userUid: userId,
       date,
       instrumentType: trimmedInstrument,
-      durationMinutes: durationMinutes ?? null,
       note: trimmedNote
     };
 
@@ -456,7 +445,9 @@ const updatePracticeSession = async (req, res, next) => {
       return next(createError(403, 'Forbidden'));
     }
 
-    const { date, instrumentType, durationMinutes, note, items } = req.body || {};
+    // durationMinutes is no longer accepted (Epic 8): the total derives from the
+    // entries' minutes. A legacy body still sending it is tolerated and ignored.
+    const { date, instrumentType, note, items } = req.body || {};
 
     let nextDate = practiceSession.date;
     if (date !== undefined) {
@@ -485,19 +476,6 @@ const updatePracticeSession = async (req, res, next) => {
         return next(createError(400, 'Instrument contains invalid characters'));
       }
       nextInstrument = trimmedInstrument;
-    }
-
-    let nextDuration = practiceSession.durationMinutes;
-    if (durationMinutes !== undefined) {
-      if (durationMinutes === null) {
-        nextDuration = null;
-      } else {
-        if (typeof durationMinutes !== 'number' || !Number.isInteger(durationMinutes)
-          || durationMinutes < 1 || durationMinutes > MAX_DURATION_MINUTES) {
-          return next(createError(400, 'Duration must be a whole number of minutes between 1 and 1440'));
-        }
-        nextDuration = durationMinutes;
-      }
     }
 
     let nextNote = practiceSession.note;
@@ -645,19 +623,6 @@ const updatePracticeSession = async (req, res, next) => {
       itemOps = { rows, toDelete };
     }
 
-    // A session total can't be less than the minutes its entries account for.
-    // Effective entries = the payload's items when provided, otherwise the
-    // session's existing entries (a duration-only update must still be coherent).
-    if (nextDuration !== null) {
-      const effectiveItemMinutes = itemOps
-        ? itemOps.rows.map(row => row.values.minutes)
-        : practiceSession.items.map(item => item.minutes);
-      const entriesMinutesSum = effectiveItemMinutes.reduce((sum, m) => sum + (Number.isInteger(m) ? m : 0), 0);
-      if (nextDuration < entriesMinutesSum) {
-        return next(createError(400, `Duration cannot be less than the ${entriesMinutesSum} minutes logged in its entries`));
-      }
-    }
-
     // Capture before the update so the play sync (4.2) can detect changes.
     // Normalize the day to a YYYY-MM-DD string on both sides: a DATEONLY could
     // surface as a Date, and a raw !== would then always read as "changed" and
@@ -673,7 +638,6 @@ const updatePracticeSession = async (req, res, next) => {
       await practiceSession.update({
         date: nextDate,
         instrumentType: nextInstrument,
-        durationMinutes: nextDuration,
         note: nextNote
       }, { transaction });
 

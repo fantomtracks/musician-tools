@@ -160,7 +160,9 @@ describe('songcontroller', () => {
 
       expect(PracticeSession.create).toHaveBeenCalledTimes(1);
       const sessionArg = PracticeSession.create.mock.calls[0][0];
-      expect(sessionArg).toMatchObject({ userUid: 'user-1', date: TODAY, instrumentType: 'Guitar', durationMinutes: null });
+      // Epic 8: the session no longer carries a durationMinutes column.
+      expect(sessionArg).toMatchObject({ userUid: 'user-1', date: TODAY, instrumentType: 'Guitar' });
+      expect(sessionArg).not.toHaveProperty('durationMinutes');
 
       expect(SessionItem.create).toHaveBeenCalledTimes(1);
       const itemArg = SessionItem.create.mock.calls[0][0];
@@ -233,55 +235,11 @@ describe('songcontroller', () => {
       expect(res.status).toHaveBeenCalledWith(201);
     });
 
-    test('6.1 AC6 (session total): a new entry sets the session durationMinutes (heatmap + journal)', async () => {
-      Song.findByPk.mockResolvedValue(ownedSong({ durationSeconds: 240 })); // 4 min
-      const session = { uid: 'session-uid', instrumentType: 'Guitar', durationMinutes: null, update: jest.fn() };
-      PracticeSession.findOne.mockResolvedValue(session);
-      SessionItem.findOne.mockResolvedValue(null);
-      SessionItem.sum.mockResolvedValue(0); // no prior minutes on the session
-
-      await controller.markSongPlayed(markReq({ instrumentType: 'Guitar', playedOn: TODAY }), mockRes(), mockNext());
-
-      expect(session.update).toHaveBeenCalledTimes(1);
-      expect(session.update.mock.calls[0][0]).toMatchObject({ durationMinutes: 4 });
-    });
-
-    test('6.1 AC6 (session total): a second played song grows the session total (4 + 5 = 9)', async () => {
-      Song.findByPk.mockResolvedValue(ownedSong({ durationSeconds: 300 })); // +5 min
-      const session = { uid: 'session-uid', instrumentType: 'Guitar', durationMinutes: 4, update: jest.fn() };
-      PracticeSession.findOne.mockResolvedValue(session);
-      SessionItem.findOne.mockResolvedValue(null); // a different song → new entry
-      SessionItem.sum.mockResolvedValue(4); // the first song already contributed 4
-
-      await controller.markSongPlayed(markReq({ instrumentType: 'Guitar', playedOn: TODAY }), mockRes(), mockNext());
-
-      expect(session.update.mock.calls[0][0]).toMatchObject({ durationMinutes: 9 });
-    });
-
-    test('6.1 AC6 (override preserved): a manual session total is never clobbered', async () => {
-      Song.findByPk.mockResolvedValue(ownedSong({ durationSeconds: 240 })); // 4 min
-      // Manual override (60) that does NOT equal the entries' sum (10) → keep it
-      const session = { uid: 'session-uid', instrumentType: 'Guitar', durationMinutes: 60, update: jest.fn() };
-      PracticeSession.findOne.mockResolvedValue(session);
-      SessionItem.findOne.mockResolvedValue(null);
-      SessionItem.sum.mockResolvedValue(10);
-
-      await controller.markSongPlayed(markReq({ instrumentType: 'Guitar', playedOn: TODAY }), mockRes(), mockNext());
-
-      expect(session.update).not.toHaveBeenCalled();
-    });
-
-    test('6.1 AC6 (no duration): a no-duration mark leaves the session total untouched', async () => {
-      Song.findByPk.mockResolvedValue(ownedSong()); // no duration
-      const session = { uid: 'session-uid', instrumentType: 'Guitar', durationMinutes: null, update: jest.fn() };
-      PracticeSession.findOne.mockResolvedValue(session);
-      SessionItem.findOne.mockResolvedValue(null);
-      SessionItem.sum.mockResolvedValue(0);
-
-      await controller.markSongPlayed(markReq({ instrumentType: 'Guitar', playedOn: TODAY }), mockRes(), mockNext());
-
-      expect(session.update).not.toHaveBeenCalled(); // total stays null (no minutes)
-    });
+    // Epic 8 (story 8.3): the markSongPlayed → session.durationMinutes sync of
+    // 6.1 is removed — the session total now derives from the entries' minutes
+    // (heatmap sums SessionItem.minutes), so marking a song only creates/accrues
+    // the entry and never updates a session total. The entry-minute behaviours
+    // (pre-fill, rounding, accrual) below are unchanged.
 
     test('6.1 AC2 (rounding): a 3:30 song (210s) rounds to 4 minutes on the entry', async () => {
       Song.findByPk.mockResolvedValue(ownedSong({ durationSeconds: 210 })); // 3:30 → round(3.5) = 4
