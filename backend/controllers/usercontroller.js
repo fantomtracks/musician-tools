@@ -1,8 +1,9 @@
-const { User } = require('../models');
+const { User, Topic } = require('../models');
 const createError = require('http-errors');
 const logger = require('../logger');
 const jwt = require('jsonwebtoken');
 const { Op } = require('sequelize');
+const { FREE_PRACTICE_NAME } = require('../constants/topics');
 
 const createUser = async (req, res, next) => {
   const usermail = req.body.email || 'unknown';
@@ -17,6 +18,20 @@ const createUser = async (req, res, next) => {
     });
 
     logger.info('User registered successfully', { uid: newUser.uid });
+
+    // Story 8.2: seed the per-user system "Free practice" topic so a user can
+    // log unstructured time from day one. Best-effort: registration must never
+    // fail over this. NB: there is no read-path self-heal yet, so on the rare
+    // seed failure the user has no system topic until a future backfill runs —
+    // acceptable at beta scale; revisit if it proves flaky.
+    try {
+      await Topic.findOrCreate({
+        where: { userUid: newUser.uid, name: FREE_PRACTICE_NAME },
+        defaults: { isSystem: true, category: null },
+      });
+    } catch (seedErr) {
+      logger.error('Failed to seed Free practice topic', { uid: newUser.uid, error: seedErr.message });
+    }
 
     // Create session and JWT token after registration
     const token = jwt.sign(

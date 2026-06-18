@@ -3,11 +3,16 @@ export type Topic = {
   uid: string;
   name: string;
   category?: string | null;
+  // Story 8.2: true for the per-user "Free practice" topic. Read-only on the
+  // client (never part of CreateTopicDTO/UpdateTopicDTO) — the server owns it.
+  isSystem?: boolean;
   createdAt?: string;
   updatedAt?: string;
 };
 
-export type CreateTopicDTO = Omit<Topic, 'uid' | 'createdAt' | 'updatedAt'>;
+// isSystem is server-owned (read-only on the client), so it is excluded from
+// the write DTOs — the client never sends it.
+export type CreateTopicDTO = Omit<Topic, 'uid' | 'isSystem' | 'createdAt' | 'updatedAt'>;
 export type UpdateTopicDTO = Partial<CreateTopicDTO>;
 
 const API_BASE = '/api';

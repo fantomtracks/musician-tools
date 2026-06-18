@@ -81,6 +81,10 @@ const updateTopic = async (req, res, next) => {
     if (topic.userUid !== userId) {
       return next(createError(403, 'Forbidden'));
     }
+    // Story 8.2: the system "Free practice" topic cannot be renamed or edited.
+    if (topic.isSystem) {
+      return next(createError(403, 'Cannot edit the system topic'));
+    }
 
     const { name, category } = req.body;
 
@@ -137,6 +141,10 @@ const deleteTopic = async (req, res, next) => {
     }
     if (topic.userUid !== userId) {
       return next(createError(403, 'Forbidden'));
+    }
+    // Story 8.2: the system "Free practice" topic cannot be deleted.
+    if (topic.isSystem) {
+      return next(createError(403, 'Cannot delete the system topic'));
     }
 
     await topic.destroy();
