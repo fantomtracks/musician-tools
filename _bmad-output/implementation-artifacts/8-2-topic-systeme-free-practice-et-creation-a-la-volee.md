@@ -5,7 +5,7 @@ arch_decision: "Free practice = topic SEEDÉ en base (vraie ligne Topics par use
 
 # Story 8.2: Topic système « Free practice » épinglé + création de topic à la volée
 
-Status: review
+Status: done
 
 <!-- Note: Validation is optional. Run validate-create-story for quality check before dev-story. -->
 
