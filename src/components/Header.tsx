@@ -82,7 +82,9 @@ function Header() {
               <div className="w-8 h-8 rounded-lg bg-gradient-to-br from-brand-500 to-purple-600 flex items-center justify-center">
                 <span className="text-white font-bold text-lg">♪</span>
               </div>
-              <h1 className="text-xl font-bold text-gradient hidden sm:block">
+              {/* Keep the title visible down to ~360px (all common phones); only the
+                  very narrowest screens fall back to the ♪ icon alone */}
+              <h1 className="text-xl font-bold text-gradient hidden min-[360px]:block whitespace-nowrap">
                 Musician Tools
               </h1>
             </Link>
