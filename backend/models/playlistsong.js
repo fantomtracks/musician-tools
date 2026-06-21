@@ -41,7 +41,8 @@ module.exports = (sequelize, DataTypes) => {
     tableName: 'PlaylistSongs',
     timestamps: true,
     indexes: [
-      { fields: ['playlist_uid'], name: 'playlist_songs_playlist_uid' },
+      // No standalone playlist_uid index: the composite unique below covers playlist_uid
+      // lookups via its leading column (see migration 20260621000000).
       { fields: ['playlist_uid', 'song_uid'], name: 'playlist_songs_unique', unique: true }
     ]
   });
