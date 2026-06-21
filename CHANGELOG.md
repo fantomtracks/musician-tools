@@ -6,6 +6,17 @@ project adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+## [1.4.1] — 2026-06-21
+
+### Added
+- **A song's duration now fills in automatically when you auto-fill its metadata**
+  - Clicking "Auto-fill metadata & links" now also pulls the **duration** from SongBPM (alongside BPM, key and genres) and fills the Duration field
+  - A duration you've already entered is never overwritten
+
+### Fixed
+- **The album suggestions no longer hide behind the Languages field** when editing a song — the album dropdown now sits above it (and the Genres dropdown still sits above the album)
+- **A song with no artist no longer shows a stray leading dash** ("- Title") in your playlists and the playlist song picker — it now shows just the title
+
 ## [1.4.0] — 2026-06-18
 
 ### Added
