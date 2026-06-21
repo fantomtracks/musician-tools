@@ -88,9 +88,22 @@ development_status:
   6-1-duree-de-chanson-temps-de-session-auto: done
   epic-6-retrospective: optional    # jamais tenue ; leçon de cadrage 6.1 (double source de vérité) traitée dans la rétro Epic 8 (2026-06-21)
 
-  # Epic 7: Compte utilisateur (HORS PRD initial — bloqué : brief + design sécurité)
+  # Epic 7: Compte utilisateur + durcissement sécurité app-wide (HORS PRD ; cadré 2026-06-21 — brief + addendum + architecture + 12 stories)
+  # Ordre/dépendances : 7-1 -> 7-2 -> 7-3 ∥ 7-4 -> 7-5 -> 7-6 -> 7-7 -> 7-8 -> 7-9 (crée requireVerified) -> {7-10 ∥ 7-11} ; 7-12 indépendante (après 7-2)
   epic-7: backlog
-  7-1-editer-mon-profil: backlog
+  7-1-durcir-socle-auth-secret-jwt-trust-proxy: backlog
+  7-2-migration-users-identite-discord-backfill: backlog        # risque max : migration prod sans staging
+  7-3-csrf-token-sur-mutations: backlog                         # prérequis transverse des flux suivants
+  7-4-rate-limiting-endpoints-sensibles: backlog
+  7-5-audit-ownership-collapse-403-vers-404: backlog            # + garde req.body généralisée (repli deferred-work)
+  7-6-infra-email-resend-authtokens: backlog                    # prérequis des flux email 7-9/7-10/7-11
+  7-7-login-email-only-register-handle-anti-enumeration: backlog
+  7-8-page-profil-nom-et-mot-de-passe: backlog
+  7-9-verification-email-inscription-soft-gate: backlog         # crée requireVerified (consommé par 7-11)
+  7-10-reset-mot-de-passe-par-email: backlog
+  7-11-change-email-verify-before-switch: backlog               # dépend de requireVerified (7-9)
+  7-12-unicite-topic-insensible-casse: backlog                  # citext topics (repli deferred-work, gap AC10 de 8-2)
+  epic-7-retrospective: optional
 
   # Epic 8: Refonte temps de session — « tout est entrée » (Correct Course 2026-06-18 ; PRD amendé FR13/FR15/FR24 + FR25/FR26)
   epic-8: done
