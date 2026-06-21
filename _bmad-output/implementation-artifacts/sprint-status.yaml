@@ -100,9 +100,9 @@ development_status:
   epic-8-retrospective: done    # 2026-06-21 — epic-8-retro-2026-06-21.md ; leçons : cadrer en amont + ne pas cacher la dette sous le tapis
 
   # Epic 9: Robustesse / confort UI (post-rétro 2026-06-21 — soldé avant Epic 7 ; exécution légère)
-  epic-9: in-progress
+  epic-9: done
   9-1-nav-mobile-hamburger: done   # menu hamburger md:hidden, panneau déroulant, Échap, a11y ; tests Header
   9-2-filtres-songlist-clarifies-sans-instrument: done   # libellés « Song's instrument » / « My instrument » + filtre « No instrument » (sentinelle NO_INSTRUMENT)
   9-3-composant-partage-session-history-card: done   # SessionHistoryCard + SessionEntryLine partagés (MySessions + MyHeatmap) ; prérequis de 9-4
-  9-4-chanson-cliquable-historique-session: backlog      # dépend de 9-3
+  9-4-chanson-cliquable-historique-session: done      # libellé chanson cliquable -> édition (via state.editUid) ; bénéficie aussi à la heatmap
   epic-9-retrospective: optional

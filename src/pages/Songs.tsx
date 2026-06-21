@@ -1082,6 +1082,19 @@ function Songs() {
     setPage('form');
   };
 
+  // Open a song's edit form when navigated here from the session history (story 9.4).
+  // Waits for songs to load; clearing the history state guards against re-trigger.
+  useEffect(() => {
+    const editUid = location.state?.editUid;
+    if (!editUid || songs.length === 0) return;
+    const song = songs.find(s => s.uid === editUid);
+    if (song) openSongForEdit(song);
+    window.history.replaceState({}, document.title);
+    // openSongForEdit is recreated each render; the guard above already makes this run
+    // once per navigation, so it is intentionally omitted from the deps.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [location.state, songs]);
+
   // Live "this song already exists" detection. Single source of truth: it drives
   // both the form warning AND the submit guard, so the two can never disagree.
   // Gate on title only (findDuplicateSong's own requirement); matching still needs

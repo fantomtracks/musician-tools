@@ -1,13 +1,27 @@
 import type { ReactNode } from 'react';
+import { Link } from 'react-router-dom';
 import { sumSessionMinutes, type PracticeSession, type SessionItem } from '../services/practiceSessionService';
 
 // One entry line of a session ("Artist - Title · played during N minutes · note").
 // Shared so the Sessions page and the Heatmap day-detail render entries identically.
+// A song entry's title links to its edit form; topic entries (no songUid) stay plain text.
 export function SessionEntryLine({ item, artist }: { item: SessionItem; artist?: string }) {
   return (
     <li className="text-sm text-gray-700 dark:text-gray-300 pl-3 border-l-2 border-gray-200 dark:border-gray-700 break-words">
       {artist ? <span>{artist} - </span> : null}
-      <span className="font-medium">{item.label}</span>
+      <span className="font-medium">
+        {item.songUid ? (
+          <Link
+            to="/songs"
+            state={{ editUid: item.songUid }}
+            className="hover:text-brand-600 dark:hover:text-brand-400 hover:underline"
+          >
+            {item.label}
+          </Link>
+        ) : (
+          item.label
+        )}
+      </span>
       {item.minutes ? (
         <span className="text-gray-500 dark:text-gray-400"> · played during {item.minutes} {item.minutes > 1 ? 'minutes' : 'minute'}</span>
       ) : null}
