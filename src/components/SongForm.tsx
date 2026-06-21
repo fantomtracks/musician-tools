@@ -441,7 +441,9 @@ export function SongForm(props: SongFormProps) {
             </div>
             <div>
               <label htmlFor="song-album" className="block text-sm font-medium text-gray-700 dark:text-gray-100">Album</label>
-              <div className="relative">
+              {/* z-[25] keeps the album dropdown above the Languages block (z-20) below it, while
+                  staying below the Genres block (z-30) above it so the Genres dropdown still wins */}
+              <div className="relative z-[25]">
                 <input
                   id="song-album"
                   className="mt-1 block w-full rounded-md border border-gray-300 dark:border-gray-600 p-2 focus:outline-none focus:ring-2 focus:ring-brand-500 dark:bg-gray-700 dark:text-gray-100"
@@ -501,7 +503,7 @@ export function SongForm(props: SongFormProps) {
                   autoComplete="off"
                 />
                 {albumSearchOpen && suggestedAlbums.length > 0 && (
-                  <div className="absolute top-full left-0 right-0 mt-1 bg-white dark:bg-gray-700 border border-gray-300 dark:border-gray-600 rounded-md shadow-lg z-10 max-h-64 overflow-y-auto">
+                  <div className="absolute top-full left-0 right-0 mt-1 bg-white dark:bg-gray-700 border border-gray-300 dark:border-gray-600 rounded-md shadow-lg z-50 max-h-64 overflow-y-auto">
                     {suggestedAlbums
                       .filter(album => 
                         !form.album || album.toLowerCase().includes(form.album.toLowerCase())
