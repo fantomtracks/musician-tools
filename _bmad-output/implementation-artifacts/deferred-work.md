@@ -1,79 +1,92 @@
 # Deferred Work
 
-## Deferred from: code review of story-6.1 (2026-06-18)
+> **Rituel (acté rétro Epic 8, 2026-06-21)** : ce fichier passe en revue **avant le démarrage de chaque nouvelle epic**. Chaque item est tranché — _fix maintenant_ / _story planifiée_ / _gardé-avec-raison_ / _tué_. Il ne doit jamais redevenir un cimetière. Dernière passe : **2026-06-21**.
 
-- **Désync du total de session au plafond 1440** (`songcontroller.js`, sync `markSongPlayed`) : si la somme des minutes d'entrées d'une session dépasse 1440 (>24h en une session), `session.durationMinutes` n'est plus mis à jour (gardé `<= 1440`), et au mark suivant `totalIsAuto` devient false (total ≠ somme) → le sync se fige définitivement pour cette session. Limitation du modèle minutes (cap 1440 hérité du contrôleur session), pré-existante au flux manuel ; atteignable seulement avec des durées de morceaux absurdes. À reprendre si on lève un jour le cap 1440 ou si on stocke les durées de session en secondes.
-- **Détection « modifs non enregistrées » fragile** (`Songs.tsx`, garde Mark as Played) : `isDirty` compare `JSON.stringify(form)` à un snapshot. Un effet de `SongForm` (filtrage des techniques au montage) peut muter `form` après chargement → le dialogue « Save & mark as played » peut s'afficher alors qu'aucune modif utilisateur n'a eu lieu. Conséquence bénigne (la sauvegarde réécrit les mêmes valeurs), mais fix propre = comparaison normalisée champ-à-champ (réutiliser la normalisation de `saveSongEdits` pour baseline ET courant). À traiter avec le refacto auto-save si on le fait.
-- **Course lost-update sur marquages concurrents** (`markSongPlayed`) : deux marquages simultanés (multi-onglets/appareils) même jour/instrument lisent le même `priorTotal` avant d'écrire → le total final peut perdre une contribution. Même thème que la course find-or-create déjà déférée (review 4.1) ; couvrable par un advisory lock keyed user+date+instrument si l'échelle le justifie.
+---
 
-## Demandes produit (northwood) — 2026-06-17
+## 🔧 À traiter maintenant (fix immédiat)
 
-- **Chanson cliquable dans la prévisualisation de l'historique de session** : dans `MySessionsPage.tsx` (liste « Session history », ~ligne 818-833), chaque entrée affiche le label de la chanson en texte statique (`{item.label}`). northwood veut pouvoir **cliquer** sur la chanson pour l'ouvrir (édition de la chanson dans la Songlist, via `item.songUid`). À gérer : entrées orphelines (`songUid` null après suppression → pas de lien), et navigation inter-pages (Sessions → Songs form). Idée née pendant la story 6.1.
-- **Refacto : bloc « session + entrées » dupliqué** (repéré northwood, 2026-06-18) : le rendu d'une session avec son en-tête (date · instrument · durée) et sa liste d'entrées (`played during X minutes`) existe en **double** — `MySessionsPage.tsx` (~785-835) et `MyHeatmapPage.tsx` (~435-480). Toute évolution d'affichage doit être faite aux deux endroits (déjà vécu : point médian + libellé « played during »). Extraire un composant partagé (ex. `SessionHistoryCard` / `SessionEntryLine`) prenant `session` + helpers (artiste, formatLastPlayed, callbacks Edit/Delete). À cadrer : les deux pages ont des actions légèrement différentes (Heatmap a aussi les plays hors-session). Bon candidat avant d'ajouter la « chanson cliquable » (sinon à câbler 2×).
-- **Auto-save de la fiche chanson (à brainstormer)** : explorer une sauvegarde automatique au lieu du Save manuel — soit **au blur** (quand on quitte un champ), soit **en debounce ~3 s** après la dernière frappe. Rendrait la garde « modifs non enregistrées » du Mark as Played inutile (la fiche serait toujours à jour). À cadrer : feedback visuel (« Saved »), gestion des erreurs de validation/doublon en cours de frappe, coût réseau (1 PUT par champ), conflit avec le bouton Save explicite. À discuter en session brainstorm. Idée née pendant la story 6.1 (2026-06-18).
+_Vidé le 2026-06-21 : les 3 items (z-index Album/Languages, garde artiste `MyPlaylistsPage`, drop index redondant) traités dans la branche `fix/pre-epic7-quick-wins`. Cf. journal « Soldé » en bas._
 
-## Deferred from: code review of story-5.7 (2026-06-11)
+---
 
-- **Course concurrente add/remove playlist (lost update)** : `syncPlaylistSongs` fait `destroy`+`bulkCreate` sans `SELECT … FOR UPDATE` sur la playlist parente → 2 écritures concurrentes sur la même playlist = la dernière écrase. Risque quasi nul en mono-utilisateur ; à durcir (lock de ligne) si l'app devient multi-utilisateur/collaborative.
-- **`songcontroller.getSong` sans contrôle d'ownership** (trou pré-existant, `songcontroller.js:65-76`) : 5.7 ne le reproduit pas, mais GET /api/songs/:uid reste accessible sans vérif. À corriger un jour (aligner sur le pattern 401→404→403).
-- **Index `playlist_songs_playlist_uid` redondant** avec l'unique composite `(playlist_uid, song_uid)` : inoffensif, supprimable si on veut alléger.
-- **Note (résolu avant merge, pas une dette)** : la story 5.7 exige un `make migrate` local + vérif que la FK `PlaylistSongs.song_uid` a bien `ON DELETE CASCADE` sur une vraie base (piège sync-first, cf. leçon rétro épic 4 / story 4.2).
+## 📋 Stories à planifier
 
-## Deferred from: code review of story-5.6 (2026-06-11)
+### Songlist — filtres instrument
+- **Reformuler les deux libellés** (`SongsSidebar.tsx`) : « Filter by instrument » (l.143, instrument *du morceau*) vs « Filter by my instrument » (l.157, un de *mes* instruments) se ressemblent trop. Wording plus clair (ex. « Instrument du morceau » vs « Mon instrument »).
+- **Filtre « chansons sans instrument »** : option pour afficher les morceaux liés à **aucun** instrument (repérer les orphelins). Probablement via une valeur spéciale « None » côté `SongsSidebar.tsx` + logique de filtrage (liste d'instruments vide). À cadrer côté UX avec la reformulation ci-dessus.
 
-- **Édition de playlist ne nettoie pas les orphelins** (`MyPlaylistsPage.tsx:99-107`) : `handleEdit` recopie `songUids` verbatim → un UID orphelin survit à un Update (invisible, pas de case à cocher). Bénin (masqué en lecture, le strip backend reste le vrai GC), cohérent avec « migration différée ». À reprendre si on veut un self-heal côté édition.
-- **API playlist émet encore les orphelins hérités** (`playlistcontroller.js:13-42`) : `getAllPlaylists`/`getPlaylist` renvoient `songUids` brut ; seul l'UI filtre. AC3 résolu côté UX, pas côté donnée. Tout futur consommateur de l'API devra refiltrer — ou alors faire une migration de purge / un filtrage serveur.
-- **`deleteSong` : scan O(playlists) + N updates** (`songcontroller.js:205`) : négligeable à l'échelle actuelle ; envisager une requête JSON ciblée (`song_uids @> ...`) si le nombre de playlists explose.
+### Refacto `SessionHistoryCard` _(prérequis des deux suivantes)_
+- Le rendu d'une session + ses entrées (en-tête date · instrument · durée, liste « played during X minutes ») est **dupliqué** : `MySessionsPage.tsx` (~785-835) et `MyHeatmapPage.tsx` (~435-480). Toute évolution doit être faite aux deux endroits (déjà vécu). Extraire un composant partagé (`SessionHistoryCard` / `SessionEntryLine`) prenant `session` + helpers + callbacks. À cadrer : les deux pages ont des actions légèrement différentes (Heatmap a aussi les plays hors-session).
+- **Absorbe** : l'incohérence heatmap day-detail (`MyHeatmapPage.tsx:439-444` rend le titre seul, sans artiste, alors que l'historique est en « Artiste - Titre » depuis 5.5) — à unifier dans le composant partagé.
 
-## Deferred from: code review of story-5.5 (2026-06-11)
+### Chanson cliquable dans l'historique de session _(après `SessionHistoryCard`)_
+- Dans `MySessionsPage.tsx` (~818-833), chaque entrée affiche le label en texte statique (`{item.label}`). Le rendre **cliquable** pour ouvrir l'édition de la chanson (via `item.songUid`). Gérer : entrées orphelines (`songUid` null → pas de lien), navigation inter-pages (Sessions → Songs form).
 
-- **Heatmap day-detail incohérent avec l'historique** : `MyHeatmapPage.tsx:439-444` rend les mêmes `session.items` en titre seul (sans artiste, séparateur `—`). Après 5.5, l'historique de session est en « Artiste - Titre » mais la heatmap reste en « Titre ». Candidate à une story d'extension si « Artiste - Titre partout » doit couvrir la heatmap. *(Statut : décision en attente côté story 5.5 — voir Review Findings.)*
-- **Libellé « Frankenstein » chanson renommée** (`MySessionsPage.tsx:822-827`) : titre = snapshot FR4 figé, artiste = catalogue live → une chanson renommée affiche `ArtisteLive - AncienTitre`. Préexistant ; l'ordre artiste-d'abord le rend plus visible. À traiter seulement si l'on décide de snapshotter aussi l'artiste (gros changement modèle/FR4).
-- **`MyPlaylistsPage` non gardé sur artiste vide** (`MyPlaylistsPage.tsx:132,307-322`) : `${artist} - ${title}` sans garde → artiste `""` affiche un « - Titre » orphelin. Préexistant, hors périmètre 5.5. Aligner sur le pattern gardé de `formatSongLabel` si on touche les playlists.
+### Nav mobile responsive + hamburger _(NFR3)_
+- La nav du Header est `hidden md:flex` sans menu hamburger → sur mobile, **aucun** lien (Songs, Instruments, Playlists, Topics, Sessions, Heatmap). Cassée depuis l'épic 1, jamais réparée (la story 5.3 a réordonné le menu desktop mais pas la nav mobile). Story dédiée responsive + hamburger.
 
-## Note Correct Course (2026-06-10)
+### 🔐 Lot sécu → à fusionner dans le brief Epic 7
+> **Décision 2026-06-21** : ces dettes sécu sont le **périmètre du design sécurité qui bloque l'Epic 7** (compte utilisateur). À traiter dans le brief Epic 7, pas en story autonome.
+- **`getSong` sans contrôle d'ownership** (`songcontroller.js:65-76`) : GET /api/songs/:uid accessible sans vérif. Aligner sur 401→404→403.
+- **`markSongPlayed` stocke `instrumentUid` sans vérifier l'ownership** (pré-existant).
+- **403 vs 404 = oracle d'énumération** : un user authentifié distingue « existe mais pas à moi » de « n'existe pas » (pattern maison, instrument/topic/song identiques). Trancher app-wide : 404 partout ou `where: { uid, userUid }`.
+- **Posture CSRF** : routes mutantes sur cookie de session sans token CSRF ni vérif d'origine. Vérifier SameSite (express-session) + stratégie app-wide.
+- **Garde `req.body || {}` absente** des contrôleurs préexistants (topic/instrument/song…) : POST/PUT non-JSON → `req.body` undefined → 500 au lieu de 400. Corrigé dans practicesession (2.1), à généraliser. → **story planifiée : Epic 7, AC d'audit story 7.5** (2026-06-21).
+- **Unicité topic insensible casse/accents (gap AC10, 8-2)** : dédoublonnage garanti client seulement (`foldForSearch`) ; index `(user_uid, name)` sensible. Correctif = `citext`/`LOWER()` serveur — touche la feature topics entière. → **story planifiée : Epic 7, story 7.12** (2026-06-21).
 
-- **Nav mobile toujours cassée** : la story 5.3 a réordonné/renommé le menu desktop (« Songlist »), mais la nav reste `hidden md:flex` sans menu hamburger → sur mobile, toujours aucun lien (NFR3). Réordonner ≠ réparer. Dette inchangée, candidate à une story dédiée (nav responsive + hamburger).
+---
 
-## Deferred from: code review of 2-3-consulter-mon-historique-de-sessions (2026-06-07)
+## 💭 À brainstormer
 
-- Ordre de saisie des entrées de session : `bulkCreate` horodate tout le batch au même instant, donc le GET ne peut pas restituer l'ordre de saisie (tiebreak `uid` = déterministe mais arbitraire). Restituer fidèlement l'ordre nécessite une colonne `position` sur `SessionItems` — à considérer avec la story 2.4 (édition des entrées) si l'ordre devient éditable/important.
+- **Auto-save de la fiche chanson** : sauvegarde auto au blur ou en debounce ~3 s, au lieu du Save manuel. Rendrait la garde « modifs non enregistrées » du Mark as Played inutile. **Résout aussi** la détection `isDirty` fragile (`Songs.tsx` : `JSON.stringify(form)` vs snapshot, qu'un effet de `SongForm` peut fausser). À cadrer : feedback visuel (« Saved »), erreurs de validation/doublon en cours de frappe, coût réseau, conflit avec le bouton Save explicite.
 
-## Deferred from: code review of 2-1-creer-une-session-de-pratique (2026-06-07)
+---
 
-- Migrations create-table : le `down: dropTable` peut détruire une table créée par `sequelize.sync` (pas par le `up` gardé) — perte de données si un `db:migrate:undo` tournait en prod. Pattern identique sur toutes les migrations du projet ; le rollback n'est pas utilisé (release_command = migrate up only). À trancher si on introduit un jour des rollbacks.
-- Garde `req.body || {}` absente des contrôleurs préexistants (topiccontroller, instrumentcontroller, songcontroller…) : un POST/PUT avec Content-Type non-JSON laisse `req.body` undefined → destructuring → 500 au lieu de 400. Corrigé dans practicesessioncontroller (2.1) ; à généraliser.
+## 🧊 Gardés consciemment — report assumé (mono-utilisateur beta)
 
-## Deferred from: code review of 1-2-gerer-ma-bibliotheque-de-sujets (2026-06-07)
+> **Décision 2026-06-21** : reports assumés en bloc tant que l'app reste mono-user beta (3-4 users). À remonter en « story planifiée » si l'app devient multi-user/collaborative ou si l'un mord en réel.
 
-- 403 vs 404 sur PUT/DELETE = oracle d'énumération (un utilisateur authentifié peut distinguer « existe mais pas à moi » de « n'existe pas »). Pattern maison (instrumentcontroller identique, imposé par le spec). À trancher globalement : retourner 404 dans les deux cas ou requête `where: { uid, userUid }`.
-- Posture CSRF : toutes les routes mutantes (topics, instruments, playlists, songs) reposent sur le cookie de session sans token CSRF ni vérification d'origine visible. Vérifier la config SameSite du cookie (express-session) et décider d'une stratégie app-wide.
-- Pas de verrouillage optimiste : PUT sur une entité supprimée/modifiée concurremment répond 200 sans persister (UPDATE 0 rows silencieux). App-wide, course rare.
-- Édition inline : cliquer Edit sur une autre ligne jette les modifications non sauvées sans confirmation (pattern MyInstrumentsPage identique).
+**Concurrence / lost-update** (couvrables par advisory lock si l'échelle le justifie) :
+- Course `markSongPlayed` sur marquages concurrents même jour/instrument (`priorTotal` lu avant écriture).
+- Course find-or-create de session (double-clic multi-appareils).
+- Course add/remove playlist : `syncPlaylistSongs` fait `destroy`+`bulkCreate` sans `SELECT … FOR UPDATE` (`playlistcontroller`).
+- Anti-doublon d'entrée (AC4) et calcul de `position` via count non atomiques.
+- Pas de verrouillage optimiste : PUT sur entité modifiée concurremment → 200 sans persister (UPDATE 0 rows silencieux).
 
-## Contrat FR4 pour l'Epic 2 (issu de la story 1.2 — NE PAS PERDRE)
+**Performance scale-gated** :
+- `deleteSong` : scan O(playlists) + N updates (`songcontroller.js:205`). Envisager `song_uids @> …` si le nombre de playlists explose.
 
-- Les sujets (Topics) sont en **hard delete**. Pour que FR4 tienne (« la suppression d'un sujet ne troue jamais l'historique »), les entrées de session de l'Epic 2 (SessionItem) DOIVENT **snapshotter le nom du sujet** (champ dénormalisé `topicName`) en plus de la FK nullable — une session passée affiche toujours le nom même si le sujet est supprimé, et l'entrée reste reclassable (FR4). À intégrer dès la conception du modèle SessionItem (story 2.2).
+**Orphelins playlist (JSON, GC backend = source de vérité)** :
+- Édition de playlist ne nettoie pas les orphelins (`MyPlaylistsPage.tsx:99-107`, `handleEdit` recopie verbatim).
+- API `getAllPlaylists`/`getPlaylist` émettent les `songUids` bruts (`playlistcontroller.js:13-42`) ; seul l'UI filtre. Tout futur consommateur API devra refiltrer.
 
-## Deferred from: code review of 1-1-creer-un-sujet-de-travail (2026-06-07)
+**Modèle / affichage** :
+- Libellé « Frankenstein » d'une chanson renommée (`MySessionsPage.tsx:822-827`) : titre = snapshot FR4 figé, artiste = catalogue live. Fix = snapshotter aussi l'artiste (gros changement modèle/FR4).
+- Ordre de saisie des entrées non restitué : `bulkCreate` horodate tout le batch pareil ; restituer l'ordre nécessite une colonne `position` sur `SessionItems`.
+- `lastPlayed` global non mis à jour par les plays de journal : le « dernier joué par instrument » dérivé fait foi ; le global n'est qu'un départage de secours.
+- Éditer la DATE d'une session aplatit les plays mark-as-played à midi UTC (perte du départage intra-jour). Rare ; justesse au jour préservée.
+- Un mark-as-played qui réutilise une entrée existante crée un 2ᵉ SongPlay lié au même `sessionItemUid`. Défendable (deux lectures réelles).
+- Suppression d'une chanson → CASCADE SongPlays → la heatmap déjà chargée garde une case allumée « No practice » jusqu'au refetch. Rare, auto-guéri.
 
-- Session serveur expirée → page morte : `isAuthenticated` vient du localStorage (AuthContext), pas du cookie ; un 401 sur les fetchs affiche un bandeau d'erreur sans chemin de re-login. Pré-existant et transverse (Songs, Instruments, Playlists, Topics, Sessions, Heatmap). Piste : intercepter `res.status === 401` dans les services → redirect /login. **PRIORITÉ EN HAUSSE (2026-06-07)** : vécu en réel par northwood sur la heatmap (« Heatmap could not be loaded. » alors que c'était un simple 401 après un restart nodemon qui vide le MemoryStore) — 3ᵉ manifestation. Candidat sérieux pour une mini-story dédiée avant ou pendant l'Epic 4.
-- `loading` partagé entre chargement initial et create : la table disparaît pendant un POST lent. Pattern maison hérité de MyInstrumentsPage — à corriger globalement si on touche à ces pages.
-- Aucune navigation mobile : la nav du Header est `hidden md:flex` sans menu hamburger — sur mobile, aucun lien vers /songs, /my-instruments, /my-playlists, /my-topics. Pré-existant ; pertinent pour NFR3 de l'epic 2/3 (responsive complet).
+**Migrations / patterns** :
+- `down: dropTable` peut détruire une table créée par `sequelize.sync` — perte de données si un `db:migrate:undo` tournait en prod. Rollback non utilisé (release = migrate up only).
+- Édition inline (Songs/Instruments) : cliquer Edit sur une autre ligne jette les modifs non sauvées sans confirmation.
 
-## Deferred from: code review of 3-3-ma-grille-a-deja-une-histoire-retro-import (2026-06-07)
+---
 
-- Suppression d'une chanson → CASCADE sur ses SongPlays → la heatmap déjà chargée garde une case allumée (playCount > 0) dont le panneau dit « No practice » jusqu'au prochain refetch (changement d'année ou delete de session). Rare, auto-guéri au refresh. Piste si ça mord : bump de heatmapVersion à l'ouverture d'un panneau vide inattendu, ou refetch au focus de l'onglet.
+## ✅ Soldé / retiré le 2026-06-21 (journal — pas de suppression silencieuse)
 
-## Deferred from: code review of 4-1-mark-as-played-remplit-mon-journal (2026-06-08)
+**Quick wins pre-Epic 7 (branche `fix/pre-epic7-quick-wins`, 2026-06-21) :**
+- **Bug z-index Album → Languages** → **fixé** : conteneur album passé en `relative z-30` + dropdown en `z-50` (`SongForm.tsx`) ; il stacke désormais au-dessus du bloc Languages (`z-20`). Typecheck + tests verts.
+- **`MyPlaylistsPage` garde artiste vide** → **fixé** : helper local `formatSongLabel` (drop du « - » si artiste vide), appliqué aux 5 occurrences (titre, recherche, tri, rendu). Tests verts.
+- **Index `playlist_songs_playlist_uid` redondant** → **droppé** : migration `20260621000000-drop-redundant-playlist-songs-index` (idempotente, up/down testées localement) + retrait du modèle `playlistsong.js`. Couvert par l'unique composite `(playlist_uid, song_uid)`.
+- **Durée auto via scraper SongBPM** → **livré** : `fetchFromSongBpm` extrait `Duration` (parse `m:ss`/`h:mm:ss` → secondes), `durationSeconds` propagé via `fetchSongMetadata` → `songService.lookupMetadata` → `Songs.tsx handleAutoFill` (sans écraser une saisie, ajouté à `hasUsefulData`). Alimente le champ durée d'Epic 6 / story 8.1.
 
-- `song.lastPlayed` horodaté serveur + double-écriture front/back + incohérence sur un playedOn rétroactif → cohérence bidirectionnelle traitée en 4.2 (recalcul du dernier joué à la création/suppression/déplacement de session).
-- Course résiduelle find-or-create de session (double-clic multi-appareils) après sérialisation du marquage en masse : couvrable par un verrou applicatif (advisory lock keyed user+date+instrument) si l'échelle le justifie un jour.
-- `markSongPlayed` stocke `instrumentUid` sans vérifier l'ownership (incohérence pré-existante, identique avant 4.1).
-- Anti-doublon d'entrée (AC4) et calcul de `position` via count non atomiques sous concurrence ; pas de contrainte unique car une session peut légitimement contenir deux fois la même chanson (saisie manuelle) et il peut exister plusieurs sessions même jour/instrument.
 
-## Deferred from: code review of 4-2-mon-dernier-joue-ne-ment-jamais (2026-06-08)
-
-- Éditer la DATE d'une session aplatit les plays mark-as-played (heure réelle) à midi UTC sur la nouvelle date (perte du départage intra-jour). Rare ; justesse au jour préservée ; le départage global du tri rattrape. Piste si gênant : préserver l'heure d'origine en ne déplaçant que la partie date.
-- Un mark-as-played qui réutilise une entrée existante crée un 2e SongPlay lié au même sessionItemUid (plusieurs events par entrée). Défendable (deux lectures réelles) ; cosmétique dans l'historique des plays.
-- Les plays de journal ne mettent pas à jour Song.lastPlayed (global). Le « dernier joué par instrument » dérivé fait foi ; le global n'est qu'un départage de secours. À unifier si un jour Song.lastPlayed redevient autoritaire.
+- **Désync du total au plafond 1440** (sync `markSongPlayed → durationMinutes`) → **caduc** : Epic 8 (story 8-3) a supprimé cette sync. Le bug n'existe plus.
+- **`song.lastPlayed` cohérence bidirectionnelle** (review 4-1) → **résolu** en 4.2 (recalcul à la création/suppression/déplacement de session).
+- **Contrat FR4 — snapshot `topicName` sur SessionItem** → **tenu** depuis l'Epic 2 ; contrat honoré, plus une dette.
+- **2 edges migration 8-3** (INNER JOIN sur topic système ; idempotence par valeur) → **clos** : migration one-shot déjà jouée proprement en prod sur la vraie base ; instance morte.
+- **Note 5.7 (vérif FK CASCADE sur vraie base avant merge)** → était une exigence pré-merge, satisfaite ; pas une dette.
+- **Nav mobile (note Correct Course 2026-06-10)** → fusionnée avec la story « Nav mobile responsive + hamburger » ci-dessus (doublon retiré).

@@ -3,6 +3,12 @@ stepsCompleted: [1, 2, 3, 4]
 inputDocuments:
   - _bmad-output/planning-artifacts/prds/prd-musician-tools-2026-06-06/prd.md
   - _bmad-output/planning-artifacts/prds/prd-musician-tools-2026-06-06/addendum.md
+  - _bmad-output/planning-artifacts/briefs/brief-musician-tools-2026-06-21/brief.md
+  - _bmad-output/planning-artifacts/briefs/brief-musician-tools-2026-06-21/addendum.md
+  - _bmad-output/planning-artifacts/architecture.md
+epic7:
+  source: 'hors-PRD — brief + addendum + architecture (validé northwood 2026-06-21)'
+  stepsCompleted: [1, 2, 3, 4]
 ---
 
 # musician-tools - Epic Breakdown
@@ -91,6 +97,55 @@ FR21 (amendé 2026-06-10): Epic 4 + Epic 6 - Mark as Played pré-remplit / incr�
 FR25 (ajouté 2026-06-18): Epic 8 - Topic système « Free practice » épinglé pour le temps non structuré
 FR26 (ajouté 2026-06-18): Epic 8 - Création de topic à la volée dans le sélecteur d'entrée
 
+---
+
+### Epic 7 — Compte utilisateur (hors-PRD, ajouté 2026-06-21)
+
+_Source : brief + addendum (2026-06-21) + architecture (2026-06-21), validés northwood. Pas de PRD dédié (auth supposée préexistante dans le PRD initial). Numérotation **namespacée** (`FR-A*` Account, `NFR-S*` Security) pour marquer la frontière avec le PRD._
+
+**Exigences fonctionnelles — gestion de compte (`FR-A*`)**
+
+FR-A1 : Page Profil authentifiée (accès depuis le Header) permettant d'éditer nom d'affichage, email et mot de passe.
+FR-A2 : Changement d'email en *verify-before-switch* — l'email n'est jamais écrasé directement ; stockage `pendingEmail` + token `change_email` expirant (1 h), bascule `pendingEmail → email` au clic du lien ; le login reste sur l'ancien email jusqu'à confirmation.
+FR-A3 : Vérification d'email à l'inscription en **soft gate** — l'inscription connecte directement, bandeau persistant « vérifie ton email », actions sensibles (change-email, futur partage) bloquées tant que non vérifié ; endpoint « renvoyer le lien » (rate-limité). Token `verify_email` expirant (24 h).
+FR-A4 : Reset de mot de passe par email (« mot de passe oublié ») — pages forgot/reset, token `password_reset` expirant (1 h), usage unique.
+FR-A5 : Login **email-only** — l'email est le seul identifiant de connexion (retrait du `Op.or` name/email dans `loginUser`) ; le handle n'est pas un identifiant.
+FR-A6 : Identité Discord-style — `name` non-unique + `discriminator #NNNN` (`0001`–`9999`, STRING zero-paddée) → handle unique et partageable `name#NNNN`. Attribution d'un discriminant libre à l'inscription (retry sur collision), **jamais de refus de nom** (sauf épuisement des 9999) ; stable au rename si `(nouveau_nom, disc)` libre, sinon réattribué.
+FR-A7 : Infra email transactionnel (Resend, via `emailService` unique) — socle commun des trois flux email (verify-signup, password-reset, change-email).
+FR-A8 : Au register sur un email déjà existant — réponse générique (jamais « email déjà pris ») + **notification au vrai propriétaire** de la tentative (via `emailService`).
+
+**Exigences non-fonctionnelles — sécurité (le bloqueur de l'épic, `NFR-S*` = les 4 menaces)**
+
+NFR-S1 (① Account takeover) : mot de passe ≥ 10 caractères (validé serveur + miroir front, setter bcryptjs) ; mot de passe actuel exigé et vérifié (`validPassword`) au change-mdp ; **invalidation des autres sessions** au change-mdp (suppression des lignes `session` du user sauf `req.sessionID`) ; **rate-limiting** (`express-rate-limit ^8`, `trust proxy`) sur login (10/15 min/IP), forgot-password (5/h/IP), envoi d'email (5/h/compte).
+NFR-S2 (② IDOR / ownership) : audit systématique de toutes les routes vs le pattern ownership canonique ; correction de `getSong` (aucun ownership → requête scopée `where:{uid,userUid}`) et validation de l'appartenance d'`instrumentUid` dans `markSongPlayed`.
+NFR-S3 (③ CSRF) : synchronizer token en session (`X-CSRF-Token`, endpoint `GET /api/csrf-token`) vérifié sur **toutes les routes non-GET** ; `logout` GET→POST (audit : aucune autre mutation en GET) ; retrait total du JWT vestigial ; secret(s) **fail-fast au boot** (`SESSION_SECRET`, `RESEND_API_KEY` obligatoires sinon `process.exit(1)`, fin du fallback `'MUSICIAN_SECRET'`).
+NFR-S4 (④ Énumération de comptes) : collapse **403→404 partout** (« pas à toi » indistinguable de « n'existe pas ») ; réponses email génériques identiques (`CHECK_YOUR_INBOX`) quel que soit l'existence du compte ; nom jamais refusé (désambiguïsation par discriminant) ; email en `citext` normalisé (lowercase/trim), unique insensible à la casse.
+
+**Exigences additionnelles / contraintes (architecture + project-context)**
+
+- Brownfield, prod sans staging : **pas de story d'init** ; toute migration `Users`/`AuthTokens` idempotente et testée localement avant merge (`main` = déploiement prod auto).
+- Nouvelles tables/colonnes : `Users` += `discriminator`/`emailVerified`/`pendingEmail`, drop `unique(name)`, index unique `(name, discriminator)`, email `citext` ; table `AuthTokens` (`type` ENUM `verify_email|password_reset|change_email`, `tokenHash` sha256, `payload`, `expiresAt`, `usedAt`) — pattern `Songs` (camelCase JS + `field:'snake_case'`).
+- Backfill beta (grandfathering) : discriminant aléatoire libre par nom, email lowercase, `emailVerified=true`, `pendingEmail=null` — migration rejouable.
+- Briques transverses **réutilisables obligatoires** : `emailService`, middleware `csrf`/`ratelimiters`/`requireverified`, helper d'invalidation de session, helper CSRF front (`apiFetch`), constante `CHECK_YOUR_INBOX` — jamais réimplémentées localement.
+- Nouvelles variables d'env (à provisionner Fly) : `SESSION_SECRET`, `RESEND_API_KEY`, `EMAIL_FROM`, `APP_BASE_URL`.
+- Backend CommonJS strict, pattern contrôleur ownership canonique, réponses JSON brutes, double suite Jest, langue anglaise — les 46 règles de `project-context.md` s'appliquent telles quelles.
+
+**FR Coverage Map — Epic 7 (toutes les exigences → Epic 7, story pressentie entre parenthèses)**
+
+FR-A1 : Epic 7 (7.8) - Page Profil : nom d'affichage + change-mdp
+FR-A2 : Epic 7 (7.11) - Change-email verify-before-switch
+FR-A3 : Epic 7 (7.9) - Vérif inscription + soft gate
+FR-A4 : Epic 7 (7.10) - Reset mot de passe par email
+FR-A5 : Epic 7 (7.7) - Login email-only
+FR-A6 : Epic 7 (7.2 migration, 7.7 register) - Identité Discord-style name#NNNN
+FR-A7 : Epic 7 (7.6) - Infra email Resend + AuthTokens
+FR-A8 : Epic 7 (7.7) - Notification du vrai propriétaire au register sur email existant
+NFR-S1 : Epic 7 (7.4 rate-limit, 7.8 mdp actuel + invalidation sessions) - Account takeover
+NFR-S2 : Epic 7 (7.5) - IDOR/ownership : audit + getSong + markSongPlayed
+NFR-S3 : Epic 7 (7.1 secret/JWT, 7.3 CSRF) - CSRF + hygiène secrets
+NFR-S4 : Epic 7 (7.2 citext, 7.5 collapse 403→404, 7.7 réponses génériques) - Énumération
+Durcissements repliés du deferred-work (2026-06-21) : garde `req.body` généralisée → Epic 7 (7.5) ; unicité topic citext serveur (gap AC10 de 8-2) → Epic 7 (7.12)
+
 ## Epic List
 
 ### Epic 1: Ma bibliothèque de sujets de travail
@@ -116,11 +171,11 @@ Petites stories de robustesse et de confort nées des rétros et du terrain (pas
 Je renseigne une durée sur mes chansons et le « Mark as Played » remplit automatiquement le temps de ma session.
 **FRs covered:** FR24, FR21 (amendé)
 
-### Epic 7: Compte utilisateur (HORS PRD initial)
-J'édite mon profil (name, email, mot de passe). **Hors scope du PRD musician-tools** — nécessite un product-brief + design sécurité avant dev (bloqué).
-**FRs covered:** — (à cadrer)
+### Epic 7: Compte utilisateur + durcissement sécurité app-wide
+Je gère mon compte en autonomie (page Profil : nom d'affichage, email, mot de passe ; reset par email ; vérification d'email à l'inscription) sous une identité partageable `name#NNNN` — le tout posé sur une base d'auth durcie contre les 4 menaces (account takeover, IDOR, CSRF, énumération de comptes). _Cadré 2026-06-21 (brief + addendum + architecture) ; débloque le stub « HORS PRD » du 2026-06-10._
+**FRs covered:** FR-A1, FR-A2, FR-A3, FR-A4, FR-A5, FR-A6, FR-A7, FR-A8 — **NFRs:** NFR-S1, NFR-S2, NFR-S3, NFR-S4
 
-**Dépendances :** E1 → E2 → (E3 ∥ E4). Les epics 3 et 4 sont indépendants l'un de l'autre. E6 dépend d'E4 (pont Mark as Played). E5 et E7 sont transverses. Les NFR1-NFR6 transverses s'appliquent aux critères d'acceptation des stories concernées.
+**Dépendances :** E1 → E2 → (E3 ∥ E4). Les epics 3 et 4 sont indépendants l'un de l'autre. E6 dépend d'E4 (pont Mark as Played). E5 est transverse ; E7 (compte + sécurité, hors-PRD) est autonome — ne dépend d'aucun épic PRD et n'en bloque aucun. Les NFR1-NFR6 transverses s'appliquent aux critères d'acceptation des stories concernées.
 
 ## Epic 1: Ma bibliothèque de sujets de travail
 
@@ -489,25 +544,311 @@ So that mon journal reflète mon temps de pratique sans saisie manuelle.
 
 ---
 
-## Epic 7: Compte utilisateur (HORS PRD initial)
+## Epic 7: Compte utilisateur + durcissement sécurité app-wide
 
-_Ajouté 2026-06-10 (Correct Course). **Hors scope du PRD musician-tools** (auth supposée préexistante). **Bloqué** : product-brief + design sécurité requis avant dev (Major, PM/Architect)._
+_Cadré 2026-06-21 (brief + addendum + architecture, validés northwood) — débloque le stub « HORS PRD » du 2026-06-10. **Hors scope du PRD musician-tools** (auth supposée préexistante)._
 
-### Story 7.1: Éditer mon profil (name, email, mot de passe)
+Je gère mon compte en autonomie (page Profil : nom d'affichage, email, mot de passe ; reset par email ; vérification d'email à l'inscription) sous une identité partageable `name#NNNN` — le tout posé sur une base d'auth durcie contre les 4 menaces (account takeover, IDOR, CSRF, énumération de comptes).
+
+**FRs covered:** FR-A1, FR-A2, FR-A3, FR-A4, FR-A5, FR-A6, FR-A7, FR-A8 — **NFRs:** NFR-S1, NFR-S2, NFR-S3, NFR-S4
+
+**Séquence & dépendances (ordre d'implémentation, sans dépendance avant) :** 7.1 (socle) → 7.2 (migration identité) → 7.3 (CSRF) ∥ 7.4 (rate-limit) → 7.5 (ownership/404) → 7.6 (email + AuthTokens) → 7.7 (login/register/handle) → 7.8 (Profil) → 7.9 (verify + soft gate, **crée `requireVerified`**) → {7.10 reset ∥ 7.11 change-email}. Les flux email (7.9–7.11) dépendent de 7.6 ; 7.11 (change-email) consomme le `requireVerified` créé en 7.9 ; toute mutation des stories suivantes passe le CSRF de 7.3. Risque maximal sur 7.2 (migration prod sans staging) → testée localement avant merge. **7.12 (citext topics, repliée du deferred-work)** est indépendante — jouable à tout moment après 7.2.
+
+### Story 7.1: Durcir le socle d'auth (secret fail-fast, retrait du JWT, trust proxy)
+
+As a mainteneur du produit,
+I want que l'app refuse de démarrer sans ses secrets et n'émette plus de JWT mort,
+So that la base d'auth est saine avant d'exposer la moindre route de compte.
+
+**Acceptance Criteria:**
+
+**Given** le démarrage du serveur
+**When** `SESSION_SECRET` est absent de l'environnement
+**Then** le process échoue immédiatement (`process.exit(1)`) avec un log explicite
+**And** plus aucun fallback `'musician-secret'` / `'MUSICIAN_SECRET'` n'existe dans le code
+
+**Given** le cycle login / register
+**When** un utilisateur s'authentifie
+**Then** aucun JWT n'est signé, renvoyé ni stocké en session (`jwt.sign` et le champ `token` retirés)
+**And** `authsess` ne s'appuie que sur `req.session.loggedIn` ; la dépendance `jsonwebtoken` devient retirable
+
+**Given** le déploiement derrière le proxy Fly.io
+**When** l'app démarre
+**Then** `app.set('trust proxy', 1)` est posé (prérequis du rate-limiting par IP réelle — story 7.4)
+
+**Given** la suite de tests backend
+**Then** un test couvre le fail-fast (secret absent → exit non-zéro) et l'absence de tout JWT dans la réponse de login
+
+### Story 7.2: Migrer le modèle Users vers l'identité Discord-style (+ backfill beta)
+
+As a produit,
+I want le modèle Users migré vers `name#discriminator` et l'email casse-insensible,
+So that le handle et les flux de compte reposent sur un schéma sain, en prod, sans casse de données.
+
+**Acceptance Criteria:**
+
+**Given** la migration `alter-users-identity` (idempotente, gardes `describeTable`)
+**When** elle s'exécute
+**Then** `CREATE EXTENSION IF NOT EXISTS citext` ; `email` passé en `citext` ; ajout `discriminator` (STRING), `emailVerified` (BOOLEAN default false), `pendingEmail` (STRING null)
+**And** la contrainte `unique(name)` est retirée et un index **unique `(name, discriminator)`** est créé (collation cohérente avec l'email)
+
+**Given** la migration `backfill-users-beta` (idempotente, rejouable)
+**When** elle s'exécute sur la base beta
+**Then** chaque user existant reçoit un `discriminator` libre pour son nom (`0001`–`9999`, zero-paddé STRING), son `email` est normalisé (lowercase/trim), `emailVerified=true` (grandfathering), `pendingEmail=null`
+
+**Given** le modèle `user.js`
+**Then** `name` n'est plus `unique` ; les nouveaux champs sont déclarés en camelCase JS + `field:'snake_case'` (`email_verified`, `pending_email`) ; `discriminator` stocké en STRING 4 chiffres
+
+**Given** deux comptes portant le même nom d'affichage
+**Then** l'index `(name, discriminator)` garantit l'unicité du handle, et `loginUser` n'a plus besoin d'`iLike` (citext)
+
+**Given** une ré-exécution des migrations (double filet release_command + `sync`)
+**Then** aucune erreur ; testé localement (`make migrate`) avant merge (`main` = prod)
+
+### Story 7.3: Protéger toutes les mutations par un token CSRF
+
+As a utilisateur authentifié,
+I want que toute requête mutante exige un token CSRF valide,
+So that une page tierce ne peut pas agir en mon nom (défense en profondeur par-dessus SameSite=Lax).
+
+**Acceptance Criteria:**
+
+**Given** une session
+**When** le front appelle `GET /api/csrf-token`
+**Then** le serveur renvoie `{ csrfToken }` (synchronizer token par session, stocké côté session Postgres)
+
+**Given** une requête non-GET (POST/PUT/PATCH/DELETE)
+**When** l'en-tête `X-CSRF-Token` est absent ou invalide
+**Then** la requête est rejetée avec un statut **normalisé** (pas de détail révélateur)
+
+**Given** le front (`src/services/apiFetch.ts`)
+**Then** le helper lit le token et l'injecte en `X-CSRF-Token` sur **toutes** les mutations, de façon centralisée (un seul point pour tous les services)
+
+**Given** les POST pré-auth (login, register, forgot-password)
+**When** ils s'exécutent
+**Then** le front récupère d'abord le token via `GET /api/csrf-token` ; le middleware couvre aussi ces routes (intégration pré-auth explicitée)
+
+**Given** les routes GET
+**Then** elles ne sont pas soumises au check CSRF
+
+**And** tests : middleware rejette une mutation sans token (back) ; `apiFetch` injecte l'en-tête (front)
+
+### Story 7.4: Plafonner les endpoints sensibles (rate-limiting)
+
+As a mainteneur,
+I want plafonner login, reset et envois d'email,
+So that le brute-force et l'abus d'email transactionnel sont contenus.
+
+**Acceptance Criteria:**
+
+**Given** `express-rate-limit ^8` et `trust proxy` (story 7.1), middleware `ratelimiters.js`
+**Then** les limiteurs nommés et réutilisables sont montés : `/login` **10 / 15 min / IP** ; forgot-password **5 / h / IP** ; envoi d'email (resend-verification, change-email) **5 / h / compte**
+
+**Given** un dépassement de seuil
+**When** une requête arrive au-delà du plafond
+**Then** réponse **429 générique** sans détail
+
+**Given** la limite consciente (store en mémoire, par instance, reset au deploy)
+**Then** elle est documentée comme acceptable beta (store persistant = futur)
+
+**And** test : un appel au-delà du seuil renvoie 429
+
+### Story 7.5: Auditer l'ownership et normaliser 403→404 (fix getSong & markSongPlayed)
 
 As a utilisateur,
-I want pouvoir modifier mon nom, mon email et mon mot de passe,
-So that je garde mon compte à jour sans support.
+I want que jamais une réponse ne révèle l'existence d'une donnée qui n'est pas à moi,
+So that il n'y a ni IDOR ni oracle d'énumération par code de statut.
 
-**Acceptance Criteria (esquisse — à raffiner au cadrage) :**
+**Acceptance Criteria:**
 
-**Given** une page Profil accessible depuis le Header (authentifié)
-**When** je modifie name / email
-**Then** c'est persisté, avec unicité vérifiée hors soi-même (400 explicite sinon)
+**Given** `getSong` (GET /api/songs/:uid), aujourd'hui sans contrôle d'ownership
+**When** l'`uid` n'appartient pas au user courant
+**Then** requête scopée `where:{ uid, userUid }` → **404** (plus aucune donnée d'autrui renvoyée, IDOR fermé)
+
+**Given** `markSongPlayed`
+**When** un `instrumentUid` est fourni
+**Then** son appartenance au user est validée ; sinon **404**
+
+**Given** l'audit systématique de toutes les routes vs le pattern ownership canonique
+**Then** tout échec d'ownership renvoie **404, jamais 403** ; aucune nouvelle route ne renvoie 403 pour de l'ownership (« pas à toi » indistinguable de « n'existe pas »)
+
+**Given** les contrôleurs préexistants (topic / instrument / song…) sans garde de corps de requête
+**When** un POST/PUT arrive sans corps JSON
+**Then** la garde `req.body || {}` est **généralisée** (pattern déjà posé en story 2.1 practicesession) → **400** explicite au lieu d'un 500 (deferred-work 2026-06-21)
+
+**And** tests : `getSong` d'un autre user → 404 ; `markSongPlayed` avec `instrumentUid` étranger → 404 ; POST sans corps JSON → 400 (pas 500)
+
+### Story 7.6: Monter l'infra email transactionnel (Resend) + table AuthTokens
+
+As a produit,
+I want une brique d'envoi d'email et une table de tokens à usage unique,
+So that les trois flux email (verify-signup, password-reset, change-email) reposent sur un socle sûr et partagé.
+
+**Acceptance Criteria:**
+
+**Given** `backend/services/emailService.js`
+**Then** c'est le **seul** point d'envoi (wrapper Resend), configuré par `RESEND_API_KEY` / `EMAIL_FROM` / `APP_BASE_URL` (obligatoires au boot — fail-fast comme 7.1)
+
+**Given** la migration `create-auth-tokens` (idempotente) et le modèle `authtoken.js`
+**Then** table `AuthTokens` : `uid` (PK UUID), `userUid` (FK → `user_uid`), `type` ENUM **`verify_email | password_reset | change_email`**, `tokenHash` (sha256 hex), `payload`, `expiresAt`, `usedAt` ; pattern `Songs` (camelCase JS + `field:'snake_case'`), auto-chargé par `models/index.js`
+
+**Given** l'émission d'un token
+**Then** token opaque `crypto.randomBytes(32).toString('base64url')` envoyé **en clair par email**, **stocké hashé** (sha256, jamais en clair), **usage unique** (`usedAt`) et expirant : `verify_email` **24 h**, `password_reset` **1 h**, `change_email` **1 h**
+
+**Given** `backend/constants/messages.js`
+**Then** source unique des messages anti-énumération (`CHECK_YOUR_INBOX`, etc.), réutilisée par tous les flux
+
+**And** tests : émission + vérification d'un token (hash match, usage unique respecté, expiration respectée)
+
+### Story 7.7: Login email-only, register handle, et anti-énumération à l'inscription
+
+As a utilisateur,
+I want me connecter par email seul et m'inscrire sans jamais voir mon nom refusé ni révéler un email,
+So that l'identité est un handle social et l'inscription ne fuit aucune existence de compte.
+
+**Acceptance Criteria:**
+
+**Given** `loginUser`
+**When** je me connecte
+**Then** l'**email est le seul identifiant** (retrait du `Op.or` name/email) ; comparaison via `citext` (plus d'`iLike`)
+
+**Given** le register avec un nom déjà porté par un autre compte
+**When** je m'inscris
+**Then** un `discriminator` libre m'est attribué (random `0001`–`9999`, retry sur collision), handle `name#NNNN` formé ; **jamais de réponse « name taken »**
+
+**Given** un register sur un email **déjà existant**
+**When** je soumets
+**Then** réponse **générique** (jamais « email déjà pris ») **et** notification au vrai propriétaire via `emailService` (tentative d'inscription) — FR-A8 ; l'oracle explicite « email déjà pris » disparaît
+**And** une inscription sur un email **neuf** connecte directement (flux actuel préservé, `emailVerified=false` — le soft gate arrive en story 7.9) ; le différentiel d'auto-login (neuf vs existant) est un **résidu conscient** assumé à l'échelle beta, bien plus faible que le message explicite supprimé
+
+**Given** l'épuisement des 9999 discriminants d'un nom (hors d'atteinte beta)
+**Then** seul cas de refus : « ce nom est plein »
+
+**Given** le mot de passe à l'inscription et au login
+**Then** validation **≥ 10 caractères** côté serveur (miroir front), setter bcryptjs (jamais de hash manuel)
+
+**And** tests : login par email OK / par nom KO ; deux users même nom → handles distincts ; register email existant → réponse générique + email au propriétaire
+
+### Story 7.8: Page Profil — éditer nom d'affichage et mot de passe en sécurité
+
+As a utilisateur,
+I want une page Profil pour changer mon nom d'affichage et mon mot de passe,
+So that je gère mon compte en autonomie, sans support.
+
+**Acceptance Criteria:**
+
+**Given** la page Profil (route authentifiée, accès depuis le Header), `profileService.ts` (fetch brut, `credentials:'include'`, `X-CSRF-Token` via `apiFetch`)
+**Then** elle présente les sections nom d'affichage / email / mot de passe ; routes `account.js` montées `authsess` + CSRF
+
+**Given** un changement de nom d'affichage
+**When** je le soumets
+**Then** le `discriminator` courant est conservé si `(nouveau_nom, disc)` est libre, sinon réattribué un libre ; jamais de refus (sauf épuisement) ; le handle et `AuthContext` (`handle`) sont rafraîchis
 
 **Given** un changement de mot de passe
 **When** je le soumets
-**Then** le mot de passe actuel est exigé et vérifié (`validPassword`), le nouveau est confirmé, le hachage passe par le setter bcryptjs, et la réponse ne renvoie jamais le hash
+**Then** le **mot de passe actuel est exigé et vérifié** (`validPassword`, via `scope(null)` pour accéder au hash), le nouveau est **≥ 10 caractères** et confirmé, le hash passe par le setter bcryptjs, et la réponse ne renvoie **jamais** le hash
+
+**Given** un changement de mot de passe réussi
+**Then** les **autres sessions du user sont invalidées** (helper unique : suppression des lignes `session` du user sauf `req.sessionID`), la session courante reste active (rate-limit change-password appliqué)
+
+**And** tests : change-mdp sans mdp actuel → rejet ; mauvais mdp actuel → rejet ; succès → autres sessions invalidées, courante conservée, hash absent de la réponse
+
+### Story 7.9: Vérification d'email à l'inscription + soft gate
+
+As a utilisateur,
+I want vérifier mon email après inscription sans être bloqué dans l'usage courant,
+So that mon compte est confirmé tout en restant utilisable immédiatement.
+
+**Acceptance Criteria:**
+
+**Given** un register réussi (story 7.7)
+**Then** un token `verify_email` (24 h) est envoyé via `emailService` ; l'utilisateur est connecté directement (soft gate, flux préservé) avec `emailVerified=false`
+
+**Given** un user non vérifié
+**Then** un **bandeau persistant** `VerifyEmailBanner` (lit `emailVerified` depuis `AuthContext`) affiche « vérifie ton email » + un bouton **« renvoyer le lien »** (rate-limité **5 / h / compte**)
+
+**Given** le clic sur un lien de vérification valide (`VerifyEmailPage`, partagée avec la confirmation change-email)
+**Then** `emailVerified=true`, token marqué `usedAt`, le bandeau disparaît
+
+**Given** une **action sensible** (change-email story 7.11, futur partage de songlist) tentée par un user non vérifié
+**Then** le middleware `requireVerified` (créé par cette story) la bloque (statut normalisé) ; le **reste de l'app reste accessible** non vérifié
+
+**Given** un token de vérification expiré
+**When** je clique « renvoyer le lien »
+**Then** un nouveau token `verify_email` est généré et envoyé
+
+**And** tests : register → `emailVerified=false` + token créé ; clic valide → `true` ; `requireVerified` bloque une route sensible si non vérifié
+
+### Story 7.10: Réinitialiser un mot de passe oublié par email
+
+As a utilisateur qui a oublié son mot de passe,
+I want le réinitialiser par email,
+So that je récupère l'accès seul, sans support.
+
+**Acceptance Criteria:**
+
+**Given** la page `ForgotPasswordPage` (pré-auth, via `apiFetch`/CSRF)
+**When** je soumets un email
+**Then** la réponse est **toujours** générique (`CHECK_YOUR_INBOX`) quel que soit l'existence du compte ; si l'email existe, un token `password_reset` (1 h, usage unique) est envoyé (rate-limit **5 / h / IP**)
+
+**Given** la page `ResetPasswordPage` (lien email) avec un token valide
+**When** je soumets un nouveau mot de passe (≥ 10, confirmé)
+**Then** le mot de passe est changé (setter bcryptjs), token marqué `usedAt`, et les **autres sessions sont invalidées** (helper unique)
+
+**Given** un token expiré, réutilisé ou invalide
+**Then** rejet générique
+
+**And** tests : forgot sur email inexistant → 200 générique sans envoi ; reset token valide → mdp changé + sessions invalidées ; token réutilisé → rejet
+
+### Story 7.11: Changer d'email en verify-before-switch
+
+As a utilisateur vérifié,
+I want changer mon email avec confirmation par lien sur la nouvelle adresse,
+So that personne ne détourne mon compte via un email non possédé.
+
+**Acceptance Criteria:**
+
+**Given** un user **vérifié** (middleware `requireVerified` issu de la story 7.9, soft gate)
+**When** je demande un changement d'email
+**Then** `pendingEmail` est stocké (l'`email` n'est **jamais** écrasé directement) et un token `change_email` (1 h, usage unique) est envoyé à la **nouvelle** adresse via `emailService`
+
+**Given** le clic sur un lien valide (`VerifyEmailPage`, partagée avec la vérification d'inscription)
+**Then** bascule `pendingEmail → email`, `pendingEmail=null`, token marqué `usedAt`
+
+**Given** une nouvelle adresse déjà prise ou inexistante
+**Then** réponse **générique** (anti-énumération), jamais « email déjà pris »
+
+**Given** la transition (avant confirmation)
+**Then** le login reste sur l'**ancien** email tant que le nouveau n'est pas confirmé
+
+**Given** un token expiré ou déjà utilisé
+**Then** rejet générique ; routes montées `authsess` + CSRF + `requireVerified` + rate-limit email
+
+**And** tests : demande → `pendingEmail` posé + email envoyé, `email` inchangé ; clic valide → bascule ; token réutilisé → rejet
+
+### Story 7.12: Unicité de topic insensible à la casse/accents (côté serveur)
+
+As a utilisateur,
+I want que mes topics ne se dédoublonnent pas selon la casse ou les accents,
+So that « Pentatonique » et « pentatonique » ne créent jamais deux topics distincts.
+
+**Acceptance Criteria:**
+
+**Given** le dédoublonnage actuel garanti **côté client seulement** (`foldForSearch`) et l'index `(user_uid, name)` sensible à la casse (gap AC10 de la story 8-2, deferred-work 2026-06-21)
+**When** deux topics ne diffèrent que par la casse ou les accents
+**Then** une contrainte **serveur** les empêche : `name` en `citext` (ou comparaison `LOWER()`), index unique `(user_uid, name)` insensible à la casse, collation cohérente avec l'email (story 7.2)
+
+**Given** la migration (idempotente, testée localement avant merge — `main` = prod)
+**When** elle s'exécute sur la base beta
+**Then** `name` est converti et les éventuels doublons existants sont normalisés/résolus (dédoublonnage one-shot documenté avant ajout de la contrainte unique)
+
+**Given** le contrôleur topic (création / rename)
+**When** un nom en collision casse-insensible est soumis
+**Then** il s'appuie sur la contrainte serveur, avec une réponse d'erreur **normalisée** (pas d'oracle d'énumération — cohérent NFR-S4)
+
+**And** tests : créer « Pentatonique » puis « pentatonique » → refus/normalisé ; rename en collision → refus
+
+_Indépendant des autres stories Epic 7 (feature topics isolée) ; risque = migration prod. Jouable à tout moment après 7.2 (collation citext partagée)._
 
 ---
 
