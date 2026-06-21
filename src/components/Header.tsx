@@ -70,7 +70,7 @@ function Header() {
               <button
                 type="button"
                 onClick={() => setMobileMenuOpen(open => !open)}
-                className="md:hidden w-9 h-9 rounded-lg bg-gray-100 hover:bg-gray-200 dark:bg-gray-700 dark:hover:bg-gray-600 flex items-center justify-center transition-colors"
+                className="lg:hidden w-9 h-9 rounded-lg bg-gray-100 hover:bg-gray-200 dark:bg-gray-700 dark:hover:bg-gray-600 flex items-center justify-center transition-colors"
                 aria-label={mobileMenuOpen ? 'Close navigation menu' : 'Open navigation menu'}
                 aria-expanded={mobileMenuOpen}
                 aria-controls="mobile-nav"
@@ -88,21 +88,21 @@ function Header() {
                 Musician Tools
               </h1>
             </Link>
-          </div>
 
-          {/* Navigation (desktop) */}
-          <nav className="hidden md:flex items-center gap-8">
-            {isAuthenticated && navLinks.map(link => (
-              <Link
-                key={link.to}
-                to={link.to}
-                state={link.state}
-                className="text-gray-700 hover:text-brand-600 font-medium transition-colors dark:text-gray-300 dark:hover:text-brand-400"
-              >
-                {link.label}
-              </Link>
-            ))}
-          </nav>
+            {/* Navigation (desktop ≥ lg) — flush left, right after the logo */}
+            <nav className="hidden lg:flex items-center gap-8 ml-4">
+              {isAuthenticated && navLinks.map(link => (
+                <Link
+                  key={link.to}
+                  to={link.to}
+                  state={link.state}
+                  className="text-gray-700 hover:text-brand-600 font-medium transition-colors dark:text-gray-300 dark:hover:text-brand-400"
+                >
+                  {link.label}
+                </Link>
+              ))}
+            </nav>
+          </div>
 
           {/* Right side actions */}
           <div className="flex items-center gap-4">
@@ -122,7 +122,7 @@ function Header() {
               <button
                 type="button"
                 onClick={handleLogout}
-                className="btn-secondary text-sm hidden md:inline-flex"
+                className="btn-secondary text-sm hidden lg:inline-flex"
               >
                 Sign out
               </button>
@@ -142,7 +142,7 @@ function Header() {
 
       {/* Navigation (mobile dropdown) */}
       {isAuthenticated && mobileMenuOpen && (
-        <nav id="mobile-nav" className="md:hidden border-t border-gray-200 dark:border-gray-700">
+        <nav id="mobile-nav" className="lg:hidden border-t border-gray-200 dark:border-gray-700">
           <div className="max-w-7xl mx-auto px-2 sm:px-4 py-2 flex flex-col">
             {navLinks.map(link => (
               <Link
