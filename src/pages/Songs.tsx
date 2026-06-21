@@ -8,7 +8,7 @@ import { songPlayService, type SongPlay } from '../services/songPlayService';
 import { playlistService, type Playlist } from '../services/playlistService';
 import { ConfirmDialog } from '../components/ConfirmDialog';
 import { instrumentTechniquesMap, instrumentTuningsMap, instrumentTypeOptions } from '../constants/instrumentTypes';
-import { applySongFilters } from '../utils/songFilters';
+import { applySongFilters, NO_INSTRUMENT } from '../utils/songFilters';
 import { findDuplicateSong } from '../utils/songDuplicate';
 import { formatLocalDate } from '../utils/heatmap';
 
@@ -1494,7 +1494,7 @@ function Songs() {
   const availableTechniqueFilters = instrumentFilter ? instrumentTechniquesMap[instrumentFilter] || [] : [];
   const availableTuningFilters = instrumentFilter ? instrumentTuningsMap[instrumentFilter] || [] : [];
   const tuningFilterOptions = availableTuningFilters.filter(opt => opt.value);
-  const showTuningFilters = !!(instrumentFilter && instrumentFilter !== 'Drums');
+  const showTuningFilters = !!(instrumentFilter && instrumentFilter !== 'Drums' && instrumentFilter !== NO_INSTRUMENT);
 
   return (
     <div className="min-h-screen bg-gradient-to-br from-gray-50 via-blue-50 to-purple-50 dark:from-gray-900 dark:via-gray-800 dark:to-gray-950 text-gray-900 dark:text-gray-100">

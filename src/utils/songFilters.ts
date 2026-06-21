@@ -1,6 +1,9 @@
 import type { Playlist } from '../services/playlistService';
 import type { Song } from '../services/songService';
 
+// Special `instrumentFilter` value: match only songs linked to no instrument (orphans).
+export const NO_INSTRUMENT = '__none__';
+
 export type SongFilterOptions = {
   searchQuery: string;
   instrumentFilter: string;
@@ -62,19 +65,22 @@ export function applySongFilters(songs: Song[], opts: SongFilterOptions): Song[]
       song.album?.toLowerCase().includes(query)
     );
 
-    const selected = instrumentFilter ? [instrumentFilter] : [];
+    const isNoInstrument = instrumentFilter === NO_INSTRUMENT;
+    const selected = instrumentFilter && !isNoInstrument ? [instrumentFilter] : [];
     const songInstruments = Array.isArray(song.instrument)
       ? song.instrument
       : (song.instrument ? [song.instrument] : []);
-    const passesInstrument =
-      selected.length === 0 ||
-      (instrumentMatchMode === 'all'
-        ? selected.every(inst => songInstruments.includes(inst))
-        : selected.some(inst => songInstruments.includes(inst)));
+    const passesInstrument = isNoInstrument
+      ? songInstruments.length === 0
+      : (selected.length === 0 ||
+        (instrumentMatchMode === 'all'
+          ? selected.every(inst => songInstruments.includes(inst))
+          : selected.some(inst => songInstruments.includes(inst))));
 
     const passesMyInstrument = !myInstrumentFilter || song.myInstrumentUid === myInstrumentFilter;
 
-    const passesTuning = !tuningFilter || (instrumentFilter && song.instrumentTuning && song.instrumentTuning[instrumentFilter] === tuningFilter);
+    // Tuning/difficulty are per-instrument: not applicable when filtering for instrument-less songs.
+    const passesTuning = isNoInstrument || !tuningFilter || (instrumentFilter && song.instrumentTuning && song.instrumentTuning[instrumentFilter] === tuningFilter);
 
     const rawSongDifficulty: unknown =
       instrumentFilter && song.instrumentDifficulty
@@ -92,7 +98,7 @@ export function applySongFilters(songs: Song[], opts: SongFilterOptions): Song[]
       const parsed = Number(rawSongDifficulty);
       return Number.isFinite(parsed) ? parsed : undefined;
     })();
-    const passesDifficulty = !instrumentDifficultyFilter || (
+    const passesDifficulty = isNoInstrument || !instrumentDifficultyFilter || (
       instrumentFilter
         ? (typeof songDifficulty === 'number' && Number.isFinite(songDifficulty) && songDifficulty <= instrumentDifficultyFilter)
         : false

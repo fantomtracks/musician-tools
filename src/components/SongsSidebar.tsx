@@ -1,3 +1,5 @@
+import { NO_INSTRUMENT } from '../utils/songFilters';
+
 export interface SongsSidebarProps {
   // UI state
   sidebarExpanded: boolean;
@@ -140,13 +142,14 @@ export default function SongsSidebar(props: SongsSidebarProps) {
             {props.filtersAccordionOpen && (
               <div className="p-4 border-t border-gray-100 dark:border-gray-700 space-y-3">
                 <div>
-                  <div className="text-xs font-semibold text-gray-700 dark:text-gray-300 mb-2">Filter by instrument</div>
+                  <div className="text-xs font-semibold text-gray-700 dark:text-gray-300 mb-2">Song's instrument</div>
                   <select
                     value={props.instrumentFilter}
                     onChange={(e) => props.setInstrumentFilter(e.target.value)}
                     className="input-base text-sm"
                   >
                     <option value="">All instruments</option>
+                    <option value={NO_INSTRUMENT}>No instrument</option>
                     {props.instrumentTypeOptions.map(inst => (
                       <option key={inst} value={inst}>{inst}</option>
                     ))}
@@ -154,7 +157,7 @@ export default function SongsSidebar(props: SongsSidebarProps) {
                 </div>
 
                 <div>
-                  <div className="text-xs font-semibold text-gray-700 dark:text-gray-300 mb-2">Filter by my instrument</div>
+                  <div className="text-xs font-semibold text-gray-700 dark:text-gray-300 mb-2">My instrument</div>
                   <select
                     value={props.myInstrumentFilter}
                     onChange={(e) => props.setMyInstrumentFilter(e.target.value)}
@@ -221,7 +224,7 @@ export default function SongsSidebar(props: SongsSidebarProps) {
             )}
           </div>
 
-          {props.instrumentFilter && (
+          {props.instrumentFilter && props.instrumentFilter !== NO_INSTRUMENT && (
             <div className="card-base mt-3">
               <button
                 type="button"
@@ -315,7 +318,7 @@ export default function SongsSidebar(props: SongsSidebarProps) {
               )}
             </div>
           )}
-          {props.instrumentFilter && (
+          {props.instrumentFilter && props.instrumentFilter !== NO_INSTRUMENT && (
             <div className="card-base mt-3">
               <button
                 type="button"

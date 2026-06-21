@@ -1,4 +1,4 @@
-import { applySongFilters } from '../utils/songFilters';
+import { applySongFilters, NO_INSTRUMENT } from '../utils/songFilters';
 import type { Song } from '../services/songService';
 
 const baseSong: Song = {
@@ -126,6 +126,27 @@ test('excludes capo 0 as invalid when capo filter is active', () => {
 
   const result = applySongFilters(songs, makeOpts({ capoFilter: 3 }));
   expect(result.map(s => s.uid)).toEqual(['2']);
+});
+
+test('NO_INSTRUMENT keeps only songs linked to no instrument', () => {
+  const songs: Song[] = [
+    { ...baseSong, uid: '1', instrument: [] },
+    { ...baseSong, uid: '2', instrument: ['Guitar'] },
+    { ...baseSong, uid: '3', instrument: null },
+  ];
+
+  const result = applySongFilters(songs, makeOpts({ instrumentFilter: NO_INSTRUMENT }));
+  expect(result.map(s => s.uid)).toEqual(['1', '3']);
+});
+
+test('NO_INSTRUMENT ignores per-instrument sub-filters (stale difficulty/tuning do not exclude)', () => {
+  const songs: Song[] = [{ ...baseSong, uid: '1', instrument: [] }];
+
+  const result = applySongFilters(
+    songs,
+    makeOpts({ instrumentFilter: NO_INSTRUMENT, instrumentDifficultyFilter: 3, tuningFilter: 'Drop D' }),
+  );
+  expect(result.map(s => s.uid)).toEqual(['1']);
 });
 
 test('filters by language', () => {
