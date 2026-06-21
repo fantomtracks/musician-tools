@@ -89,8 +89,8 @@ function Header() {
               </h1>
             </Link>
 
-            {/* Navigation (desktop ≥ lg) — flush left, right after the logo */}
-            <nav className="hidden lg:flex items-center gap-8 ml-4">
+            {/* Navigation (desktop ≥ lg) — flush left, with breathing room after the title */}
+            <nav className="hidden lg:flex items-center gap-8 ml-10">
               {isAuthenticated && navLinks.map(link => (
                 <Link
                   key={link.to}
