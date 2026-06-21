@@ -118,4 +118,4 @@ development_status:
   9-2-filtres-songlist-clarifies-sans-instrument: done   # libellés « Song's instrument » / « My instrument » + filtre « No instrument » (sentinelle NO_INSTRUMENT)
   9-3-composant-partage-session-history-card: done   # SessionHistoryCard + SessionEntryLine partagés (MySessions + MyHeatmap) ; prérequis de 9-4
   9-4-chanson-cliquable-historique-session: done      # libellé chanson cliquable -> édition (via state.editUid) ; bénéficie aussi à la heatmap
-  epic-9-retrospective: optional
+  epic-9-retrospective: done    # 2026-06-21 — epic-9-retro-2026-06-21.md ; leçon : réviser même le « trivial » ; rituel deferred-work 5/5 appliqué
