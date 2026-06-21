@@ -1,5 +1,5 @@
 # generated: 2026-06-07
-# last_updated: 2026-06-18
+# last_updated: 2026-06-21
 # project: musician-tools
 # project_key: NOKEY
 # tracking_system: file-system
@@ -35,7 +35,7 @@
 # - Dev moves story to 'review', then runs code-review (fresh context, different LLM recommended)
 
 generated: 2026-06-07
-last_updated: 2026-06-18
+last_updated: 2026-06-21
 project: musician-tools
 project_key: NOKEY
 tracking_system: file-system
@@ -86,6 +86,7 @@ development_status:
   # Epic 6: Capture enrichie — durée de répertoire (PRD amendé : FR21 + FR24)
   epic-6: done
   6-1-duree-de-chanson-temps-de-session-auto: done
+  epic-6-retrospective: optional    # jamais tenue ; leçon de cadrage 6.1 (double source de vérité) traitée dans la rétro Epic 8 (2026-06-21)
 
   # Epic 7: Compte utilisateur (HORS PRD initial — bloqué : brief + design sécurité)
   epic-7: backlog
@@ -96,3 +97,4 @@ development_status:
   8-1-auto-remplissage-minutes-entree-depuis-duree-chanson: done   # Phase A — indépendant, quick win
   8-2-topic-systeme-free-practice-et-creation-a-la-volee: done     # Phase B — prérequis de 8-3 ; décision tranchée : Free practice SEEDÉ en base (vrai FK SessionItem.topicUid)
   8-3-suppression-duree-globale-heatmap-somme-entrees-migration: done  # Phase C — après 8-2 ; rollback sync 6.1 + plancher (380e8c4/cbd6676)
+  epic-8-retrospective: done    # 2026-06-21 — epic-8-retro-2026-06-21.md ; leçons : cadrer en amont + ne pas cacher la dette sous le tapis
