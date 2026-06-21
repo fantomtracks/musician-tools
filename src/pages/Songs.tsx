@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from 'react';
-import { Link, useLocation } from 'react-router-dom';
+import { Link, useLocation, useNavigate } from 'react-router-dom';
 import { SongForm } from '../components/SongForm';
 import SongsList from '../components/SongsList';
 import { songService, type CreateSongDTO, type Song } from '../services/songService';
@@ -234,6 +234,7 @@ function Songs() {
   // Removed unused user, logout from useAuth
   
   const location = useLocation();
+  const navigate = useNavigate();
 
   const hasActiveFilters = Boolean(
     instrumentFilter ||
@@ -856,7 +857,8 @@ function Songs() {
       setLoading(true);
       setError(null);
       const playedOn = formatLocalDate(new Date());
-      const instrumentTypeForPlay = instrumentFilter || undefined;
+      // The "No instrument" sentinel is a filter, never a real instrument — don't persist it.
+      const instrumentTypeForPlay = instrumentFilter && instrumentFilter !== NO_INSTRUMENT ? instrumentFilter : undefined;
 
       // Serialize, do NOT Promise.all: concurrent marks for the same day +
       // instrument each find no session and each create one → duplicate day
@@ -1083,15 +1085,17 @@ function Songs() {
   };
 
   // Open a song's edit form when navigated here from the session history (story 9.4).
-  // Waits for songs to load; clearing the history state guards against re-trigger.
+  // Waits for songs to load, then clears the router state via navigate() — a raw
+  // history.replaceState would NOT update useLocation().state, so the effect would
+  // re-fire (and re-open the form, clobbering edits) on every later songs reload.
   useEffect(() => {
     const editUid = location.state?.editUid;
     if (!editUid || songs.length === 0) return;
     const song = songs.find(s => s.uid === editUid);
     if (song) openSongForEdit(song);
-    window.history.replaceState({}, document.title);
-    // openSongForEdit is recreated each render; the guard above already makes this run
-    // once per navigation, so it is intentionally omitted from the deps.
+    navigate(location.pathname + location.search, { replace: true, state: null });
+    // openSongForEdit is recreated each render; the navigate() above clears the state
+    // so this runs once per navigation, hence it is omitted from the deps.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [location.state, songs]);
 
@@ -1435,8 +1439,9 @@ function Songs() {
     const plays = songPlays.get(songUid) || [];
     if (plays.length === 0) return undefined;
 
-    // Si on filtre par type d'instrument, trouver le dernier play pour ce type
-    if (instrumentFilter) {
+    // When filtering by a real instrument type, find the last play for that type.
+    // The "No instrument" sentinel is not a type, so fall through to all-instruments.
+    if (instrumentFilter && instrumentFilter !== NO_INSTRUMENT) {
       const instrumentPlays = plays.filter(p => p.instrumentType === instrumentFilter);
       return instrumentPlays.length > 0 ? instrumentPlays[0].playedAt : undefined;
     }
