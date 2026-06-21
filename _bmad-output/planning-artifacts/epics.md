@@ -175,7 +175,15 @@ Je renseigne une durée sur mes chansons et le « Mark as Played » remplit auto
 Je gère mon compte en autonomie (page Profil : nom d'affichage, email, mot de passe ; reset par email ; vérification d'email à l'inscription) sous une identité partageable `name#NNNN` — le tout posé sur une base d'auth durcie contre les 4 menaces (account takeover, IDOR, CSRF, énumération de comptes). _Cadré 2026-06-21 (brief + addendum + architecture) ; débloque le stub « HORS PRD » du 2026-06-10._
 **FRs covered:** FR-A1, FR-A2, FR-A3, FR-A4, FR-A5, FR-A6, FR-A7, FR-A8 — **NFRs:** NFR-S1, NFR-S2, NFR-S3, NFR-S4
 
-**Dépendances :** E1 → E2 → (E3 ∥ E4). Les epics 3 et 4 sont indépendants l'un de l'autre. E6 dépend d'E4 (pont Mark as Played). E5 est transverse ; E7 (compte + sécurité, hors-PRD) est autonome — ne dépend d'aucun épic PRD et n'en bloque aucun. Les NFR1-NFR6 transverses s'appliquent aux critères d'acceptation des stories concernées.
+### Epic 8: Refonte temps de session — « tout est entrée »
+La session devient un simple regroupement (jour + instrument) ; la durée totale = somme des minutes des entrées ; le temps non structuré se loggue via le topic système « Free practice ».
+**FRs covered:** FR13 (amendé), FR15 (précisé), FR24 (étendu), FR25, FR26
+
+### Epic 9: Robustesse / confort UI (post-rétro)
+Petites stories de confort/robustesse UI nées du terrain et de la revue `deferred-work.md`, soldées **avant l'Epic 7** : nav mobile, clarté des filtres Songlist, dé-duplication de l'affichage de session, navigation chanson depuis l'historique.
+**Couvre :** NFR3 (responsive) + dette de maintenabilité (deferred-work 2026-06-21)
+
+**Dépendances :** E1 → E2 → (E3 ∥ E4). Les epics 3 et 4 sont indépendants l'un de l'autre. E6 dépend d'E4 (pont Mark as Played). E5 est transverse ; E9 (confort UI, post-rétro) est autonome et se solde avant E7 ; E7 (compte + sécurité, hors-PRD) est autonome — ne dépend d'aucun épic PRD et n'en bloque aucun. Les NFR1-NFR6 transverses s'appliquent aux critères d'acceptation des stories concernées.
 
 ## Epic 1: Ma bibliothèque de sujets de travail
 
@@ -919,3 +927,86 @@ So that le temps a une seule source de vérité (les entrées).
 **Et** retrait du code devenu inutile : sync `markSongPlayed → durationMinutes` (story 6.1) et calage/plancher session (commits 380e8c4, cbd6676).
 
 _Démarre après 8.2. Breaking changes tolérés (beta)._
+
+---
+
+## Epic 9: Robustesse / confort UI (post-rétro)
+
+_Ajouté 2026-06-21 — issu de la revue `deferred-work.md` (rituel avant Epic 7). Exécution **légère** : cadrage + implémentation directe par branche (façon quick wins), sans create-story/dev-story/review formel. Soldé avant l'Epic 7._
+
+**Objectif :** nettoyer la dette UI/confort accumulée avant d'attaquer la grosse Epic 7. Quatre stories autonomes (sauf 9.4 qui dépend de 9.3).
+
+**Ordre :** 9.1 ∥ 9.2 (indépendantes) → 9.3 (refacto) → 9.4 (dépend de 9.3).
+
+### Story 9.1: Navigation mobile (menu hamburger)
+
+As a utilisateur sur mobile,
+I want un menu hamburger qui expose les liens de navigation,
+So that je peux accéder à toutes les pages depuis un téléphone (NFR3).
+
+**Acceptance Criteria:**
+
+**Given** un viewport mobile (`< md`) et un utilisateur authentifié
+**When** j'ouvre le Header
+**Then** un bouton hamburger (`md:hidden`) est visible ; la nav desktop (`hidden md:flex`) reste inchangée au-dessus de `md`
+
+**Given** le menu fermé
+**When** je clique le hamburger
+**Then** un panneau déroulant affiche les 6 liens (Songlist, Heatmap, Sessions, Playlists, Topics, Instruments) empilés ; clic sur un lien ferme le menu ; `Échap` ferme aussi
+
+**Given** un utilisateur non authentifié
+**Then** pas de hamburger (aucun lien à dérouler) ; les boutons Sign in / Create account restent visibles
+
+**And** dark mode respecté ; liens dédupliqués (un seul tableau mappé pour desktop et mobile)
+
+### Story 9.2: Filtres Songlist clarifiés + filtre « sans instrument »
+
+As a utilisateur qui range sa songlist,
+I want des libellés de filtre instrument non ambigus et pouvoir isoler les chansons sans instrument,
+So that je distingue « instrument du morceau » de « mon instrument » et je repère les orphelins.
+
+**Acceptance Criteria:**
+
+**Given** la sidebar Songlist (`SongsSidebar.tsx`)
+**When** je lis les deux filtres instrument
+**Then** les libellés sont clairement distincts (ex. « Instrument du morceau » vs « Mon instrument »), plus « Filter by instrument » / « Filter by my instrument » trop proches
+
+**Given** le filtre instrument du morceau
+**When** je choisis l'option « Sans instrument »
+**Then** la liste n'affiche que les chansons liées à **aucun** instrument (orphelins), via une valeur spéciale dédiée
+
+**And** persistance localStorage cohérente avec le pattern existant ; pas de régression sur les filtres actuels
+
+### Story 9.3: Composant partagé `SessionHistoryCard` (dé-duplication)
+
+As a mainteneur,
+I want extraire le rendu d'une session + ses entrées en un composant partagé,
+So that toute évolution se fait à un seul endroit (la duplication a déjà causé des incohérences).
+
+**Acceptance Criteria:**
+
+**Given** le rendu dupliqué d'une session (en-tête date · instrument · durée + liste « played during X minutes ») dans `MySessionsPage.tsx` et `MyHeatmapPage.tsx`
+**When** j'extrais un composant `SessionHistoryCard` (+ `SessionEntryLine`)
+**Then** les deux pages le consomment ; les actions spécifiques (la Heatmap a aussi les plays hors-session) passent en props/callbacks
+
+**Given** le détail jour de la heatmap (`MyHeatmapPage.tsx`) qui rendait le titre seul, sans artiste
+**Then** il est unifié sur le composant partagé → « Artiste - Titre » cohérent partout (comme depuis 5.5)
+
+**And** aucun changement de comportement visible hors la correction d'incohérence ; tests des deux pages au vert
+
+### Story 9.4: Chanson cliquable dans l'historique de session
+
+As a utilisateur qui relit son journal,
+I want cliquer une entrée chanson pour ouvrir sa fiche,
+So that je passe de l'historique à l'édition de la chanson sans la rechercher.
+
+**Acceptance Criteria:**
+
+**Given** le composant `SessionHistoryCard` (story 9.3) et une entrée référençant une chanson (`songUid` non nul)
+**When** je clique le libellé de l'entrée
+**Then** je suis navigué vers l'édition de cette chanson (via `songUid`)
+
+**Given** une entrée orpheline (`songUid` nul) ou un topic
+**Then** pas de lien (texte statique), pas de navigation cassée
+
+**And** dépend de 9.3 (le lien vit dans le composant partagé) ; pas de régression d'affichage
