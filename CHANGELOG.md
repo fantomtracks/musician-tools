@@ -6,6 +6,13 @@ project adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+## [1.5.0] — 2026-06-21
+
+### Added
+- **The navigation finally works on phones and tablets** — a hamburger menu (☰, top-left) opens all your pages, plus Sign out, on any screen below 1024px; the horizontal menu returns on wider screens
+- **Filter your songlist for songs with no instrument** — a new "No instrument" option in the instrument filter helps you spot songs you haven't linked to an instrument yet; the two instrument filters are also relabelled "Song's instrument" and "My instrument" to tell them apart
+- **Jump from your practice journal straight to a song** — clicking a song entry (artist or title) in your session history or in the heatmap's day view opens that song's edit screen
+
 ## [1.4.1] — 2026-06-21
 
 ### Added
