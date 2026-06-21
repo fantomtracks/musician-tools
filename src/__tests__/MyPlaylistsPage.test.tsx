@@ -43,6 +43,22 @@ test('a playlist song renders as "Artist - Title"', async () => {
   expect(await screen.findByText("Guns N' Roses - Sweet Child")).toBeInTheDocument();
 });
 
+test('a playlist song with an empty artist renders as just the title, with no leading dash', async () => {
+  mockedSong.getAllSongs.mockResolvedValue([
+    { uid: 'no-artist-uid', title: 'Untitled Jam', artist: '' } as never,
+  ]);
+  mockedPlaylist.getAllPlaylists.mockResolvedValue([
+    { uid: 'pl-1', name: 'My set', songUids: ['no-artist-uid'] } as never,
+  ]);
+
+  render(<MyPlaylistsPage />);
+
+  // The title shows on its own...
+  expect(await screen.findByText('Untitled Jam')).toBeInTheDocument();
+  // ...and never as the orphaned "- Title" the un-guarded concatenation produced.
+  expect(screen.queryByText('- Untitled Jam')).not.toBeInTheDocument();
+});
+
 test('Story 5.6: an orphan song UID (deleted song) is hidden, never shown as a raw hash', async () => {
   mockedSong.getAllSongs.mockResolvedValue([
     { uid: 'known-uid', title: 'Sweet Child', artist: "Guns N' Roses" } as never,
