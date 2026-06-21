@@ -12,19 +12,7 @@ _Vidé le 2026-06-21 : les 3 items (z-index Album/Languages, garde artiste `MyPl
 
 ## 📋 Stories à planifier
 
-### Songlist — filtres instrument
-- **Reformuler les deux libellés** (`SongsSidebar.tsx`) : « Filter by instrument » (l.143, instrument *du morceau*) vs « Filter by my instrument » (l.157, un de *mes* instruments) se ressemblent trop. Wording plus clair (ex. « Instrument du morceau » vs « Mon instrument »).
-- **Filtre « chansons sans instrument »** : option pour afficher les morceaux liés à **aucun** instrument (repérer les orphelins). Probablement via une valeur spéciale « None » côté `SongsSidebar.tsx` + logique de filtrage (liste d'instruments vide). À cadrer côté UX avec la reformulation ci-dessus.
-
-### Refacto `SessionHistoryCard` _(prérequis des deux suivantes)_
-- Le rendu d'une session + ses entrées (en-tête date · instrument · durée, liste « played during X minutes ») est **dupliqué** : `MySessionsPage.tsx` (~785-835) et `MyHeatmapPage.tsx` (~435-480). Toute évolution doit être faite aux deux endroits (déjà vécu). Extraire un composant partagé (`SessionHistoryCard` / `SessionEntryLine`) prenant `session` + helpers + callbacks. À cadrer : les deux pages ont des actions légèrement différentes (Heatmap a aussi les plays hors-session).
-- **Absorbe** : l'incohérence heatmap day-detail (`MyHeatmapPage.tsx:439-444` rend le titre seul, sans artiste, alors que l'historique est en « Artiste - Titre » depuis 5.5) — à unifier dans le composant partagé.
-
-### Chanson cliquable dans l'historique de session _(après `SessionHistoryCard`)_
-- Dans `MySessionsPage.tsx` (~818-833), chaque entrée affiche le label en texte statique (`{item.label}`). Le rendre **cliquable** pour ouvrir l'édition de la chanson (via `item.songUid`). Gérer : entrées orphelines (`songUid` null → pas de lien), navigation inter-pages (Sessions → Songs form).
-
-### Nav mobile responsive + hamburger _(NFR3)_
-- La nav du Header est `hidden md:flex` sans menu hamburger → sur mobile, **aucun** lien (Songs, Instruments, Playlists, Topics, Sessions, Heatmap). Cassée depuis l'épic 1, jamais réparée (la story 5.3 a réordonné le menu desktop mais pas la nav mobile). Story dédiée responsive + hamburger.
+_Les 4 stories UI/confort (filtres Songlist, refacto SessionHistoryCard, chanson cliquable, nav mobile) ont été regroupées et **livrées dans l'Epic 9** (2026-06-21, branche `feat/epic-9-ui-polish`). Cf. journal « Soldé »._
 
 ### 🔐 Lot sécu → à fusionner dans le brief Epic 7
 > **Décision 2026-06-21** : ces dettes sécu sont le **périmètre du design sécurité qui bloque l'Epic 7** (compte utilisateur). À traiter dans le brief Epic 7, pas en story autonome.
@@ -76,6 +64,12 @@ _Vidé le 2026-06-21 : les 3 items (z-index Album/Languages, garde artiste `MyPl
 ---
 
 ## ✅ Soldé / retiré le 2026-06-21 (journal — pas de suppression silencieuse)
+
+**Epic 9 — Robustesse / confort UI (branche `feat/epic-9-ui-polish`, 2026-06-21) :**
+- **9.1 Nav mobile + hamburger** → **livré** : `Header.tsx` avec liens dédupliqués + bouton hamburger `md:hidden`, panneau déroulant (clic/Échap), a11y ; tests `Header.test.tsx` + stub `matchMedia` au setup.
+- **9.2 Filtres Songlist** → **livré** : libellés « Song's instrument » / « My instrument » + option « No instrument » (sentinelle `NO_INSTRUMENT`, sous-filtres par instrument neutralisés) ; tests filtres.
+- **9.3 Refacto `SessionHistoryCard`** → **livré** : composant partagé `SessionHistoryCard` + `SessionEntryLine` (MySessions + MyHeatmap dé-dupliqués). _(L'incohérence artiste heatmap day-detail était en fait déjà résolue ; seules les `plays` projetées restent en titre seul, volontairement plus sobres.)_
+- **9.4 Chanson cliquable** → **livré** : libellé chanson de l'historique → édition (`/songs` + `state.editUid`) ; bénéficie aussi à la heatmap via le composant partagé ; tests `SessionHistoryCard.test.tsx`.
 
 **Quick wins pre-Epic 7 (branche `fix/pre-epic7-quick-wins`, 2026-06-21) :**
 - **Bug z-index Album → Languages** → **fixé** : conteneur album passé en `relative z-30` + dropdown en `z-50` (`SongForm.tsx`) ; il stacke désormais au-dessus du bloc Languages (`z-20`). Typecheck + tests verts.
