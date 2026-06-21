@@ -1,4 +1,4 @@
-import { render, screen, fireEvent } from '@testing-library/react';
+import { render, screen, fireEvent, within } from '@testing-library/react';
 import { MemoryRouter } from 'react-router-dom';
 import Header from '../components/Header';
 import { useAuth } from '../contexts/AuthContext';
@@ -61,6 +61,19 @@ test('clicking a mobile link closes the menu', () => {
 
   fireEvent.click(heatmapLinks[1]); // the mobile-menu one
   expect(screen.getAllByRole('link', { name: 'Heatmap' })).toHaveLength(1);
+});
+
+test('authenticated mobile: Sign out lives inside the menu and logs out', () => {
+  const logout = jest.fn().mockResolvedValue(undefined);
+  mockedUseAuth.mockReturnValue({ isAuthenticated: true, logout });
+  renderHeader();
+
+  fireEvent.click(screen.getByRole('button', { name: /open navigation menu/i }));
+  const menu = document.getElementById('mobile-nav') as HTMLElement;
+  const signOut = within(menu).getByRole('button', { name: 'Sign out' });
+
+  fireEvent.click(signOut);
+  expect(logout).toHaveBeenCalled();
 });
 
 test('unauthenticated: no hamburger and no nav links, but sign-in actions remain', () => {

@@ -64,15 +64,29 @@ function Header() {
     <header className="sticky top-0 z-40 glass-effect border-b border-gray-200 dark:border-gray-700 shadow-sm">
       <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
         <div className="flex items-center justify-between h-16">
-          {/* Logo */}
-          <Link to="/" className="flex items-center gap-2 group">
-            <div className="w-8 h-8 rounded-lg bg-gradient-to-br from-brand-500 to-purple-600 flex items-center justify-center">
-              <span className="text-white font-bold text-lg">♪</span>
-            </div>
-            <h1 className="text-xl font-bold text-gradient hidden sm:block">
-              Musician Tools
-            </h1>
-          </Link>
+          {/* Left: hamburger (mobile, authenticated) + logo */}
+          <div className="flex items-center gap-2">
+            {isAuthenticated && (
+              <button
+                type="button"
+                onClick={() => setMobileMenuOpen(open => !open)}
+                className="md:hidden w-9 h-9 rounded-lg bg-gray-100 hover:bg-gray-200 dark:bg-gray-700 dark:hover:bg-gray-600 flex items-center justify-center transition-colors"
+                aria-label={mobileMenuOpen ? 'Close navigation menu' : 'Open navigation menu'}
+                aria-expanded={mobileMenuOpen}
+                aria-controls="mobile-nav"
+              >
+                <span className="text-lg">{mobileMenuOpen ? '✕' : '☰'}</span>
+              </button>
+            )}
+            <Link to="/" className="flex items-center gap-2 group">
+              <div className="w-8 h-8 rounded-lg bg-gradient-to-br from-brand-500 to-purple-600 flex items-center justify-center">
+                <span className="text-white font-bold text-lg">♪</span>
+              </div>
+              <h1 className="text-xl font-bold text-gradient hidden sm:block">
+                Musician Tools
+              </h1>
+            </Link>
+          </div>
 
           {/* Navigation (desktop) */}
           <nav className="hidden md:flex items-center gap-8">
@@ -90,19 +104,6 @@ function Header() {
 
           {/* Right side actions */}
           <div className="flex items-center gap-4">
-            {/* Hamburger (mobile only, authenticated — the nav links are auth-gated) */}
-            {isAuthenticated && (
-              <button
-                type="button"
-                onClick={() => setMobileMenuOpen(open => !open)}
-                className="md:hidden w-9 h-9 rounded-lg bg-gray-100 hover:bg-gray-200 dark:bg-gray-700 dark:hover:bg-gray-600 flex items-center justify-center transition-colors"
-                aria-label={mobileMenuOpen ? 'Close navigation menu' : 'Open navigation menu'}
-                aria-expanded={mobileMenuOpen}
-                aria-controls="mobile-nav"
-              >
-                <span className="text-lg">{mobileMenuOpen ? '✕' : '☰'}</span>
-              </button>
-            )}
             <button
               type="button"
               onClick={() => setDarkMode(!darkMode)}
@@ -119,7 +120,7 @@ function Header() {
               <button
                 type="button"
                 onClick={handleLogout}
-                className="btn-secondary text-sm"
+                className="btn-secondary text-sm hidden md:inline-flex"
               >
                 Sign out
               </button>
@@ -152,6 +153,16 @@ function Header() {
                 {link.label}
               </Link>
             ))}
+            {/* Sign out lives in the menu on mobile (it is hidden in the top bar below md) */}
+            <div className="mt-1 pt-1 border-t border-gray-200 dark:border-gray-700">
+              <button
+                type="button"
+                onClick={() => { setMobileMenuOpen(false); handleLogout(); }}
+                className="w-full rounded-lg px-3 py-3 text-left text-gray-700 hover:bg-gray-100 hover:text-brand-600 font-medium transition-colors dark:text-gray-300 dark:hover:bg-gray-700 dark:hover:text-brand-400"
+              >
+                Sign out
+              </button>
+            </div>
           </div>
         </nav>
       )}
