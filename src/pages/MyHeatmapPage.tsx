@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { Link } from 'react-router-dom';
-import { practiceSessionService, sumSessionMinutes, type DayPlay, type HeatmapDay, type PracticeSession } from '../services/practiceSessionService';
+import { practiceSessionService, type DayPlay, type HeatmapDay, type PracticeSession } from '../services/practiceSessionService';
+import { SessionHistoryCard } from '../components/SessionHistoryCard';
 import { songService, type Song } from '../services/songService';
 import { ConfirmDialog } from '../components/ConfirmDialog';
 import { buildYearGrid, computeLevels, formatLocalDate } from '../utils/heatmap';
@@ -435,16 +436,14 @@ function MyHeatmapPage() {
             )}
             {!dayFailed && daySessions !== null && daySessions.length > 0 && (
               <ul aria-label="Day sessions" className="space-y-3">
-                {daySessions.map(session => {
-                  const totalMinutes = sumSessionMinutes(session);
-                  return (
-                  <li key={session.uid} className="rounded-lg border border-gray-200 dark:border-gray-700 p-3 space-y-2">
-                    <div className="flex flex-wrap items-baseline gap-x-3 gap-y-1">
-                      <span className="text-sm text-gray-600 dark:text-gray-400">{session.instrumentType}</span>
-                      {totalMinutes > 0 ? (
-                        <span className="text-sm text-gray-600 dark:text-gray-400">· {totalMinutes} min</span>
-                      ) : null}
-                      <div className="flex gap-2 ml-auto">
+                {daySessions.map(session => (
+                  <SessionHistoryCard
+                    key={session.uid}
+                    session={session}
+                    artistBySongUid={artistBySongUid}
+                    showDate={false}
+                    actions={
+                      <>
                         <Link
                           to={`/my-sessions?edit=${session.uid}`}
                           aria-label={`Edit session of ${session.date}`}
@@ -461,29 +460,10 @@ function MyHeatmapPage() {
                         >
                           Delete
                         </button>
-                      </div>
-                    </div>
-                    {session.note && (
-                      <p className="text-sm text-gray-700 dark:text-gray-300 whitespace-pre-wrap break-words">{session.note}</p>
-                    )}
-                    {session.items && session.items.length > 0 && (
-                      <ul className="space-y-1">
-                        {session.items.map(item => {
-                          const artist = item.songUid ? artistBySongUid.get(item.songUid) : undefined;
-                          return (
-                          <li key={item.uid} className="text-sm text-gray-700 dark:text-gray-300 pl-3 border-l-2 border-gray-200 dark:border-gray-700 break-words">
-                            {artist ? <span>{artist} - </span> : null}
-                            <span className="font-medium">{item.label}</span>
-                            {item.minutes ? <span className="text-gray-500 dark:text-gray-400"> · played during {item.minutes} {item.minutes > 1 ? 'minutes' : 'minute'}</span> : null}
-                            {item.note ? <span className="text-gray-500 dark:text-gray-400 italic"> · {item.note}</span> : null}
-                          </li>
-                          );
-                        })}
-                      </ul>
-                    )}
-                  </li>
-                  );
-                })}
+                      </>
+                    }
+                  />
+                ))}
               </ul>
             )}
             {/* Projected play history (FR22), below the real sessions:

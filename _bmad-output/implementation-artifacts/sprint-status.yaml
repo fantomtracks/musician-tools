@@ -103,6 +103,6 @@ development_status:
   epic-9: in-progress
   9-1-nav-mobile-hamburger: done   # menu hamburger md:hidden, panneau déroulant, Échap, a11y ; tests Header
   9-2-filtres-songlist-clarifies-sans-instrument: done   # libellés « Song's instrument » / « My instrument » + filtre « No instrument » (sentinelle NO_INSTRUMENT)
-  9-3-composant-partage-session-history-card: backlog   # prérequis de 9-4
+  9-3-composant-partage-session-history-card: done   # SessionHistoryCard + SessionEntryLine partagés (MySessions + MyHeatmap) ; prérequis de 9-4
   9-4-chanson-cliquable-historique-session: backlog      # dépend de 9-3
   epic-9-retrospective: optional

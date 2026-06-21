@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
-import { practiceSessionService, sumSessionMinutes, type CreatePracticeSessionDTO, type CreateSessionItemDTO, type UpdateSessionItemDTO, type UpdatePracticeSessionDTO, type PracticeSession } from '../services/practiceSessionService';
+import { practiceSessionService, type CreatePracticeSessionDTO, type CreateSessionItemDTO, type UpdateSessionItemDTO, type UpdatePracticeSessionDTO, type PracticeSession } from '../services/practiceSessionService';
+import { SessionHistoryCard } from '../components/SessionHistoryCard';
 import { songService, type Song } from '../services/songService';
 import { topicService, type Topic } from '../services/topicService';
 import { ConfirmDialog } from '../components/ConfirmDialog';
@@ -845,19 +846,13 @@ function MySessionsPage() {
           </div>
           {!editingSessionUid && !sessionsFailed && sessions !== null && sessions.length > 0 && (
             <ul aria-label="Session history" className="space-y-3">
-              {sessions.map(session => {
-                const totalMinutes = sumSessionMinutes(session);
-                return (
-                <li key={session.uid} className="rounded-lg border border-gray-200 dark:border-gray-700 p-3 space-y-2">
-                  <div className="flex flex-wrap items-baseline gap-x-3 gap-y-1">
-                    {/* The DATEONLY string is displayed verbatim: new Date('YYYY-MM-DD')
-                        would parse as UTC midnight and shift the day in some timezones */}
-                    <span className="font-semibold">{session.date}</span>
-                    <span className="text-sm text-gray-600 dark:text-gray-400">{session.instrumentType}</span>
-                    {totalMinutes > 0 ? (
-                      <span className="text-sm text-gray-600 dark:text-gray-400">· {totalMinutes} min</span>
-                    ) : null}
-                    <div className="flex gap-2 ml-auto">
+              {sessions.map(session => (
+                <SessionHistoryCard
+                  key={session.uid}
+                  session={session}
+                  artistBySongUid={artistBySongUid}
+                  actions={
+                    <>
                       <button
                         type="button"
                         aria-label={`Edit session of ${session.date}`}
@@ -876,31 +871,10 @@ function MySessionsPage() {
                       >
                         Delete
                       </button>
-                    </div>
-                  </div>
-                  {session.note && (
-                    <p className="text-sm text-gray-700 dark:text-gray-300 whitespace-pre-wrap break-words">{session.note}</p>
-                  )}
-                  {session.items && session.items.length > 0 && (
-                    // pt-3 only when a note precedes: extra breathing room between
-                    // the session note and what was played (northwood feedback)
-                    <ul className={`space-y-1${session.note ? ' pt-3' : ''}`}>
-                      {session.items.map(item => {
-                        const artist = item.songUid ? artistBySongUid.get(item.songUid) : undefined;
-                        return (
-                        <li key={item.uid} className="text-sm text-gray-700 dark:text-gray-300 pl-3 border-l-2 border-gray-200 dark:border-gray-700 break-words">
-                          {artist ? <span>{artist} - </span> : null}
-                          <span className="font-medium">{item.label}</span>
-                          {item.minutes ? <span className="text-gray-500 dark:text-gray-400"> · played during {item.minutes} {item.minutes > 1 ? 'minutes' : 'minute'}</span> : null}
-                          {item.note ? <span className="text-gray-500 dark:text-gray-400 italic"> · {item.note}</span> : null}
-                        </li>
-                        );
-                      })}
-                    </ul>
-                  )}
-                </li>
-                );
-              })}
+                    </>
+                  }
+                />
+              ))}
             </ul>
           )}
         </div>
