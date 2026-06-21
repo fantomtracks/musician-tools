@@ -1287,7 +1287,7 @@ function Songs() {
 
       // Check if meta has any useful data
       const hasUsefulData = meta && (
-        meta.bpm || meta.key || meta.mode || meta.timeSignature || meta.album || 
+        meta.bpm || meta.key || meta.mode || meta.timeSignature || meta.album || meta.durationSeconds ||
         (Array.isArray(meta.genres) && meta.genres.length > 0)
       );
 
@@ -1321,6 +1321,7 @@ function Songs() {
         mode: prev.mode || meta.mode || '',
         timeSignature: prev.timeSignature || meta.timeSignature || '',
         album: prev.album || meta.album || '',
+        durationSeconds: prev.durationSeconds ?? meta.durationSeconds,
         genre: mergedGenres,
         streamingLinks: mergedStreamingLinks,
       }));

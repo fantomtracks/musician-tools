@@ -99,6 +99,22 @@ const safeNumber = (val) => {
   return Number.isFinite(num) ? num : null;
 };
 
+// Parse a "m:ss" or "h:mm:ss" duration string into total seconds. Returns null on anything
+// unexpected, including out-of-range components (e.g. "3:90") so a malformed scrape is rejected.
+const parseDurationToSeconds = (text) => {
+  if (!text || typeof text !== 'string') return null;
+  const parts = text.trim().split(':').map(p => p.trim());
+  if (parts.length < 2 || parts.length > 3 || !parts.every(p => /^\d+$/.test(p))) return null;
+  const nums = parts.map(Number);
+  // Trailing components are sexagesimal: seconds < 60 always; minutes < 60 when hours are present.
+  if (nums[nums.length - 1] >= 60) return null;
+  if (nums.length === 3 && nums[1] >= 60) return null;
+  const seconds = nums.length === 2
+    ? nums[0] * 60 + nums[1]
+    : nums[0] * 3600 + nums[1] * 60 + nums[2];
+  return Number.isFinite(seconds) && seconds > 0 ? seconds : null;
+};
+
 // Slugify artist/song name for SongBPM URL format
 const slugify = (text) => {
   return text
@@ -165,13 +181,23 @@ async function fetchFromSongBpm(query, title, artist) {
       timeSignature = `${tsMatch[1]}/4`;
     }
 
+    // Extract Duration from metrics card (same dl dt/dd card as BPM/Key), parse "m:ss"/"h:mm:ss"
+    let durationSeconds = null;
+    $('dl dt').each((_, dt) => {
+      const $dt = $(dt);
+      if ($dt.text().trim() === 'Duration') {
+        const durText = $dt.next('dd').text().trim();
+        durationSeconds = parseDurationToSeconds(durText);
+      }
+    });
+
     // Album not available on song page, leave null
     const album = null;
 
     // If we got at least BPM or key, consider it a valid result
     if (!bpm && !key) return null;
 
-    return { bpm, key, mode, timeSignature, album };
+    return { bpm, key, mode, timeSignature, album, durationSeconds };
   } catch (err) {
     logger.warn(`SongBPM scraping failed: ${err.message}`);
     return null;
@@ -509,6 +535,7 @@ async function fetchSongMetadata({ title, artist }) {
       timeSignature: null,
       album: null,
       genres: null,
+      durationSeconds: null,
       source: 'none'
     };
   }
@@ -522,6 +549,7 @@ async function fetchSongMetadata({ title, artist }) {
   const key = songBpm?.key ?? null;
   const mode = songBpm?.mode ?? null;
   const timeSignature = songBpm?.timeSignature ?? null;
+  const durationSeconds = songBpm?.durationSeconds ?? null;
 
   // Try Genius first (better coverage for songs), then fallback to Wikipedia
   let album = null;
@@ -623,6 +651,7 @@ async function fetchSongMetadata({ title, artist }) {
     timeSignature,
     album,
     genres: normalizedGenres,
+    durationSeconds,
     source
   };
 }

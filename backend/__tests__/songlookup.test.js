@@ -46,6 +46,7 @@ describe('lookupSongMetadata', () => {
       timeSignature: '4/4',
       album: 'Album Name',
       genres: ['rock', 'pop'],
+      durationSeconds: 225,
       source: 'songbpm, wikipedia, lastfm'
     });
 
@@ -59,6 +60,7 @@ describe('lookupSongMetadata', () => {
       timeSignature: '4/4',
       album: 'Album Name',
       genres: ['rock', 'pop'],
+      durationSeconds: 225,
       source: 'songbpm, wikipedia, lastfm'
     });
   });

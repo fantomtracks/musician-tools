@@ -104,6 +104,7 @@ export const songService = {
     timeSignature: string | null;
     genres: string[];
     album: string | null;
+    durationSeconds: number | null;
     source: string;
   }> {
     const params = new URLSearchParams({ title, artist });
