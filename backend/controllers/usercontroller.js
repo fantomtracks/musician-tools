@@ -1,7 +1,6 @@
 const { User, Topic } = require('../models');
 const createError = require('http-errors');
 const logger = require('../logger');
-const jwt = require('jsonwebtoken');
 const { Op } = require('sequelize');
 const { FREE_PRACTICE_NAME } = require('../constants/topics');
 
@@ -33,24 +32,16 @@ const createUser = async (req, res, next) => {
       logger.error('Failed to seed Free practice topic', { uid: newUser.uid, error: seedErr.message });
     }
 
-    // Create session and JWT token after registration
-    const token = jwt.sign(
-      { userId: newUser.uid },
-      process.env.JWT_SECRET || 'MUSICIAN_SECRET',
-      { expiresIn: '24h' }
-    );
-
+    // Authenticate via the session cookie only — no JWT (story 7.1).
     let newSession = req.session;
     newSession.loggedIn = true;
     newSession.user = newUser.uid;
-    newSession.token = token;
 
     const { password, ...userWithoutPassword } = newUser.dataValues;
-    
+
     res.status(201).json({
       ...userWithoutPassword,
-      auth: true,
-      token
+      auth: true
     });
   } catch (err) {
     logger.error('Error registering user:', err.message);
@@ -85,22 +76,15 @@ const loginUser = async (req, res, next) => {
 
     logger.info('User login successful', { uid: user.uid });
 
-    const token = jwt.sign(
-      { userId: user.uid },
-      process.env.JWT_SECRET || 'MUSICIAN_SECRET',
-      { expiresIn: '24h' }
-    );
-
+    // Authenticate via the session cookie only — no JWT (story 7.1).
     let newSession = req.session;
     newSession.loggedIn = true;
     newSession.user = user.uid;
-    newSession.token = token;
 
     res.status(200).json({
       auth: true,
       userId: user.uid,
       sessionId: newSession.id,
-      token,
       user: {
         uid: user.uid,
         name: user.name,

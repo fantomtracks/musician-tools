@@ -116,7 +116,8 @@ Key variables:
 - `NODE_ENV` - Environment (development, test, staging, production)
 - `DATABASE_URL_DEV` - PostgreSQL connection string for development
 - `PORT` - Server port (default: 3001)
-- `JWT_SECRET` - Secret key for JWT tokens
+- `SESSION_SECRET` - **Required.** Session signing secret; the server fails to boot if it is missing (no fallback)
+- `JWT_SECRET` - Deprecated since story 7.1 (JWT removed); no longer consumed by the app
 
 ## Logging
 

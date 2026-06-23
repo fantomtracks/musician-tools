@@ -9,10 +9,21 @@ var session = require('express-session');
 var pgSession = require('connect-pg-simple')(session);
 var pg = require('pg');
 const logger = require('./logger');
+const requireEnv = require('./config/requireEnv');
 const env = process.env.NODE_ENV || 'production';
 const config = require('./config/config')[env];
 const PORT = process.env.PORT || 3001;
 const { sequelize } = require('./models');
+
+// Fail-fast at boot: required secrets must be present. There is no fallback —
+// an app without a real session secret must not start. (Story 7.1)
+try {
+  requireEnv(['SESSION_SECRET']);
+} catch (err) {
+  logger.error(`Boot aborted: ${err.message}`);
+  process.exit(1);
+}
+const SESSION_SECRET = process.env.SESSION_SECRET;
 
 // Run migrations on startup
 (async () => {
@@ -65,12 +76,13 @@ app.use(cookieParser());
 
 // Session configuration
 
-// Indique à Express qu'il est derrière un proxy (Fly.io)
+// Tell Express it sits behind a proxy (Fly.io), so it reads the real client IP
+// from X-Forwarded-For. Prerequisite for per-IP rate-limiting (story 7.4).
 app.set('trust proxy', 1);
 
 // Session configuration
 const sessionConfig = {
-  secret: config.jwtsecret || 'musician-secret',
+  secret: SESSION_SECRET,
   resave: false,
   saveUninitialized: false,
   cookie: {

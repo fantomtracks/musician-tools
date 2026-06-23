@@ -8,10 +8,6 @@ jest.mock('../models', () => ({
   },
 }));
 
-jest.mock('jsonwebtoken', () => ({
-  sign: jest.fn(() => 'signed-token'),
-}));
-
 const { User, Topic } = require('../models');
 const controller = require('../controllers/usercontroller');
 const { FREE_PRACTICE_NAME } = require('../constants/topics');
@@ -56,6 +52,21 @@ describe('usercontroller.createUser', () => {
     expect(next).not.toHaveBeenCalled();
   });
 
+  test('does not emit a JWT in the response or session (story 7.1)', async () => {
+    const newUser = mockNewUser();
+    User.create.mockResolvedValue(newUser);
+
+    const req = { body: { name: 'Ada', email: 'ada@example.com', password: 'pw' }, session: {} };
+    const res = mockRes();
+    const next = mockNext();
+
+    await controller.createUser(req, res, next);
+
+    expect(res.json.mock.calls[0][0]).not.toHaveProperty('token');
+    expect(req.session).not.toHaveProperty('token');
+    expect(req.session.loggedIn).toBe(true);
+  });
+
   test('registration still succeeds (201) when seeding the topic fails', async () => {
     const newUser = mockNewUser();
     User.create.mockResolvedValue(newUser);
@@ -85,5 +96,41 @@ describe('usercontroller.createUser', () => {
 
     expect(Topic.findOrCreate).not.toHaveBeenCalled();
     expect(next.mock.calls[0][0].status).toBe(400);
+  });
+});
+
+describe('usercontroller.loginUser', () => {
+  beforeEach(() => {
+    jest.clearAllMocks();
+  });
+
+  function mockLoginUser() {
+    return {
+      uid: 'user-1',
+      name: 'Ada',
+      email: 'ada@example.com',
+      isAdmin: false,
+      validPassword: jest.fn().mockResolvedValue(true),
+    };
+  }
+
+  test('logs in via session only, with no JWT in the response or session (story 7.1)', async () => {
+    const user = mockLoginUser();
+    User.scope.mockReturnValue({ findOne: jest.fn().mockResolvedValue(user) });
+
+    const req = { body: { login: 'ada@example.com', password: 'pw' }, session: {} };
+    const res = mockRes();
+    const next = mockNext();
+
+    await controller.loginUser(req, res, next);
+
+    expect(res.status).toHaveBeenCalledWith(200);
+    const payload = res.json.mock.calls[0][0];
+    expect(payload).not.toHaveProperty('token');
+    expect(payload.auth).toBe(true);
+    expect(payload.userId).toBe('user-1');
+    expect(req.session).not.toHaveProperty('token');
+    expect(req.session.loggedIn).toBe(true);
+    expect(next).not.toHaveBeenCalled();
   });
 });

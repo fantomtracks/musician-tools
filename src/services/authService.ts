@@ -19,7 +19,6 @@ export type RegisterRequest = {
 export type AuthResponse = {
   auth: boolean;
   userId?: string;
-  token?: string;
   user?: User;
 };
 

@@ -1,4 +1,4 @@
-.PHONY: setup start stop up down restart rebuild-backend migrate migrate-prod seed logs logs-db dev preview install-backend install-frontend install reset-db ps db-psql db-backup db-backup-prod db-restore api-test help
+.PHONY: setup start stop up down restart rebuild-backend migrate migrate-prod seed logs logs-db dev preview install-backend install-frontend install reset-db ps db-psql db-backup db-backup-prod db-restore api-test help check-env
 
 # Default help
 help:
@@ -40,8 +40,14 @@ help:
 # 🚀 SETUP & START COMMANDS
 # ============================================
 
+# Pre-flight: required env must be present before booting the backend container,
+# otherwise it fail-fasts (process.exit(1)) and crash-loops silently (story 7.1).
+check-env:
+	@test -f backend/.env || { echo "❌ backend/.env is missing — copy backend/.env.example and fill it in"; exit 1; }
+	@grep -Eq '^SESSION_SECRET=.+' backend/.env || { echo "❌ SESSION_SECRET is missing or empty in backend/.env (required to boot the backend since story 7.1; in dev, mirror JWT_SECRET)"; exit 1; }
+
 # Complete setup from scratch
-setup:
+setup: check-env
 	@echo "🎵 Setting up Musician Tools..."
 	@echo ""
 	@echo "📦 Step 1/5: Installing frontend dependencies..."
@@ -73,7 +79,7 @@ setup:
 	@echo "   - Frontend (after 'make dev'): http://localhost:5173"
 
 # Start everything (Docker + frontend)
-start:
+start: check-env
 	@echo "🚀 Starting Musician Tools..."
 	@echo ""
 	@echo "🐳 Starting Docker containers..."
@@ -114,16 +120,16 @@ install-backend:
 # ============================================
 
 # Docker compose commands (run from repo root)
-up:
+up: check-env
 	docker compose up -d
 
 down:
 	docker compose down
 
-restart:
+restart: check-env
 	docker compose restart backend
 
-rebuild-backend:
+rebuild-backend: check-env
 	docker compose up -d --build backend
 
 ps:
@@ -155,7 +161,7 @@ migrate-prod:
 seed:
 	docker compose exec backend npx sequelize-cli db:seed:all
 
-reset-db:
+reset-db: check-env
 	@echo "🗑️  Resetting database..."
 	docker compose down -v
 	docker compose up -d
