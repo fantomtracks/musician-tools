@@ -3,7 +3,7 @@ jest.mock('../models', () => {
     Topic: {
       create: jest.fn(async (data) => ({ ...data, uid: 'topic-uid' })),
       findAll: jest.fn(async () => []),
-      findByPk: jest.fn(),
+      findOne: jest.fn(),
     },
   };
 });
@@ -45,6 +45,13 @@ describe('topiccontroller', () => {
     expect(res.status).toHaveBeenCalledWith(201);
     expect(res.json).toHaveBeenCalled();
     expect(next).not.toHaveBeenCalled();
+  });
+
+  test('createTopic without a JSON body → 400, not a 500 (story 7.5 req.body guard)', async () => {
+    const next = mockNext();
+    await controller.createTopic({ session: { user: 'user-1' } }, mockRes(), next); // req.body undefined
+    expect(next.mock.calls[0][0].status).toBe(400);
+    expect(Topic.create).not.toHaveBeenCalled();
   });
 
   test('createTopic persists category when provided', async () => {
@@ -176,7 +183,7 @@ describe('topiccontroller', () => {
 
     test('updates name and category when both provided', async () => {
       const topic = mockTopic();
-      Topic.findByPk.mockResolvedValue(topic);
+      Topic.findOne.mockResolvedValue(topic);
 
       const req = {
         params: { uid: '11111111-1111-4111-8111-111111111111' },
@@ -195,7 +202,7 @@ describe('topiccontroller', () => {
 
     test('partial update keeps missing fields unchanged and blank category clears it', async () => {
       const topic = mockTopic();
-      Topic.findByPk.mockResolvedValue(topic);
+      Topic.findOne.mockResolvedValue(topic);
 
       const req = {
         params: { uid: '11111111-1111-4111-8111-111111111111' },
@@ -213,7 +220,7 @@ describe('topiccontroller', () => {
     test('rejects blank or oversized name with 400', async () => {
       for (const name of ['', '   ', 'a'.repeat(256)]) {
         const topic = mockTopic();
-        Topic.findByPk.mockResolvedValue(topic);
+        Topic.findOne.mockResolvedValue(topic);
 
         const req = { params: { uid: '11111111-1111-4111-8111-111111111111' }, session: { user: 'user-1' }, body: { name } };
         const res = mockRes();
@@ -229,7 +236,7 @@ describe('topiccontroller', () => {
     test('rejects non-string category with 400 instead of wiping it', async () => {
       for (const category of [123, true, ['x'], { a: 1 }]) {
         const topic = mockTopic();
-        Topic.findByPk.mockResolvedValue(topic);
+        Topic.findOne.mockResolvedValue(topic);
 
         const req = { params: { uid: '11111111-1111-4111-8111-111111111111' }, session: { user: 'user-1' }, body: { category } };
         const res = mockRes();
@@ -244,7 +251,7 @@ describe('topiccontroller', () => {
 
     test('explicit null category clears it', async () => {
       const topic = mockTopic();
-      Topic.findByPk.mockResolvedValue(topic);
+      Topic.findOne.mockResolvedValue(topic);
 
       const req = { params: { uid: '11111111-1111-4111-8111-111111111111' }, session: { user: 'user-1' }, body: { category: null } };
       const res = mockRes();
@@ -262,7 +269,7 @@ describe('topiccontroller', () => {
 
       await controller.updateTopic(req, res, next);
 
-      expect(Topic.findByPk).not.toHaveBeenCalled();
+      expect(Topic.findOne).not.toHaveBeenCalled();
       expect(next.mock.calls[0][0].status).toBe(404);
     });
 
@@ -270,7 +277,7 @@ describe('topiccontroller', () => {
       const uniqueError = new Error('duplicate');
       uniqueError.name = 'SequelizeUniqueConstraintError';
       const topic = mockTopic({ update: jest.fn().mockRejectedValue(uniqueError) });
-      Topic.findByPk.mockResolvedValue(topic);
+      Topic.findOne.mockResolvedValue(topic);
 
       const req = { params: { uid: '11111111-1111-4111-8111-111111111111' }, session: { user: 'user-1' }, body: { name: 'Walking bass' } };
       const res = mockRes();
@@ -282,7 +289,7 @@ describe('topiccontroller', () => {
     });
 
     test('returns 404 when topic does not exist', async () => {
-      Topic.findByPk.mockResolvedValue(null);
+      Topic.findOne.mockResolvedValue(null);
 
       const req = { params: { uid: '99999999-9999-4999-8999-999999999999' }, session: { user: 'user-1' }, body: { name: 'X' } };
       const res = mockRes();
@@ -293,9 +300,8 @@ describe('topiccontroller', () => {
       expect(next.mock.calls[0][0].status).toBe(404);
     });
 
-    test('returns 403 when topic belongs to another user', async () => {
-      const topic = mockTopic({ userUid: 'user-2' });
-      Topic.findByPk.mockResolvedValue(topic);
+    test('returns 404 when topic belongs to another user (scoped out, story 7.5)', async () => {
+      Topic.findOne.mockResolvedValue(null); // scoped where excludes a foreign topic
 
       const req = { params: { uid: '11111111-1111-4111-8111-111111111111' }, session: { user: 'user-1' }, body: { name: 'X' } };
       const res = mockRes();
@@ -303,8 +309,7 @@ describe('topiccontroller', () => {
 
       await controller.updateTopic(req, res, next);
 
-      expect(topic.update).not.toHaveBeenCalled();
-      expect(next.mock.calls[0][0].status).toBe(403);
+      expect(next.mock.calls[0][0].status).toBe(404);
     });
 
     test('returns 401 when unauthenticated', async () => {
@@ -314,13 +319,13 @@ describe('topiccontroller', () => {
 
       await controller.updateTopic(req, res, next);
 
-      expect(Topic.findByPk).not.toHaveBeenCalled();
+      expect(Topic.findOne).not.toHaveBeenCalled();
       expect(next.mock.calls[0][0].status).toBe(401);
     });
 
     test('returns 403 and does not update the system topic (story 8.2)', async () => {
       const topic = mockTopic({ isSystem: true });
-      Topic.findByPk.mockResolvedValue(topic);
+      Topic.findOne.mockResolvedValue(topic);
 
       const req = { params: { uid: '11111111-1111-4111-8111-111111111111' }, session: { user: 'user-1' }, body: { name: 'Renamed' } };
       const res = mockRes();
@@ -341,13 +346,13 @@ describe('topiccontroller', () => {
 
       await controller.deleteTopic(req, res, next);
 
-      expect(Topic.findByPk).not.toHaveBeenCalled();
+      expect(Topic.findOne).not.toHaveBeenCalled();
       expect(next.mock.calls[0][0].status).toBe(404);
     });
 
     test('deletes an owned topic and returns a message', async () => {
       const topic = { userUid: 'user-1', destroy: jest.fn() };
-      Topic.findByPk.mockResolvedValue(topic);
+      Topic.findOne.mockResolvedValue(topic);
 
       const req = { params: { uid: '11111111-1111-4111-8111-111111111111' }, session: { user: 'user-1' } };
       const res = mockRes();
@@ -360,7 +365,7 @@ describe('topiccontroller', () => {
     });
 
     test('returns 404 when topic does not exist', async () => {
-      Topic.findByPk.mockResolvedValue(null);
+      Topic.findOne.mockResolvedValue(null);
 
       const req = { params: { uid: '99999999-9999-4999-8999-999999999999' }, session: { user: 'user-1' } };
       const res = mockRes();
@@ -371,9 +376,8 @@ describe('topiccontroller', () => {
       expect(next.mock.calls[0][0].status).toBe(404);
     });
 
-    test('returns 403 when topic belongs to another user', async () => {
-      const topic = { userUid: 'user-2', destroy: jest.fn() };
-      Topic.findByPk.mockResolvedValue(topic);
+    test('returns 404 when topic belongs to another user (scoped out, story 7.5)', async () => {
+      Topic.findOne.mockResolvedValue(null); // scoped where excludes a foreign topic
 
       const req = { params: { uid: '11111111-1111-4111-8111-111111111111' }, session: { user: 'user-1' } };
       const res = mockRes();
@@ -381,8 +385,7 @@ describe('topiccontroller', () => {
 
       await controller.deleteTopic(req, res, next);
 
-      expect(topic.destroy).not.toHaveBeenCalled();
-      expect(next.mock.calls[0][0].status).toBe(403);
+      expect(next.mock.calls[0][0].status).toBe(404);
     });
 
     test('returns 401 when unauthenticated', async () => {
@@ -392,13 +395,13 @@ describe('topiccontroller', () => {
 
       await controller.deleteTopic(req, res, next);
 
-      expect(Topic.findByPk).not.toHaveBeenCalled();
+      expect(Topic.findOne).not.toHaveBeenCalled();
       expect(next.mock.calls[0][0].status).toBe(401);
     });
 
     test('returns 403 and does not delete the system topic (story 8.2)', async () => {
       const topic = { userUid: 'user-1', isSystem: true, destroy: jest.fn() };
-      Topic.findByPk.mockResolvedValue(topic);
+      Topic.findOne.mockResolvedValue(topic);
 
       const req = { params: { uid: '11111111-1111-4111-8111-111111111111' }, session: { user: 'user-1' } };
       const res = mockRes();

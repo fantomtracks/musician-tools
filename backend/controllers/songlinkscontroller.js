@@ -10,13 +10,10 @@ const generateStreamingLinks = async (req, res, next) => {
       return next(createError(401, 'Unauthorized'));
     }
 
-    const song = await Song.findByPk(req.params.uid);
+    // Scoped lookup (story 7.5): not-found and not-yours both 404 — no ownership 403.
+    const song = await Song.findOne({ where: { uid: req.params.uid, userUid: userId } });
     if (!song) {
       return next(createError(404, 'Song not found'));
-    }
-
-    if (song.userUid !== userId) {
-      return next(createError(403, 'Forbidden'));
     }
 
     const artist = (song.artist || '').trim();

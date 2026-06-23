@@ -1,4 +1,4 @@
-const { Song, SongPlay, PracticeSession, SessionItem, sequelize } = require('../models');
+const { Song, SongPlay, PracticeSession, SessionItem, Instrument, sequelize } = require('../models');
 const createError = require('http-errors');
 const logger = require('../logger');
 const { fetchSongMetadata } = require('../services/songMetadataService');
@@ -77,7 +77,14 @@ const getAllSongs = async (req, res, next) => {
 // GET single song by uid
 const getSong = async (req, res, next) => {
   try {
-    const song = await Song.findByPk(req.params.uid);
+    const userId = req.session.user;
+    if (!userId) {
+      return next(createError(401, 'Unauthorized'));
+    }
+
+    // Scoped lookup (story 7.5): another user's uid and an unknown uid get the
+    // same 404 — closes the IDOR and the existence oracle.
+    const song = await Song.findOne({ where: { uid: req.params.uid, userUid: userId } });
     if (!song) {
       return next(createError(404, 'Song not found'));
     }
@@ -96,7 +103,7 @@ const createSong = async (req, res, next) => {
       return next(createError(401, 'Unauthorized'));
     }
 
-    const { title, bpm, durationSeconds, key, capo, notes, instrument, artist, album, language, genre, pitchStandard, instrumentTuning, technique, instrumentLinks, instrumentDifficulty, myInstrumentUid, lastPlayed, streamingLinks, timeSignature, mode } = req.body;
+    const { title, bpm, durationSeconds, key, capo, notes, instrument, artist, album, language, genre, pitchStandard, instrumentTuning, technique, instrumentLinks, instrumentDifficulty, myInstrumentUid, lastPlayed, streamingLinks, timeSignature, mode } = req.body || {};
 
     if (!title) {
       return next(createError(400, 'Title is required'));
@@ -148,17 +155,13 @@ const updateSong = async (req, res, next) => {
       return next(createError(401, 'Unauthorized'));
     }
 
-    const song = await Song.findByPk(req.params.uid);
+    // Scoped lookup (story 7.5): not-found and not-yours both 404 — no ownership 403.
+    const song = await Song.findOne({ where: { uid: req.params.uid, userUid: userId } });
     if (!song) {
       return next(createError(404, 'Song not found'));
     }
 
-    // Check ownership
-    if (song.userUid !== userId) {
-      return next(createError(403, 'Forbidden'));
-    }
-
-    const { title, bpm, durationSeconds, key, capo, notes, instrument, artist, album, language, genre, pitchStandard, instrumentTuning, technique, instrumentLinks, instrumentDifficulty, myInstrumentUid, lastPlayed, streamingLinks, timeSignature, mode } = req.body;
+    const { title, bpm, durationSeconds, key, capo, notes, instrument, artist, album, language, genre, pitchStandard, instrumentTuning, technique, instrumentLinks, instrumentDifficulty, myInstrumentUid, lastPlayed, streamingLinks, timeSignature, mode } = req.body || {};
 
     const normalizedCapo = normalizeCapo(capo);
 
@@ -205,14 +208,10 @@ const deleteSong = async (req, res, next) => {
       return next(createError(401, 'Unauthorized'));
     }
 
-    const song = await Song.findByPk(req.params.uid);
+    // Scoped lookup (story 7.5): not-found and not-yours both 404 — no ownership 403.
+    const song = await Song.findOne({ where: { uid: req.params.uid, userUid: userId } });
     if (!song) {
       return next(createError(404, 'Song not found'));
-    }
-
-    // Check ownership
-    if (song.userUid !== userId) {
-      return next(createError(403, 'Forbidden'));
     }
 
     // Deleting the song cascades to its PlaylistSongs join rows via the FK
@@ -254,14 +253,19 @@ const markSongPlayed = async (req, res, next) => {
       return next(createError(400, 'playedOn cannot be in the future'));
     }
 
-    const song = await Song.findByPk(req.params.uid);
+    // Scoped lookup (story 7.5): not-found and not-yours both 404 — no ownership 403.
+    const song = await Song.findOne({ where: { uid: req.params.uid, userUid: userId } });
     if (!song) {
       return next(createError(404, 'Song not found'));
     }
 
-    // Check ownership
-    if (song.userUid !== userId) {
-      return next(createError(403, 'Forbidden'));
+    // A provided instrument reference must belong to the user (story 7.5): an
+    // unowned/unknown instrumentUid is a 404, not silently persisted on the play.
+    if (instrumentUid) {
+      const ownedInstrument = await Instrument.findOne({ where: { uid: instrumentUid, userUid: userId } });
+      if (!ownedInstrument) {
+        return next(createError(404, 'Instrument not found'));
+      }
     }
 
     let trimmedInstrument = typeof instrumentType === 'string' ? instrumentType.trim() : '';
@@ -375,14 +379,10 @@ const getSongPlays = async (req, res, next) => {
       return next(createError(401, 'Unauthorized'));
     }
 
-    const song = await Song.findByPk(req.params.uid);
+    // Scoped lookup (story 7.5): not-found and not-yours both 404 — no ownership 403.
+    const song = await Song.findOne({ where: { uid: req.params.uid, userUid: userId } });
     if (!song) {
       return next(createError(404, 'Song not found'));
-    }
-
-    // Check ownership
-    if (song.userUid !== userId) {
-      return next(createError(403, 'Forbidden'));
     }
 
     const plays = await SongPlay.findAll({

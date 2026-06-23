@@ -32,7 +32,7 @@ const createTopic = async (req, res, next) => {
       return next(createError(401, 'Unauthorized'));
     }
 
-    const { name, category } = req.body;
+    const { name, category } = req.body || {};
     const trimmedName = typeof name === 'string' ? name.trim() : '';
     if (!trimmedName) {
       return next(createError(400, 'Name is required'));
@@ -74,19 +74,18 @@ const updateTopic = async (req, res, next) => {
       return next(createError(404, 'Topic not found'));
     }
 
-    const topic = await Topic.findByPk(req.params.uid);
+    // Scoped lookup (story 7.5): not-found and not-yours both 404 — no ownership 403.
+    const topic = await Topic.findOne({ where: { uid: req.params.uid, userUid: userId } });
     if (!topic) {
       return next(createError(404, 'Topic not found'));
     }
-    if (topic.userUid !== userId) {
-      return next(createError(403, 'Forbidden'));
-    }
     // Story 8.2: the system "Free practice" topic cannot be renamed or edited.
+    // This is a legitimate non-ownership 403 (the user owns it) — it STAYS 403.
     if (topic.isSystem) {
       return next(createError(403, 'Cannot edit the system topic'));
     }
 
-    const { name, category } = req.body;
+    const { name, category } = req.body || {};
 
     let nextName = topic.name;
     if (name !== undefined) {
@@ -135,14 +134,13 @@ const deleteTopic = async (req, res, next) => {
       return next(createError(404, 'Topic not found'));
     }
 
-    const topic = await Topic.findByPk(req.params.uid);
+    // Scoped lookup (story 7.5): not-found and not-yours both 404 — no ownership 403.
+    const topic = await Topic.findOne({ where: { uid: req.params.uid, userUid: userId } });
     if (!topic) {
       return next(createError(404, 'Topic not found'));
     }
-    if (topic.userUid !== userId) {
-      return next(createError(403, 'Forbidden'));
-    }
     // Story 8.2: the system "Free practice" topic cannot be deleted.
+    // Legitimate non-ownership 403 (the user owns it) — it STAYS 403.
     if (topic.isSystem) {
       return next(createError(403, 'Cannot delete the system topic'));
     }

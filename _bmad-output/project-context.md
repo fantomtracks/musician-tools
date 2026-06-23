@@ -75,7 +75,7 @@ _Versions = état actuel du projet (aucune contrainte de montée de version docu
 
 **Express / Sequelize**
 - Routes dans `backend/routes/` → contrôleurs `backend/controllers/xxxcontroller.js` (tout en minuscules, sans tiret)
-- Pattern contrôleur OBLIGATOIRE : `req.session.user` (uid) → 401 si absent → `findByPk` → 404 si introuvable → `entity.userUid !== userId` → 403 → action
+- Pattern contrôleur OBLIGATOIRE (durci story 7.5) : `req.session.user` (uid) → 401 si absent → **requête scopée** `Model.findOne({ where: { uid, userUid } })` → 404 si `null`. L'ownership passe par le `where`, **jamais par un 403** : « pas à toi » doit être indistinguable de « n'existe pas » (anti-IDOR / anti-oracle d'énumération). Ne PAS revenir à `findByPk` + `entity.userUid !== userId → 403`. Un 403 ne subsiste que pour un refus **non-ownership** légitime (ex. topic système « Free practice »).
 - Réponses : entité JSON brute (pas d'enveloppe `{data:...}`) ; delete → `{ message: '...' }`
 - Auth : `middleware/authsess.js` vérifie `req.session.loggedIn === true` (le JWT en session n'est JAMAIS vérifié — ne pas s'appuyer dessus)
 - Modèles : PK `uid` UUID v4, `timestamps: true` ; chargés automatiquement par lecture du dossier `models/` (créer le fichier suffit)
@@ -113,7 +113,7 @@ _Versions = état actuel du projet (aucune contrainte de montée de version docu
 ### Critical Don't-Miss Rules
 
 **Anti-patterns à ne pas reproduire**
-- `getSong` (GET /api/songs/:uid) ne vérifie PAS l'ownership — incohérence existante ; toute NOUVELLE route doit vérifier l'ownership (et ne pas copier getSong)
+- Toute route à record DOIT scoper par `userUid` via `findOne({ where: { uid, userUid } })` → 404 (cf. pattern contrôleur). L'ancienne faille `getSong` (GET /api/songs/:uid sans ownership) a été fermée en story 7.5 ; ne jamais réintroduire de lecture/écriture scopée par `uid` seul
 - `node-fetch` et `body-parser` sont utilisés mais absents des dépendances directes (transitifs) — ne pas les importer dans du nouveau code ; utiliser le `fetch` natif de Node 22 et `express.json()`
 - La connexion Sequelize est créée deux fois (db.js puis models/index.js) — la source de vérité est `models/index.js`
 - Fichiers morts à ignorer : `test-scrape.js`, `backend/test-*.js`, `cookies.txt` — ne pas s'en inspirer

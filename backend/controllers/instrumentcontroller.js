@@ -29,7 +29,7 @@ const createInstrument = async (req, res, next) => {
       return next(createError(401, 'Unauthorized'));
     }
 
-    const { name, type, brand, model } = req.body;
+    const { name, type, brand, model } = req.body || {};
     if (!name) {
       return next(createError(400, 'Name is required'));
     }
@@ -57,15 +57,13 @@ const updateInstrument = async (req, res, next) => {
       return next(createError(401, 'Unauthorized'));
     }
 
-    const instrument = await Instrument.findByPk(req.params.uid);
+    // Scoped lookup (story 7.5): not-found and not-yours both 404 — no ownership 403.
+    const instrument = await Instrument.findOne({ where: { uid: req.params.uid, userUid: userId } });
     if (!instrument) {
       return next(createError(404, 'Instrument not found'));
     }
-    if (instrument.userUid !== userId) {
-      return next(createError(403, 'Forbidden'));
-    }
 
-    const { name, type, brand, model } = req.body;
+    const { name, type, brand, model } = req.body || {};
     await instrument.update({
       name: name !== undefined ? name : instrument.name,
       type: type !== undefined ? type : instrument.type,
@@ -88,12 +86,10 @@ const deleteInstrument = async (req, res, next) => {
       return next(createError(401, 'Unauthorized'));
     }
 
-    const instrument = await Instrument.findByPk(req.params.uid);
+    // Scoped lookup (story 7.5): not-found and not-yours both 404 — no ownership 403.
+    const instrument = await Instrument.findOne({ where: { uid: req.params.uid, userUid: userId } });
     if (!instrument) {
       return next(createError(404, 'Instrument not found'));
-    }
-    if (instrument.userUid !== userId) {
-      return next(createError(403, 'Forbidden'));
     }
 
     await instrument.destroy();

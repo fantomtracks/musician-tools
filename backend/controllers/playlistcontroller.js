@@ -81,14 +81,10 @@ const getPlaylist = async (req, res, next) => {
       return next(createError(401, 'Unauthorized'));
     }
 
-    const playlist = await Playlist.findByPk(req.params.uid);
+    // Scoped lookup (story 7.5): not-found and not-yours both 404 — no ownership 403.
+    const playlist = await Playlist.findOne({ where: { uid: req.params.uid, userUid: userId } });
     if (!playlist) {
       return next(createError(404, 'Playlist not found'));
-    }
-
-    // Check ownership
-    if (playlist.userUid !== userId) {
-      return next(createError(403, 'Forbidden'));
     }
 
     const byPlaylist = await songUidsByPlaylist([playlist.uid]);
@@ -138,14 +134,10 @@ const updatePlaylist = async (req, res, next) => {
       return next(createError(401, 'Unauthorized'));
     }
 
-    const playlist = await Playlist.findByPk(req.params.uid);
+    // Scoped lookup (story 7.5): not-found and not-yours both 404 — no ownership 403.
+    const playlist = await Playlist.findOne({ where: { uid: req.params.uid, userUid: userId } });
     if (!playlist) {
       return next(createError(404, 'Playlist not found'));
-    }
-
-    // Check ownership
-    if (playlist.userUid !== userId) {
-      return next(createError(403, 'Forbidden'));
     }
 
     const { name, description, songUids } = req.body || {};
@@ -179,14 +171,10 @@ const deletePlaylist = async (req, res, next) => {
       return next(createError(401, 'Unauthorized'));
     }
 
-    const playlist = await Playlist.findByPk(req.params.uid);
+    // Scoped lookup (story 7.5): not-found and not-yours both 404 — no ownership 403.
+    const playlist = await Playlist.findOne({ where: { uid: req.params.uid, userUid: userId } });
     if (!playlist) {
       return next(createError(404, 'Playlist not found'));
-    }
-
-    // Check ownership
-    if (playlist.userUid !== userId) {
-      return next(createError(403, 'Forbidden'));
     }
 
     await playlist.destroy();
@@ -207,14 +195,10 @@ const addSongToPlaylist = async (req, res, next) => {
 
     const { uid: playlistUid, songUid } = req.params;
 
-    const playlist = await Playlist.findByPk(playlistUid);
+    // Scoped lookup (story 7.5): not-found and not-yours both 404 — no ownership 403.
+    const playlist = await Playlist.findOne({ where: { uid: playlistUid, userUid: userId } });
     if (!playlist) {
       return next(createError(404, 'Playlist not found'));
-    }
-
-    // Check ownership
-    if (playlist.userUid !== userId) {
-      return next(createError(403, 'Forbidden'));
     }
 
     const finalUids = await sequelize.transaction(async (transaction) => {
@@ -241,14 +225,10 @@ const removeSongFromPlaylist = async (req, res, next) => {
 
     const { uid: playlistUid, songUid } = req.params;
 
-    const playlist = await Playlist.findByPk(playlistUid);
+    // Scoped lookup (story 7.5): not-found and not-yours both 404 — no ownership 403.
+    const playlist = await Playlist.findOne({ where: { uid: playlistUid, userUid: userId } });
     if (!playlist) {
       return next(createError(404, 'Playlist not found'));
-    }
-
-    // Check ownership
-    if (playlist.userUid !== userId) {
-      return next(createError(403, 'Forbidden'));
     }
 
     const finalUids = await sequelize.transaction(async (transaction) => {

@@ -1,7 +1,7 @@
 jest.mock('../models', () => ({
   Playlist: {
     findAll: jest.fn(),
-    findByPk: jest.fn(),
+    findOne: jest.fn(),
     create: jest.fn()
   },
   PlaylistSong: {
@@ -133,7 +133,7 @@ describe('createPlaylist', () => {
 
 describe('updatePlaylist', () => {
   test('omitting songUids keeps the existing songs (never clears them)', async () => {
-    Playlist.findByPk.mockResolvedValue(ownedPlaylist());
+    Playlist.findOne.mockResolvedValue(ownedPlaylist());
     PlaylistSong.findAll.mockResolvedValue([
       { playlistUid: 'p1', songUid: 's1', position: 0 }
     ]);
@@ -150,15 +150,15 @@ describe('updatePlaylist', () => {
 });
 
 describe('getPlaylist / ownership', () => {
-  test('403 when the playlist belongs to another user', async () => {
-    Playlist.findByPk.mockResolvedValue(ownedPlaylist({ userUid: 'someone-else' }));
+  test('404 when the playlist belongs to another user (scoped out, story 7.5)', async () => {
+    Playlist.findOne.mockResolvedValue(null); // scoped where excludes a foreign playlist
     const next = mockNext();
     await controller.getPlaylist({ session: { user: 'user-1' }, params: { uid: 'p1' } }, mockRes(), next);
-    expect(next.mock.calls[0][0].status).toBe(403);
+    expect(next.mock.calls[0][0].status).toBe(404);
   });
 
   test('404 when the playlist does not exist', async () => {
-    Playlist.findByPk.mockResolvedValue(null);
+    Playlist.findOne.mockResolvedValue(null);
     const next = mockNext();
     await controller.getPlaylist({ session: { user: 'user-1' }, params: { uid: 'nope' } }, mockRes(), next);
     expect(next.mock.calls[0][0].status).toBe(404);
@@ -167,7 +167,7 @@ describe('getPlaylist / ownership', () => {
 
 describe('removeSongFromPlaylist', () => {
   test('removes the song from the join table, returns the remaining ordered songUids', async () => {
-    Playlist.findByPk.mockResolvedValue(ownedPlaylist());
+    Playlist.findOne.mockResolvedValue(ownedPlaylist());
     PlaylistSong.findAll.mockResolvedValue([
       { playlistUid: 'p1', songUid: 's1', position: 0 },
       { playlistUid: 'p1', songUid: 's2', position: 1 }
@@ -185,7 +185,7 @@ describe('removeSongFromPlaylist', () => {
 
 describe('addSongToPlaylist', () => {
   test('appends an owned song to the join table', async () => {
-    Playlist.findByPk.mockResolvedValue(ownedPlaylist());
+    Playlist.findOne.mockResolvedValue(ownedPlaylist());
     PlaylistSong.findAll.mockResolvedValue([
       { playlistUid: 'p1', songUid: 's1', position: 0 }
     ]);

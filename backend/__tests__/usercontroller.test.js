@@ -113,6 +113,17 @@ describe('usercontroller.createUser', () => {
     expect(User.create.mock.calls[0][0].discriminator).toMatch(/^\d{4}$/);
   });
 
+  test('without a JSON body → 400, not a 500 crash (story 7.5 req.body guard)', async () => {
+    const validationErr = new Error('notNull Violation: User.email cannot be null');
+    validationErr.name = 'SequelizeValidationError';
+    User.create.mockRejectedValue(validationErr);
+
+    const next = mockNext();
+    await controller.createUser({ session: {} }, mockRes(), next); // req.body undefined
+
+    expect(next.mock.calls[0][0].status).toBe(400);
+  });
+
   test('retries with a new discriminator on a (name, discriminator) collision (7.2)', async () => {
     const collision = new Error('dup');
     collision.name = 'SequelizeUniqueConstraintError';
@@ -146,6 +157,12 @@ describe('usercontroller.loginUser', () => {
       validPassword: jest.fn().mockResolvedValue(true),
     };
   }
+
+  test('without a JSON body (or missing login/password) → 400, not a 500 (story 7.5)', async () => {
+    const next = mockNext();
+    await controller.loginUser({ session: {} }, mockRes(), next); // req.body undefined
+    expect(next.mock.calls[0][0].status).toBe(400);
+  });
 
   test('logs in via session only, with no JWT in the response or session (story 7.1)', async () => {
     const user = mockLoginUser();

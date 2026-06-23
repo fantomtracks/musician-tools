@@ -435,14 +435,13 @@ const updatePracticeSession = async (req, res, next) => {
       return next(createError(404, 'Session not found'));
     }
 
-    const practiceSession = await PracticeSession.findByPk(req.params.uid, {
+    // Scoped lookup (story 7.5): not-found and not-yours both 404 — no ownership 403.
+    const practiceSession = await PracticeSession.findOne({
+      where: { uid: req.params.uid, userUid: userId },
       include: [{ model: SessionItem, as: 'items' }]
     });
     if (!practiceSession) {
       return next(createError(404, 'Session not found'));
-    }
-    if (practiceSession.userUid !== userId) {
-      return next(createError(403, 'Forbidden'));
     }
 
     // durationMinutes is no longer accepted (Epic 8): the total derives from the
@@ -717,12 +716,10 @@ const deletePracticeSession = async (req, res, next) => {
       return next(createError(404, 'Session not found'));
     }
 
-    const practiceSession = await PracticeSession.findByPk(req.params.uid);
+    // Scoped lookup (story 7.5): not-found and not-yours both 404 — no ownership 403.
+    const practiceSession = await PracticeSession.findOne({ where: { uid: req.params.uid, userUid: userId } });
     if (!practiceSession) {
       return next(createError(404, 'Session not found'));
-    }
-    if (practiceSession.userUid !== userId) {
-      return next(createError(403, 'Forbidden'));
     }
 
     await practiceSession.destroy();

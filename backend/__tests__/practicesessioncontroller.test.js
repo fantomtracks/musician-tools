@@ -3,7 +3,7 @@ jest.mock('../models', () => {
     PracticeSession: {
       create: jest.fn(async (data) => ({ ...data, uid: 'session-uid' })),
       findAll: jest.fn(async () => []),
-      findByPk: jest.fn(),
+      findOne: jest.fn(),
     },
     SessionItem: {
       bulkCreate: jest.fn(async (rows) => rows.map((row, i) => ({ ...row, uid: `item-${i}` }))),
@@ -762,7 +762,7 @@ describe('practicesessioncontroller', () => {
 
     test('partial update keeps absent fields and passes the transaction option', async () => {
       const session = mockExistingSession();
-      PracticeSession.findByPk.mockResolvedValue(session);
+      PracticeSession.findOne.mockResolvedValue(session);
 
       const req = { params: { uid: SESSION_UID }, session: { user: 'user-1' }, body: { date: '2026-05-01' } };
       const res = mockRes();
@@ -782,7 +782,7 @@ describe('practicesessioncontroller', () => {
 
     test('explicit null clears the note (and a legacy durationMinutes is ignored)', async () => {
       const session = mockExistingSession();
-      PracticeSession.findByPk.mockResolvedValue(session);
+      PracticeSession.findOne.mockResolvedValue(session);
 
       const req = { params: { uid: SESSION_UID }, session: { user: 'user-1' }, body: { durationMinutes: null, note: null } };
 
@@ -796,7 +796,7 @@ describe('practicesessioncontroller', () => {
     test('rejects invalid or future dates with 400', async () => {
       for (const date of ['07/06/2026', utcDateString(2), '1899-12-31']) {
         const session = mockExistingSession();
-        PracticeSession.findByPk.mockResolvedValue(session);
+        PracticeSession.findOne.mockResolvedValue(session);
         const next = mockNext();
 
         await controller.updatePracticeSession(
@@ -810,21 +810,22 @@ describe('practicesessioncontroller', () => {
       }
     });
 
-    test('404 on malformed and unknown uid, 403 on foreign session, 401 unauthenticated', async () => {
+    test('404 on malformed, unknown, and foreign session; 401 unauthenticated (story 7.5)', async () => {
       const badNext = mockNext();
       await controller.updatePracticeSession({ params: { uid: 'nope' }, session: { user: 'user-1' }, body: {} }, mockRes(), badNext);
-      expect(PracticeSession.findByPk).not.toHaveBeenCalled();
+      expect(PracticeSession.findOne).not.toHaveBeenCalled();
       expect(badNext.mock.calls[0][0].status).toBe(404);
 
-      PracticeSession.findByPk.mockResolvedValue(null);
+      PracticeSession.findOne.mockResolvedValue(null);
       const missingNext = mockNext();
       await controller.updatePracticeSession({ params: { uid: SESSION_UID }, session: { user: 'user-1' }, body: {} }, mockRes(), missingNext);
       expect(missingNext.mock.calls[0][0].status).toBe(404);
 
-      PracticeSession.findByPk.mockResolvedValue(mockExistingSession({ userUid: 'user-2' }));
+      // Story 7.5: a foreign session is scoped out → null → 404 (no 403 oracle).
+      PracticeSession.findOne.mockResolvedValue(null);
       const foreignNext = mockNext();
       await controller.updatePracticeSession({ params: { uid: SESSION_UID }, session: { user: 'user-1' }, body: {} }, mockRes(), foreignNext);
-      expect(foreignNext.mock.calls[0][0].status).toBe(403);
+      expect(foreignNext.mock.calls[0][0].status).toBe(404);
 
       const anonNext = mockNext();
       await controller.updatePracticeSession({ params: { uid: SESSION_UID }, session: {}, body: {} }, mockRes(), anonNext);
@@ -834,7 +835,7 @@ describe('practicesessioncontroller', () => {
     test('items diff: updates an existing row in place, label preserved without a new ref', async () => {
       const item = mockItem();
       const session = mockExistingSession({ items: [item] });
-      PracticeSession.findByPk.mockResolvedValue(session);
+      PracticeSession.findOne.mockResolvedValue(session);
 
       const req = {
         params: { uid: SESSION_UID },
@@ -855,7 +856,7 @@ describe('practicesessioncontroller', () => {
     test('items diff: reclassifying re-resolves the label (FR4)', async () => {
       const orphan = mockItem({ songUid: null, topicUid: null, label: 'Ghost topic' });
       const session = mockExistingSession({ items: [orphan] });
-      PracticeSession.findByPk.mockResolvedValue(session);
+      PracticeSession.findOne.mockResolvedValue(session);
 
       const req = {
         params: { uid: SESSION_UID },
@@ -874,7 +875,7 @@ describe('practicesessioncontroller', () => {
     test('items diff: an orphan sent back without a ref keeps its snapshot label (FR4)', async () => {
       const orphan = mockItem({ songUid: null, topicUid: null, label: 'Ghost topic', minutes: 10 });
       const session = mockExistingSession({ items: [orphan] });
-      PracticeSession.findByPk.mockResolvedValue(session);
+      PracticeSession.findOne.mockResolvedValue(session);
 
       const req = {
         params: { uid: SESSION_UID },
@@ -894,7 +895,7 @@ describe('practicesessioncontroller', () => {
       const kept = mockItem();
       const removed = mockItem({ uid: ITEM_UID_2, label: 'To remove' });
       const session = mockExistingSession({ items: [kept, removed] });
-      PracticeSession.findByPk.mockResolvedValue(session);
+      PracticeSession.findOne.mockResolvedValue(session);
 
       const req = {
         params: { uid: SESSION_UID },
@@ -914,7 +915,7 @@ describe('practicesessioncontroller', () => {
 
     test("items diff: a uid that is not one of this session's items is rejected with 400", async () => {
       const session = mockExistingSession({ items: [mockItem()] });
-      PracticeSession.findByPk.mockResolvedValue(session);
+      PracticeSession.findOne.mockResolvedValue(session);
       const next = mockNext();
 
       await controller.updatePracticeSession(
@@ -937,7 +938,7 @@ describe('practicesessioncontroller', () => {
       ];
       for (const body of bodies) {
         const session = mockExistingSession({ items: [mockItem()] });
-        PracticeSession.findByPk.mockResolvedValue(session);
+        PracticeSession.findOne.mockResolvedValue(session);
         const next = mockNext();
 
         await controller.updatePracticeSession({ params: { uid: SESSION_UID }, session: { user: 'user-1' }, body }, mockRes(), next);
@@ -949,7 +950,7 @@ describe('practicesessioncontroller', () => {
 
     test('rejects a duplicate item uid in the payload with 400', async () => {
       const session = mockExistingSession({ items: [mockItem()] });
-      PracticeSession.findByPk.mockResolvedValue(session);
+      PracticeSession.findOne.mockResolvedValue(session);
       const next = mockNext();
 
       await controller.updatePracticeSession(
@@ -965,7 +966,7 @@ describe('practicesessioncontroller', () => {
 
     test('response re-reads items ordered by position', async () => {
       const session = mockExistingSession();
-      PracticeSession.findByPk.mockResolvedValue(session);
+      PracticeSession.findOne.mockResolvedValue(session);
 
       await controller.updatePracticeSession(
         { params: { uid: SESSION_UID }, session: { user: 'user-1' }, body: { note: 'updated' } },
@@ -981,7 +982,7 @@ describe('practicesessioncontroller', () => {
 
     test('4.2: changing the date moves the linked plays to the new day (AC3)', async () => {
       const session = mockExistingSession({ date: '2026-06-01', items: [mockItem()] });
-      PracticeSession.findByPk.mockResolvedValue(session);
+      PracticeSession.findOne.mockResolvedValue(session);
       SessionItem.findAll.mockResolvedValue([{ uid: ITEM_UID }]);
 
       await controller.updatePracticeSession(
@@ -998,7 +999,7 @@ describe('practicesessioncontroller', () => {
 
     test('4.2: changing the instrument re-labels the linked plays (FR7)', async () => {
       const session = mockExistingSession({ instrumentType: 'Bass', items: [mockItem()] });
-      PracticeSession.findByPk.mockResolvedValue(session);
+      PracticeSession.findOne.mockResolvedValue(session);
       SessionItem.findAll.mockResolvedValue([{ uid: ITEM_UID }]);
 
       await controller.updatePracticeSession(
@@ -1016,7 +1017,7 @@ describe('practicesessioncontroller', () => {
 
     test('4.2: a note/duration-only edit does NOT touch the linked plays', async () => {
       const session = mockExistingSession({ items: [mockItem()] });
-      PracticeSession.findByPk.mockResolvedValue(session);
+      PracticeSession.findOne.mockResolvedValue(session);
 
       await controller.updatePracticeSession(
         { params: { uid: SESSION_UID }, session: { user: 'user-1' }, body: { note: 'just a note', durationMinutes: 45 } },
@@ -1033,7 +1034,7 @@ describe('practicesessioncontroller', () => {
     test('4.2: the realign covers EVERY linked play of a multi-entry session', async () => {
       const item2 = mockItem({ uid: ITEM_UID_2, songUid: TOPIC_UID });
       const session = mockExistingSession({ date: '2026-06-01', items: [mockItem(), item2] });
-      PracticeSession.findByPk.mockResolvedValue(session);
+      PracticeSession.findOne.mockResolvedValue(session);
       SessionItem.findAll.mockResolvedValue([{ uid: ITEM_UID }, { uid: ITEM_UID_2 }]);
 
       await controller.updatePracticeSession(
@@ -1049,7 +1050,7 @@ describe('practicesessioncontroller', () => {
 
     test('4.2: adding a song entry creates a linked play (AC1)', async () => {
       const session = mockExistingSession({ items: [] });
-      PracticeSession.findByPk.mockResolvedValue(session);
+      PracticeSession.findOne.mockResolvedValue(session);
 
       await controller.updatePracticeSession(
         { params: { uid: SESSION_UID }, session: { user: 'user-1' }, body: { items: [{ songUid: SONG_UID }] } },
@@ -1062,7 +1063,7 @@ describe('practicesessioncontroller', () => {
 
     test('4.2: removing an entry deletes the entry (its plays cascade)', async () => {
       const session = mockExistingSession({ items: [mockItem()] });
-      PracticeSession.findByPk.mockResolvedValue(session);
+      PracticeSession.findOne.mockResolvedValue(session);
 
       await controller.updatePracticeSession(
         { params: { uid: SESSION_UID }, session: { user: 'user-1' }, body: { items: [] } },
@@ -1077,7 +1078,7 @@ describe('practicesessioncontroller', () => {
     test('4.2: re-pointing an entry from a song to a topic drops its play', async () => {
       const item = mockItem({ update: jest.fn(function (vals) { Object.assign(this, vals); }) });
       const session = mockExistingSession({ items: [item] });
-      PracticeSession.findByPk.mockResolvedValue(session);
+      PracticeSession.findOne.mockResolvedValue(session);
 
       await controller.updatePracticeSession(
         { params: { uid: SESSION_UID }, session: { user: 'user-1' }, body: { items: [{ uid: ITEM_UID, topicUid: TOPIC_UID }] } },
@@ -1095,7 +1096,7 @@ describe('practicesessioncontroller', () => {
 
     test('deletes an owned session and returns a message', async () => {
       const session = { uid: SESSION_UID, userUid: 'user-1', destroy: jest.fn() };
-      PracticeSession.findByPk.mockResolvedValue(session);
+      PracticeSession.findOne.mockResolvedValue(session);
 
       const res = mockRes();
       await controller.deletePracticeSession({ params: { uid: SESSION_UID }, session: { user: 'user-1' } }, res, mockNext());
@@ -1111,7 +1112,7 @@ describe('practicesessioncontroller', () => {
       // cascade is exercised by the migration + the manual/DB pass; here we pin
       // that the delete path fires and never hand-deletes plays in the controller.
       const session = { uid: SESSION_UID, userUid: 'user-1', destroy: jest.fn() };
-      PracticeSession.findByPk.mockResolvedValue(session);
+      PracticeSession.findOne.mockResolvedValue(session);
 
       await controller.deletePracticeSession({ params: { uid: SESSION_UID }, session: { user: 'user-1' } }, mockRes(), mockNext());
 
@@ -1119,22 +1120,21 @@ describe('practicesessioncontroller', () => {
       expect(SongPlay.destroy).not.toHaveBeenCalled(); // plays vanish by FK, not by code
     });
 
-    test('404 malformed/unknown, 403 foreign, 401 unauthenticated', async () => {
+    test('404 malformed/unknown/foreign, 401 unauthenticated (story 7.5)', async () => {
       const badNext = mockNext();
       await controller.deletePracticeSession({ params: { uid: 'nope' }, session: { user: 'user-1' } }, mockRes(), badNext);
       expect(badNext.mock.calls[0][0].status).toBe(404);
 
-      PracticeSession.findByPk.mockResolvedValue(null);
+      PracticeSession.findOne.mockResolvedValue(null);
       const missingNext = mockNext();
       await controller.deletePracticeSession({ params: { uid: SESSION_UID }, session: { user: 'user-1' } }, mockRes(), missingNext);
       expect(missingNext.mock.calls[0][0].status).toBe(404);
 
-      const foreign = { uid: SESSION_UID, userUid: 'user-2', destroy: jest.fn() };
-      PracticeSession.findByPk.mockResolvedValue(foreign);
+      // Story 7.5: a foreign session is scoped out → null → 404 (no 403 oracle).
+      PracticeSession.findOne.mockResolvedValue(null);
       const foreignNext = mockNext();
       await controller.deletePracticeSession({ params: { uid: SESSION_UID }, session: { user: 'user-1' } }, mockRes(), foreignNext);
-      expect(foreign.destroy).not.toHaveBeenCalled();
-      expect(foreignNext.mock.calls[0][0].status).toBe(403);
+      expect(foreignNext.mock.calls[0][0].status).toBe(404);
 
       const anonNext = mockNext();
       await controller.deletePracticeSession({ params: { uid: SESSION_UID }, session: {} }, mockRes(), anonNext);

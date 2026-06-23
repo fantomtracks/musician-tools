@@ -5,7 +5,10 @@ const { Op } = require('sequelize');
 const { FREE_PRACTICE_NAME } = require('../constants/topics');
 
 const createUser = async (req, res, next) => {
-  const usermail = req.body.email || 'unknown';
+  // req.body is undefined when the request body is not JSON (story 7.5) — treat
+  // as empty so a malformed request yields a clean 400, not a 500.
+  const body = req.body || {};
+  const usermail = body.email || 'unknown';
   logger.info('Registering new user', { usermail });
 
   try {
@@ -18,9 +21,9 @@ const createUser = async (req, res, next) => {
       const discriminator = String(Math.floor(Math.random() * 9999) + 1).padStart(4, '0');
       try {
         newUser = await User.create({
-          name: req.body.name,
-          email: req.body.email,
-          password: req.body.password,
+          name: body.name,
+          email: body.email,
+          password: body.password,
           discriminator,
           isAdmin: false
         });
@@ -77,11 +80,18 @@ const loginUser = async (req, res, next) => {
   logger.info('Login attempt');
 
   try {
+    // req.body is undefined when the request body is not JSON (story 7.5); a
+    // missing login/password yields the same generic 400 (no enumeration oracle).
+    const { login, password } = req.body || {};
+    if (!login || !password) {
+      return next(createError(400, 'Invalid username/email or password'));
+    }
+
     const user = await User.scope(null).findOne({
       where: {
         [Op.or]: [
-          { email: { [Op.iLike]: req.body.login } },
-          { name: { [Op.iLike]: req.body.login } }
+          { email: { [Op.iLike]: login } },
+          { name: { [Op.iLike]: login } }
         ]
       }
     });
@@ -90,7 +100,7 @@ const loginUser = async (req, res, next) => {
       return next(createError(400, 'Invalid username/email or password'));
     }
 
-    const isValidPassword = await user.validPassword(req.body.password);
+    const isValidPassword = await user.validPassword(password);
     if (!isValidPassword) {
       return next(createError(400, 'Invalid username/email or password'));
     }

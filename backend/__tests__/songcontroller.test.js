@@ -4,7 +4,10 @@ jest.mock('../models', () => {
   return {
     Song: {
       create: jest.fn(async (data) => ({ ...data, uid: 'test-uid' })),
-      findByPk: jest.fn()
+      findOne: jest.fn()
+    },
+    Instrument: {
+      findOne: jest.fn()
     },
     SongPlay: {
       create: jest.fn(async (data) => ({ ...data, uid: 'play-uid' }))
@@ -25,7 +28,7 @@ jest.mock('../models', () => {
   };
 });
 
-const { Song, SongPlay, PracticeSession, SessionItem } = require('../models');
+const { Song, SongPlay, PracticeSession, SessionItem, Instrument } = require('../models');
 const controller = require('../controllers/songcontroller');
 
 // A played song the user owns, with a server-side title for the FR4 label snapshot
@@ -96,9 +99,16 @@ describe('songcontroller', () => {
     expect(Song.create.mock.calls[1][0].durationSeconds).toBeNull();
   });
 
+  test('createSong without a JSON body → 400, not 500 (story 7.5 req.body guard)', async () => {
+    const next = mockNext();
+    await controller.createSong({ session: { user: 'user-1' } }, mockRes(), next); // req.body undefined
+    expect(next.mock.calls[0][0].status).toBe(400);
+    expect(Song.create).not.toHaveBeenCalled();
+  });
+
   test('updateSong updates timeSignature and mode', async () => {
     const update = jest.fn();
-    Song.findByPk.mockResolvedValue({
+    Song.findOne.mockResolvedValue({
       userUid: 'user-1',
       update,
     });
@@ -125,7 +135,7 @@ describe('songcontroller', () => {
 
   test('updateSong updates durationSeconds; an absent field leaves it untouched (FR24)', async () => {
     const update = jest.fn();
-    Song.findByPk.mockResolvedValue({ userUid: 'user-1', durationSeconds: 420, update });
+    Song.findOne.mockResolvedValue({ userUid: 'user-1', durationSeconds: 420, update });
 
     await controller.updateSong(
       { params: { uid: 'song-1' }, session: { user: 'user-1' }, body: { durationSeconds: 720 } },
@@ -136,7 +146,7 @@ describe('songcontroller', () => {
 
     // Field absent from the payload → keep the song's current value
     const update2 = jest.fn();
-    Song.findByPk.mockResolvedValue({ userUid: 'user-1', durationSeconds: 420, update: update2 });
+    Song.findOne.mockResolvedValue({ userUid: 'user-1', durationSeconds: 420, update: update2 });
     await controller.updateSong(
       { params: { uid: 'song-1' }, session: { user: 'user-1' }, body: { title: 'Renamed' } },
       mockRes(),
@@ -151,7 +161,7 @@ describe('songcontroller', () => {
     }
 
     test('AC1: with no session that day creates the day session and adds the song as a no-minutes entry', async () => {
-      Song.findByPk.mockResolvedValue(ownedSong());
+      Song.findOne.mockResolvedValue(ownedSong());
       PracticeSession.findOne.mockResolvedValue(null);
 
       const res = mockRes();
@@ -178,7 +188,7 @@ describe('songcontroller', () => {
     });
 
     test('AC2: reuses an existing same-instrument session that day instead of creating a new one', async () => {
-      Song.findByPk.mockResolvedValue(ownedSong());
+      Song.findOne.mockResolvedValue(ownedSong());
       PracticeSession.findOne.mockResolvedValue({ uid: 'existing-session', instrumentType: 'Guitar', durationMinutes: null, update: jest.fn() });
       SessionItem.count.mockResolvedValue(2);
 
@@ -193,7 +203,7 @@ describe('songcontroller', () => {
     });
 
     test('AC3: a bass session exists but not guitar — a distinct guitar session is created (one per instrument)', async () => {
-      Song.findByPk.mockResolvedValue(ownedSong());
+      Song.findOne.mockResolvedValue(ownedSong());
       // findOne is scoped to the instrument, so the guitar lookup returns null
       PracticeSession.findOne.mockResolvedValue(null);
 
@@ -207,7 +217,7 @@ describe('songcontroller', () => {
     });
 
     test('AC4: re-marking a song already in the day session adds no duplicate entry', async () => {
-      Song.findByPk.mockResolvedValue(ownedSong());
+      Song.findOne.mockResolvedValue(ownedSong());
       PracticeSession.findOne.mockResolvedValue({ uid: 'existing-session', instrumentType: 'Guitar', durationMinutes: null, update: jest.fn() });
       SessionItem.findOne.mockResolvedValue({ uid: 'already-there', songUid: 'song-1' });
 
@@ -223,7 +233,7 @@ describe('songcontroller', () => {
     });
 
     test('6.1 AC2 (pre-fill): a song duration (seconds) pre-fills the new entry minutes, rounded (FR21 amended)', async () => {
-      Song.findByPk.mockResolvedValue(ownedSong({ durationSeconds: 240 })); // 4:00
+      Song.findOne.mockResolvedValue(ownedSong({ durationSeconds: 240 })); // 4:00
       PracticeSession.findOne.mockResolvedValue(null);
       SessionItem.findOne.mockResolvedValue(null); // no existing entry → a new one is created
 
@@ -242,7 +252,7 @@ describe('songcontroller', () => {
     // (pre-fill, rounding, accrual) below are unchanged.
 
     test('6.1 AC2 (rounding): a 3:30 song (210s) rounds to 4 minutes on the entry', async () => {
-      Song.findByPk.mockResolvedValue(ownedSong({ durationSeconds: 210 })); // 3:30 → round(3.5) = 4
+      Song.findOne.mockResolvedValue(ownedSong({ durationSeconds: 210 })); // 3:30 → round(3.5) = 4
       PracticeSession.findOne.mockResolvedValue(null);
       SessionItem.findOne.mockResolvedValue(null);
 
@@ -252,7 +262,7 @@ describe('songcontroller', () => {
     });
 
     test('6.1 AC3 (no duration): a song without a duration keeps the no-minutes entry (FR21 original)', async () => {
-      Song.findByPk.mockResolvedValue(ownedSong()); // no durationSeconds
+      Song.findOne.mockResolvedValue(ownedSong()); // no durationSeconds
       PracticeSession.findOne.mockResolvedValue(null);
       SessionItem.findOne.mockResolvedValue(null);
 
@@ -262,7 +272,7 @@ describe('songcontroller', () => {
     });
 
     test('6.1 AC3 (sub-30s rounds to nothing): a 20s song adds a no-minutes entry', async () => {
-      Song.findByPk.mockResolvedValue(ownedSong({ durationSeconds: 20 })); // round(0.33) = 0 → null
+      Song.findOne.mockResolvedValue(ownedSong({ durationSeconds: 20 })); // round(0.33) = 0 → null
       PracticeSession.findOne.mockResolvedValue(null);
       SessionItem.findOne.mockResolvedValue(null);
 
@@ -272,7 +282,7 @@ describe('songcontroller', () => {
     });
 
     test('6.1 AC4 (cumul): re-marking a song with a duration increments the existing entry minutes, no duplicate', async () => {
-      Song.findByPk.mockResolvedValue(ownedSong({ durationSeconds: 240 })); // 4:00 → 4 min
+      Song.findOne.mockResolvedValue(ownedSong({ durationSeconds: 240 })); // 4:00 → 4 min
       PracticeSession.findOne.mockResolvedValue({ uid: 'existing-session', instrumentType: 'Guitar', durationMinutes: null, update: jest.fn() });
       const existingItem = { uid: 'already-there', songUid: 'song-1', minutes: 10, update: jest.fn() };
       SessionItem.findOne.mockResolvedValue(existingItem);
@@ -289,7 +299,7 @@ describe('songcontroller', () => {
     });
 
     test('6.1 AC4 (cumul from no minutes): an existing no-minutes entry accrues the duration from zero', async () => {
-      Song.findByPk.mockResolvedValue(ownedSong({ durationSeconds: 300 })); // 5:00 → 5 min
+      Song.findOne.mockResolvedValue(ownedSong({ durationSeconds: 300 })); // 5:00 → 5 min
       PracticeSession.findOne.mockResolvedValue({ uid: 'existing-session', instrumentType: 'Guitar', durationMinutes: null, update: jest.fn() });
       const existingItem = { uid: 'already-there', songUid: 'song-1', minutes: null, update: jest.fn() };
       SessionItem.findOne.mockResolvedValue(existingItem);
@@ -300,7 +310,7 @@ describe('songcontroller', () => {
     });
 
     test('6.1 AC4 (no duration): re-marking a song without a duration leaves the existing entry untouched', async () => {
-      Song.findByPk.mockResolvedValue(ownedSong()); // no durationSeconds
+      Song.findOne.mockResolvedValue(ownedSong()); // no durationSeconds
       PracticeSession.findOne.mockResolvedValue({ uid: 'existing-session', instrumentType: 'Guitar', durationMinutes: null, update: jest.fn() });
       const existingItem = { uid: 'already-there', songUid: 'song-1', minutes: 8, update: jest.fn() };
       SessionItem.findOne.mockResolvedValue(existingItem);
@@ -312,7 +322,7 @@ describe('songcontroller', () => {
     });
 
     test('AC5 (timestamp): the SongPlay is stamped on the client day (UTC day == playedOn), not the server day', async () => {
-      Song.findByPk.mockResolvedValue(ownedSong());
+      Song.findOne.mockResolvedValue(ownedSong());
 
       const res = mockRes();
       await controller.markSongPlayed(markReq({ instrumentType: 'Guitar', playedOn: '2026-03-10' }), res, mockNext());
@@ -324,7 +334,7 @@ describe('songcontroller', () => {
     });
 
     test('two marks the same day get distinct, orderable playedAt values (last-played sort)', async () => {
-      Song.findByPk.mockResolvedValue(ownedSong());
+      Song.findOne.mockResolvedValue(ownedSong());
 
       await controller.markSongPlayed(markReq({ instrumentType: 'Guitar', playedOn: '2026-03-10' }), mockRes(), mockNext());
       // Advance a tick so the time-of-day differs
@@ -337,7 +347,7 @@ describe('songcontroller', () => {
     });
 
     test('AC5 (validation): a missing, malformed, future or pre-1900 playedOn is rejected with 400', async () => {
-      Song.findByPk.mockResolvedValue(ownedSong());
+      Song.findOne.mockResolvedValue(ownedSong());
 
       for (const playedOn of [undefined, '', 'garbage', '2026-02-31', '0205-06-07', '2999-01-01']) {
         const next = mockNext();
@@ -349,7 +359,8 @@ describe('songcontroller', () => {
     });
 
     test('AC6: the SongPlay record is always created (per-instrument history preserved)', async () => {
-      Song.findByPk.mockResolvedValue(ownedSong());
+      Song.findOne.mockResolvedValue(ownedSong());
+      Instrument.findOne.mockResolvedValue({ uid: 'inst-1', userUid: 'user-1' }); // owned (story 7.5)
 
       const res = mockRes();
       await controller.markSongPlayed(markReq({ instrumentType: 'Guitar', instrumentUid: 'inst-1', playedOn: TODAY }), res, mockNext());
@@ -360,7 +371,7 @@ describe('songcontroller', () => {
     });
 
     test('without an instrument the play is recorded but no session is created (FR7 needs an instrument)', async () => {
-      Song.findByPk.mockResolvedValue(ownedSong());
+      Song.findOne.mockResolvedValue(ownedSong());
 
       const res = mockRes();
       await controller.markSongPlayed(markReq({ playedOn: TODAY }), res, mockNext());
@@ -375,7 +386,7 @@ describe('songcontroller', () => {
     });
 
     test('an out-of-range instrument records the play but skips the session (play stays durable)', async () => {
-      Song.findByPk.mockResolvedValue(ownedSong());
+      Song.findOne.mockResolvedValue(ownedSong());
       const longInstrument = 'x'.repeat(256);
 
       const res = mockRes();
@@ -393,7 +404,7 @@ describe('songcontroller', () => {
     });
 
     test('a NUL byte in the instrument is treated as invalid — play kept, session skipped', async () => {
-      Song.findByPk.mockResolvedValue(ownedSong());
+      Song.findOne.mockResolvedValue(ownedSong());
 
       const res = mockRes();
       await controller.markSongPlayed(markReq({ instrumentType: `Gui${String.fromCharCode(0)}tar`, playedOn: TODAY }), res, mockNext());
@@ -403,7 +414,7 @@ describe('songcontroller', () => {
     });
 
     test('a failure inside the transaction rolls back and maps to 500', async () => {
-      Song.findByPk.mockResolvedValue(ownedSong());
+      Song.findOne.mockResolvedValue(ownedSong());
       PracticeSession.findOne.mockResolvedValue(null); // reach the create step
       // The session step throws inside the transaction
       PracticeSession.create.mockRejectedValueOnce(new Error('insert failed'));
@@ -416,22 +427,71 @@ describe('songcontroller', () => {
       expect(res.status).not.toHaveBeenCalledWith(201);
     });
 
-    test('rejects unauthenticated (401), unknown song (404) and another user\'s song (403)', async () => {
+    test('rejects unauthenticated (401), unknown song (404) and another user\'s song (404, story 7.5)', async () => {
       const anon = mockNext();
       await controller.markSongPlayed({ params: { uid: 'song-1' }, session: {}, body: { playedOn: TODAY } }, mockRes(), anon);
       expect(anon.mock.calls[0][0].status).toBe(401);
 
-      Song.findByPk.mockResolvedValue(null);
+      Song.findOne.mockResolvedValue(null);
       const missing = mockNext();
       await controller.markSongPlayed(markReq({ instrumentType: 'Guitar', playedOn: TODAY }), mockRes(), missing);
       expect(missing.mock.calls[0][0].status).toBe(404);
 
-      Song.findByPk.mockResolvedValue(ownedSong({ userUid: 'someone-else' }));
+      // Story 7.5: another user's song is scoped out → indistinguishable 404 (no 403 oracle).
+      Song.findOne.mockResolvedValue(null);
       const forbidden = mockNext();
       await controller.markSongPlayed(markReq({ instrumentType: 'Guitar', playedOn: TODAY }), mockRes(), forbidden);
-      expect(forbidden.mock.calls[0][0].status).toBe(403);
+      expect(forbidden.mock.calls[0][0].status).toBe(404);
 
       expect(SongPlay.create).not.toHaveBeenCalled();
+    });
+
+    test('a foreign/unknown instrumentUid is rejected with 404 (story 7.5)', async () => {
+      Song.findOne.mockResolvedValue(ownedSong());
+      Instrument.findOne.mockResolvedValue(null); // not owned by the user
+      const next = mockNext();
+      await controller.markSongPlayed(
+        markReq({ instrumentUid: 'foreign-instr', instrumentType: 'Guitar', playedOn: TODAY }),
+        mockRes(),
+        next
+      );
+      expect(next.mock.calls[0][0].status).toBe(404);
+      expect(SongPlay.create).not.toHaveBeenCalled();
+    });
+
+    test('an owned instrumentUid is accepted (story 7.5)', async () => {
+      Song.findOne.mockResolvedValue(ownedSong());
+      Instrument.findOne.mockResolvedValue({ uid: 'instr-1', userUid: 'user-1' });
+      PracticeSession.findOne.mockResolvedValue(null);
+      const res = mockRes();
+      await controller.markSongPlayed(
+        markReq({ instrumentUid: 'instr-1', instrumentType: 'Guitar', playedOn: TODAY }),
+        res,
+        mockNext()
+      );
+      expect(res.status).toHaveBeenCalledWith(201);
+    });
+  });
+
+  describe('getSong (story 7.5 — scoped, no IDOR)', () => {
+    test('returns the song when owned', async () => {
+      Song.findOne.mockResolvedValue(ownedSong());
+      const res = mockRes();
+      await controller.getSong({ params: { uid: 'song-1' }, session: { user: 'user-1' } }, res, mockNext());
+      expect(res.json).toHaveBeenCalled();
+    });
+
+    test('401 when unauthenticated', async () => {
+      const next = mockNext();
+      await controller.getSong({ params: { uid: 'song-1' }, session: {} }, mockRes(), next);
+      expect(next.mock.calls[0][0].status).toBe(401);
+    });
+
+    test('another user\'s song → 404 (scoped out, no existence oracle)', async () => {
+      Song.findOne.mockResolvedValue(null); // scoped where excludes it
+      const next = mockNext();
+      await controller.getSong({ params: { uid: 'song-1' }, session: { user: 'user-1' } }, mockRes(), next);
+      expect(next.mock.calls[0][0].status).toBe(404);
     });
   });
 });
@@ -446,7 +506,7 @@ describe('deleteSong (Story 5.6: cleans playlists)', () => {
 
   test('destroys the song; playlist cleanup is handled by the FK cascade (Story 5.7, no manual strip)', async () => {
     const song = ownedSong({ destroy: jest.fn() });
-    Song.findByPk.mockResolvedValue(song);
+    Song.findOne.mockResolvedValue(song);
 
     const res = mockRes();
     await controller.deleteSong(deleteReq(), res, mockNext());
@@ -462,18 +522,17 @@ describe('deleteSong (Story 5.6: cleans playlists)', () => {
   });
 
   test('404 when the song does not exist', async () => {
-    Song.findByPk.mockResolvedValue(null);
+    Song.findOne.mockResolvedValue(null);
     const next = mockNext();
     await controller.deleteSong(deleteReq(), mockRes(), next);
     expect(next.mock.calls[0][0].status).toBe(404);
   });
 
-  test('403 for another user — no destroy', async () => {
-    const song = ownedSong({ userUid: 'someone-else', destroy: jest.fn() });
-    Song.findByPk.mockResolvedValue(song);
+  test('404 for another user — scoped out, no destroy (story 7.5)', async () => {
+    // The scoped findOne excludes a foreign song → null → 404 (no 403 oracle).
+    Song.findOne.mockResolvedValue(null);
     const next = mockNext();
     await controller.deleteSong(deleteReq(), mockRes(), next);
-    expect(next.mock.calls[0][0].status).toBe(403);
-    expect(song.destroy).not.toHaveBeenCalled();
+    expect(next.mock.calls[0][0].status).toBe(404);
   });
 });
