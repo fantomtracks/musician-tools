@@ -4,7 +4,7 @@ baseline_commit: 47276f1c439801359c546b8980fcef7f5fdbe260
 
 # Story 7.3: Protéger toutes les mutations par un token CSRF
 
-Status: review
+Status: done
 
 <!-- Note: Validation is optional. Run validate-create-story for quality check before dev-story. -->
 
