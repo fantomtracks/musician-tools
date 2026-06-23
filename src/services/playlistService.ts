@@ -83,6 +83,7 @@ export const playlistService = {
   async addSongToPlaylist(playlistUid: string, songUid: string): Promise<Playlist> {
     const response = await apiFetch(`${API_BASE}/playlists/${playlistUid}/songs/${songUid}`, {
       method: 'POST',
+      credentials: 'include'
     });
     if (!response.ok) {
       throw new Error('Failed to add song to playlist');
@@ -94,6 +95,7 @@ export const playlistService = {
   async removeSongFromPlaylist(playlistUid: string, songUid: string): Promise<Playlist> {
     const response = await apiFetch(`${API_BASE}/playlists/${playlistUid}/songs/${songUid}`, {
       method: 'DELETE',
+      credentials: 'include'
     });
     if (!response.ok) {
       throw new Error('Failed to remove song from playlist');

@@ -10,8 +10,32 @@
 //
 // Intentionally NOT used by authService: /auth/login returns 401 on bad
 // credentials and must show the login error, not redirect-loop.
+import { getCsrfToken } from './csrf';
+
+const MUTATING_METHODS = new Set(['POST', 'PUT', 'PATCH', 'DELETE']);
+
+// Inject the CSRF token (story 7.3) on a mutating request, preserving existing headers.
+function withCsrfHeader(init: RequestInit | undefined, token: string): RequestInit {
+  return { ...init, headers: { ...(init?.headers as Record<string, string>), 'X-CSRF-Token': token } };
+}
+
 export async function apiFetch(input: RequestInfo | URL, init?: RequestInit): Promise<Response> {
-  const res = await fetch(input, init);
+  const method = (init?.method || 'GET').toUpperCase();
+
+  let res: Response;
+  if (MUTATING_METHODS.has(method)) {
+    const token = await getCsrfToken();
+    res = await fetch(input, withCsrfHeader(init, token));
+    // Retry ONLY on a CSRF rejection (token rotated, e.g. session changed), which
+    // the server flags with X-CSRF-Token-Invalid. A bare 403 is a legitimate
+    // authorization failure (non-owner, system topic) and must not be replayed.
+    if (res.status === 403 && res.headers.get('X-CSRF-Token-Invalid')) {
+      const fresh = await getCsrfToken(true);
+      res = await fetch(input, withCsrfHeader(init, fresh));
+    }
+  } else {
+    res = await fetch(input, init);
+  }
 
   if (res.status === 401 && window.location.pathname !== '/login') {
     localStorage.removeItem('user');

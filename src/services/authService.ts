@@ -1,3 +1,5 @@
+import { getCsrfToken, clearCsrfToken } from './csrf';
+
 export type User = {
   uid: string;
   name: string;
@@ -27,10 +29,12 @@ const API_BASE = '/api';
 export const authService = {
   // Register new user
   async register(name: string, email: string, password: string): Promise<User> {
+    const csrfToken = await getCsrfToken();
     const response = await fetch(`${API_BASE}/auth/register`, {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
+        'X-CSRF-Token': csrfToken,
       },
       credentials: 'include',
       body: JSON.stringify({ name, email, password }),
@@ -44,10 +48,12 @@ export const authService = {
 
   // Login user
   async login(login: string, password: string): Promise<AuthResponse> {
+    const csrfToken = await getCsrfToken();
     const response = await fetch(`${API_BASE}/auth/login`, {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
+        'X-CSRF-Token': csrfToken,
       },
       credentials: 'include',
       body: JSON.stringify({ login, password }),
@@ -59,13 +65,28 @@ export const authService = {
     return response.json();
   },
 
-  // Logout user
+  // Logout user. POST (state-changing) + CSRF token (story 7.3). The session is
+  // destroyed server-side, so clear the cached token afterwards.
+  //
+  // Best-effort: a network failure (or a failed token fetch) must never strand
+  // the UI in a "logged in" state. We always clear client state in `finally`,
+  // so logout works offline / against a dead backend too.
   async logout(): Promise<void> {
-    await fetch(`${API_BASE}/auth/logout`, {
-      method: 'GET',
-      credentials: 'include',
-    });
-    localStorage.removeItem('user');
+    try {
+      const csrfToken = await getCsrfToken();
+      await fetch(`${API_BASE}/auth/logout`, {
+        method: 'POST',
+        headers: {
+          'X-CSRF-Token': csrfToken,
+        },
+        credentials: 'include',
+      });
+    } catch {
+      // Swallow: client state is cleared in `finally` regardless.
+    } finally {
+      clearCsrfToken();
+      localStorage.removeItem('user');
+    }
   },
 
   // Check if user is logged in

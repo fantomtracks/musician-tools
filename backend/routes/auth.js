@@ -9,6 +9,7 @@ router.use(bodyParser.json());
 // Public routes
 router.post('/register', uc.createUser);
 router.post('/login', uc.loginUser);
-router.get('/logout', uc.logoutUser);
+// logout destroys the session — a state-changing action, so POST (CSRF-protected), not GET. (7.3)
+router.post('/logout', uc.logoutUser);
 
 module.exports = router;

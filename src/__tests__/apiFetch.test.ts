@@ -1,4 +1,5 @@
 import { apiFetch } from '../services/apiFetch';
+import { clearCsrfToken } from '../services/csrf';
 
 // Flush pending microtasks/timers so the post-fetch interceptor body runs
 const flush = () => new Promise(resolve => setTimeout(resolve, 0));
@@ -82,13 +83,71 @@ describe('apiFetch — 401 interceptor', () => {
     expect(localStorage.getItem('user')).not.toBeNull();
   });
 
-  test('forwards the url and init to fetch unchanged', async () => {
+  test('forwards a GET url and init to fetch unchanged (safe method, no CSRF)', async () => {
     const fetchMock = jest.fn().mockResolvedValue({ status: 200, ok: true });
     global.fetch = fetchMock as unknown as typeof fetch;
-    const init = { method: 'POST', credentials: 'include' as const, body: '{}' };
+    const init = { credentials: 'include' as const };
 
-    await apiFetch('/api/songs/x/plays', init);
+    await apiFetch('/api/sessions', init);
 
-    expect(fetchMock).toHaveBeenCalledWith('/api/songs/x/plays', init);
+    expect(fetchMock).toHaveBeenCalledWith('/api/sessions', init);
+  });
+});
+
+describe('apiFetch — CSRF injection (story 7.3)', () => {
+  const originalFetch = global.fetch;
+
+  beforeEach(() => {
+    clearCsrfToken();
+  });
+
+  afterEach(() => {
+    global.fetch = originalFetch;
+  });
+
+  test('a mutation fetches the token then injects X-CSRF-Token', async () => {
+    const fetchMock = jest.fn()
+      .mockResolvedValueOnce({ ok: true, json: async () => ({ csrfToken: 'tok-123' }) }) // GET /csrf-token
+      .mockResolvedValueOnce({ status: 201, ok: true }); // the mutation
+    global.fetch = fetchMock as unknown as typeof fetch;
+
+    await apiFetch('/api/topics', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: '{}' });
+
+    expect(fetchMock).toHaveBeenNthCalledWith(1, '/api/csrf-token', { credentials: 'include' });
+    const [, mutationInit] = fetchMock.mock.calls[1];
+    expect(mutationInit.headers['X-CSRF-Token']).toBe('tok-123');
+    expect(mutationInit.headers['Content-Type']).toBe('application/json'); // existing header preserved
+  });
+
+  // A response carrying the server's CSRF-failure marker (X-CSRF-Token-Invalid).
+  const csrfRejected = { status: 403, ok: false, headers: { get: (h: string) => (h === 'X-CSRF-Token-Invalid' ? '1' : null) } };
+  // A legitimate authorization 403 (non-owner, system topic) — no marker.
+  const authzRejected = { status: 403, ok: false, headers: { get: () => null } };
+
+  test('a CSRF-flagged 403 refreshes the token and retries the mutation once', async () => {
+    const fetchMock = jest.fn()
+      .mockResolvedValueOnce({ ok: true, json: async () => ({ csrfToken: 'stale' }) }) // first token
+      .mockResolvedValueOnce(csrfRejected) // mutation rejected by CSRF guard
+      .mockResolvedValueOnce({ ok: true, json: async () => ({ csrfToken: 'fresh' }) }) // refreshed token
+      .mockResolvedValueOnce({ status: 200, ok: true }); // retry succeeds
+    global.fetch = fetchMock as unknown as typeof fetch;
+
+    const res = await apiFetch('/api/topics/1', { method: 'DELETE' });
+
+    expect((res as unknown as { status: number }).status).toBe(200);
+    expect(fetchMock.mock.calls[1][1].headers['X-CSRF-Token']).toBe('stale');
+    expect(fetchMock.mock.calls[3][1].headers['X-CSRF-Token']).toBe('fresh');
+  });
+
+  test('a plain authorization 403 (no CSRF marker) is returned as-is, not retried', async () => {
+    const fetchMock = jest.fn()
+      .mockResolvedValueOnce({ ok: true, json: async () => ({ csrfToken: 'tok' }) }) // token
+      .mockResolvedValueOnce(authzRejected); // authz failure — must NOT trigger refresh/replay
+    global.fetch = fetchMock as unknown as typeof fetch;
+
+    const res = await apiFetch('/api/topics/1', { method: 'DELETE' });
+
+    expect(res).toBe(authzRejected);
+    expect(fetchMock).toHaveBeenCalledTimes(2); // token + single mutation, no retry
   });
 });
