@@ -83,9 +83,10 @@ describe('usercontroller.createUser', () => {
     expect(next).not.toHaveBeenCalled();
   });
 
-  test('does not seed a topic when user creation fails', async () => {
+  test('does not seed a topic when user creation fails (email taken)', async () => {
     const uniqueError = new Error('dup');
     uniqueError.name = 'SequelizeUniqueConstraintError';
+    uniqueError.errors = [{ path: 'email' }]; // email conflict -> propagates, not retried
     User.create.mockRejectedValue(uniqueError);
 
     const req = { body: { name: 'Ada', email: 'ada@example.com', password: 'pw' }, session: {} };
@@ -96,6 +97,38 @@ describe('usercontroller.createUser', () => {
 
     expect(Topic.findOrCreate).not.toHaveBeenCalled();
     expect(next.mock.calls[0][0].status).toBe(400);
+  });
+
+  test('assigns a 4-digit discriminator on registration (story 7.2)', async () => {
+    const newUser = mockNewUser();
+    User.create.mockResolvedValue(newUser);
+
+    const req = { body: { name: 'Ada', email: 'ada@example.com', password: 'pw' }, session: {} };
+    const res = mockRes();
+    const next = mockNext();
+
+    await controller.createUser(req, res, next);
+
+    expect(res.status).toHaveBeenCalledWith(201);
+    expect(User.create.mock.calls[0][0].discriminator).toMatch(/^\d{4}$/);
+  });
+
+  test('retries with a new discriminator on a (name, discriminator) collision (7.2)', async () => {
+    const collision = new Error('dup');
+    collision.name = 'SequelizeUniqueConstraintError';
+    collision.errors = [{ path: 'discriminator' }]; // NOT email -> retry
+    const newUser = mockNewUser();
+    User.create.mockRejectedValueOnce(collision).mockResolvedValueOnce(newUser);
+
+    const req = { body: { name: 'Ada', email: 'ada@example.com', password: 'pw' }, session: {} };
+    const res = mockRes();
+    const next = mockNext();
+
+    await controller.createUser(req, res, next);
+
+    expect(User.create).toHaveBeenCalledTimes(2);
+    expect(res.status).toHaveBeenCalledWith(201);
+    expect(next).not.toHaveBeenCalled();
   });
 });
 

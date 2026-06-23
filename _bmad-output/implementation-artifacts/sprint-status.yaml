@@ -35,7 +35,7 @@
 # - Dev moves story to 'review', then runs code-review (fresh context, different LLM recommended)
 
 generated: 2026-06-07
-last_updated: 2026-06-23
+last_updated: 2026-06-23  # 7-2 ready-for-dev
 project: musician-tools
 project_key: NOKEY
 tracking_system: file-system
@@ -92,7 +92,7 @@ development_status:
   # Ordre/dépendances : 7-1 -> 7-2 -> 7-3 ∥ 7-4 -> 7-5 -> 7-6 -> 7-7 -> 7-8 -> 7-9 (crée requireVerified) -> {7-10 ∥ 7-11} ; 7-12 indépendante (après 7-2)
   epic-7: in-progress
   7-1-durcir-socle-auth-secret-jwt-trust-proxy: done
-  7-2-migration-users-identite-discord-backfill: backlog        # risque max : migration prod sans staging
+  7-2-migration-users-identite-discord-backfill: done        # risque max : migration prod sans staging
   7-3-csrf-token-sur-mutations: backlog                         # prérequis transverse des flux suivants
   7-4-rate-limiting-endpoints-sensibles: backlog
   7-5-audit-ownership-collapse-403-vers-404: backlog            # + garde req.body généralisée (repli deferred-work)

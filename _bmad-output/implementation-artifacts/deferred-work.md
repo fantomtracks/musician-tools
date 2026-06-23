@@ -88,3 +88,9 @@ _Les 4 stories UI/confort (filtres Songlist, refacto SessionHistoryCard, chanson
 ## Deferred from: code review of story-7.1 (2026-06-23)
 
 - ~~**Pré-flight env dans le Makefile**~~ — ✅ **RÉSOLU le 2026-06-23** (même branche que 7.1). Cible `check-env` ajoutée (vérifie `backend/.env` + `SESSION_SECRET` non vide) et branchée en prérequis de `setup`/`start`/`up`/`restart`/`rebuild-backend`/`reset-db` : message explicite au lieu d'un crash-loop silencieux. [Makefile]
+
+## Deferred from: code review of story-7.2 (2026-06-23)
+
+- **Grandfathering `email_verified` non rejouable après 7.9** — `UPDATE … SET email_verified=true WHERE email_verified=false` (backfill 7.2) re-vérifierait à tort de vrais comptes non vérifiés si la migration était **rejouée manuellement** une fois la vérif d'email (7.9) en place. Risque nul en flux normal (migration jouée une fois) ; à garder en tête si on rejoue `20260623000100` à la main plus tard. [20260623000100-backfill-users-beta.js]
+- **Index non-unique `users_name` redondant** — l'index composite `users_name_discriminator_unique` a `name` en colonne de tête, rendant l'index `users_name` redondant (même cas que le nettoyage 20260621 sur PlaylistSongs). Inoffensif ; à dropper dans une future migration de ménage. [migrations Users]
+- **Format du discriminator non contraint en DB** — l'invariant « 4 chiffres zero-paddés » vit dans le code (backfill + futur register 7.7), pas dans un CHECK SQL. 7.7 (register handle) est le bon endroit pour figer le format ; un CHECK `discriminator ~ '^[0-9]{4}$'` pourrait y être ajouté. [models/user.js]

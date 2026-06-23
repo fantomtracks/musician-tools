@@ -9,12 +9,33 @@ const createUser = async (req, res, next) => {
   logger.info('Registering new user', { usermail });
 
   try {
-    const newUser = await User.create({
-      name: req.body.name,
-      email: req.body.email,
-      password: req.body.password,
-      isAdmin: false
-    });
+    // Assign a free 4-digit discriminator for the display name (Discord-style
+    // identity, story 7.2). The unique (name, discriminator) index is the source
+    // of truth: on a rare race we retry with a new value. Email conflicts bubble
+    // to the handler below. (The full register/anti-enumeration flow lands in 7.7.)
+    let newUser = null;
+    for (let attempt = 0; attempt < 50 && !newUser; attempt += 1) {
+      const discriminator = String(Math.floor(Math.random() * 9999) + 1).padStart(4, '0');
+      try {
+        newUser = await User.create({
+          name: req.body.name,
+          email: req.body.email,
+          password: req.body.password,
+          discriminator,
+          isAdmin: false
+        });
+      } catch (err) {
+        const onEmail = (err.errors || []).some((e) => e.path === 'email');
+        if (err.name === 'SequelizeUniqueConstraintError' && !onEmail) {
+          continue; // (name, discriminator) collision — try another discriminator
+        }
+        throw err;
+      }
+    }
+    if (!newUser) {
+      // All 9999 discriminators for this name are taken (out of reach at beta scale).
+      return next(createError(409, 'This display name is full, please choose another.'));
+    }
 
     logger.info('User registered successfully', { uid: newUser.uid });
 
