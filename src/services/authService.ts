@@ -24,11 +24,19 @@ export type AuthResponse = {
   user?: User;
 };
 
+// Register has two non-error outcomes (story 7.7, anti-enumeration):
+// - 'created': a new email → account created + auto-logged-in (returns the user)
+// - 'pending': the email already exists → generic response, the real owner is
+//   notified by email; we must NOT reveal that the account exists.
+export type RegisterResult =
+  | { status: 'created'; user: User }
+  | { status: 'pending' };
+
 const API_BASE = '/api';
 
 export const authService = {
   // Register new user
-  async register(name: string, email: string, password: string): Promise<User> {
+  async register(name: string, email: string, password: string): Promise<RegisterResult> {
     const csrfToken = await getCsrfToken();
     const response = await fetch(`${API_BASE}/auth/register`, {
       method: 'POST',
@@ -43,7 +51,14 @@ export const authService = {
       const error = await response.json();
       throw new Error(error.message || 'Registration failed');
     }
-    return response.json();
+    const data = await response.json();
+    // The server sends an explicit discriminator: { auth:false, pending:true }
+    // for an existing email (anti-enumeration), or the user with auth:true for a
+    // new one. Key on `pending` (the explicit flag), not on the response shape.
+    if (data && data.pending) {
+      return { status: 'pending' };
+    }
+    return { status: 'created', user: data };
   },
 
   // Login user

@@ -11,6 +11,7 @@ function RegisterPage() {
   });
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
+  const [submitted, setSubmitted] = useState(false);
   const { register } = useAuth();
   const navigate = useNavigate();
 
@@ -28,10 +29,23 @@ function RegisterPage() {
       return;
     }
 
+    // Mirror the server rule (story 7.7): password must be at least 10 characters.
+    if (formData.password.length < 10) {
+      setError('Password must be at least 10 characters');
+      return;
+    }
+
     try {
       setLoading(true);
-      await register(formData.name, formData.email, formData.password);
-      navigate('/songs');
+      const result = await register(formData.name, formData.email, formData.password);
+      // New email → logged in, go to the app. Existing email → generic 'pending'
+      // result (the real owner was emailed); show a neutral screen that never
+      // reveals whether the email already exists (anti-enumeration).
+      if (result.status === 'created') {
+        navigate('/songs');
+      } else {
+        setSubmitted(true);
+      }
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Registration failed');
     } finally {
@@ -55,6 +69,22 @@ function RegisterPage() {
           </div>
         </div>
 
+        {submitted ? (
+          /* Neutral, ambiguous confirmation — never reveals whether the email
+             already exists (story 7.7 anti-enumeration). Shown only on a
+             'pending' result; a new email is auto-logged-in and redirected. */
+          <div className="rounded-lg border border-gray-200 bg-gray-50 text-gray-700 dark:border-gray-700 dark:bg-gray-800 dark:text-gray-200 px-4 py-4 text-sm space-y-2" role="status">
+            <p className="font-medium">Check your email</p>
+            <p>
+              If this email isn&apos;t already registered, your account is set up. If you already have an account,
+              we&apos;ve sent you an email about it — try signing in.
+            </p>
+            <Link to="/login" className="inline-block text-brand-600 dark:text-brand-400 font-medium hover:text-brand-700 dark:hover:text-brand-300">
+              Go to sign in
+            </Link>
+          </div>
+        ) : (
+        <>
         {/* Error Message */}
         {error && (
           <div className="rounded-lg border border-red-200 bg-red-50 text-red-700 px-4 py-3 text-sm">
@@ -128,6 +158,8 @@ function RegisterPage() {
             {loading ? 'Creating account...' : 'Create account'}
           </button>
         </form>
+        </>
+        )}
 
         {/* Sign in link */}
         <div className="text-center text-sm text-gray-600 dark:text-gray-400">

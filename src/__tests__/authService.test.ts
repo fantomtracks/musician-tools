@@ -74,3 +74,45 @@ describe('authService.logout is best-effort', () => {
     expect(localStorage.getItem('user')).toBeNull();
   });
 });
+
+// Story 7.7: register has two non-error outcomes — 'created' (new email,
+// auto-logged-in) and 'pending' (existing email, generic anti-enumeration
+// response). authService discriminates on the response shape.
+describe('authService.register outcomes (story 7.7)', () => {
+  const originalFetch = global.fetch;
+
+  beforeEach(() => clearCsrfToken());
+  afterEach(() => { global.fetch = originalFetch; });
+
+  test('a new email → { status: created, user }', async () => {
+    global.fetch = mockFetchWithCsrf({
+      ok: true,
+      json: async () => ({ uid: 'u1', name: 'Ada', email: 'ada@example.com', isAdmin: false, auth: true }),
+    }) as unknown as typeof fetch;
+
+    const result = await authService.register('Ada', 'ada@example.com', 'password123');
+
+    expect(result).toEqual({ status: 'created', user: expect.objectContaining({ uid: 'u1', auth: true }) });
+  });
+
+  test('an existing email → { status: pending } (no user, no oracle)', async () => {
+    global.fetch = mockFetchWithCsrf({
+      ok: true,
+      json: async () => ({ auth: false, pending: true }),
+    }) as unknown as typeof fetch;
+
+    const result = await authService.register('Ada', 'taken@example.com', 'password123');
+
+    expect(result).toEqual({ status: 'pending' });
+  });
+
+  test('a real error (e.g. weak password) throws', async () => {
+    global.fetch = mockFetchWithCsrf({
+      ok: false,
+      status: 400,
+      json: async () => ({ message: 'Password must be at least 10 characters' }),
+    }) as unknown as typeof fetch;
+
+    await expect(authService.register('Ada', 'a@b.com', 'short')).rejects.toThrow('at least 10 characters');
+  });
+});

@@ -1,11 +1,11 @@
 import { createContext, useContext, useEffect, useState } from 'react';
-import { authService, type User } from '../services/authService';
+import { authService, type User, type RegisterResult } from '../services/authService';
 
 interface AuthContextType {
   user: User | null;
   loading: boolean;
   login: (login: string, password: string) => Promise<void>;
-  register: (name: string, email: string, password: string) => Promise<void>;
+  register: (name: string, email: string, password: string) => Promise<RegisterResult>;
   logout: () => Promise<void>;
   isAuthenticated: boolean;
 }
@@ -36,14 +36,15 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     }
   };
 
-  const register = async (name: string, email: string, password: string) => {
-    try {
-      const response = await authService.register(name, email, password);
-      authService.storeUser(response);
-      setUser(response);
-    } catch (error) {
-      throw error;
+  const register = async (name: string, email: string, password: string): Promise<RegisterResult> => {
+    const result = await authService.register(name, email, password);
+    // Only a created (new-email) account is logged in; a 'pending' result
+    // (existing email) must not set a user — the caller shows a neutral screen.
+    if (result.status === 'created') {
+      authService.storeUser(result.user);
+      setUser(result.user);
     }
+    return result;
   };
 
   const logout = async () => {

@@ -1,8 +1,8 @@
 const { User, Topic } = require('../models');
 const createError = require('http-errors');
 const logger = require('../logger');
-const { Op } = require('sequelize');
 const { FREE_PRACTICE_NAME } = require('../constants/topics');
+const authEmails = require('../services/authEmails');
 
 const createUser = async (req, res, next) => {
   // req.body is undefined when the request body is not JSON (story 7.5) — treat
@@ -11,13 +11,22 @@ const createUser = async (req, res, next) => {
   const usermail = body.email || 'unknown';
   logger.info('Registering new user', { usermail });
 
+  // Story 7.7: minimum password length enforced at registration only (set-time).
+  // This validates the password the user just typed — it reveals nothing about
+  // whether an email exists. (Login is NOT length-gated: it would lock out beta
+  // accounts created before this rule — decision confirmed 2026-06-25.)
+  if (typeof body.password !== 'string' || body.password.length < 10) {
+    return next(createError(400, 'Password must be at least 10 characters'));
+  }
+
   try {
     // Assign a free 4-digit discriminator for the display name (Discord-style
     // identity, story 7.2). The unique (name, discriminator) index is the source
     // of truth: on a rare race we retry with a new value. Email conflicts bubble
     // to the handler below. (The full register/anti-enumeration flow lands in 7.7.)
     let newUser = null;
-    for (let attempt = 0; attempt < 50 && !newUser; attempt += 1) {
+    let emailTaken = false;
+    for (let attempt = 0; attempt < 50 && !newUser && !emailTaken; attempt += 1) {
       const discriminator = String(Math.floor(Math.random() * 9999) + 1).padStart(4, '0');
       try {
         newUser = await User.create({
@@ -28,13 +37,43 @@ const createUser = async (req, res, next) => {
           isAdmin: false
         });
       } catch (err) {
-        const onEmail = (err.errors || []).some((e) => e.path === 'email');
-        if (err.name === 'SequelizeUniqueConstraintError' && !onEmail) {
-          continue; // (name, discriminator) collision — try another discriminator
+        if (err.name === 'SequelizeUniqueConstraintError') {
+          // Retry a new discriminator ONLY for a positively-identified
+          // (name, discriminator) collision. Any OTHER unique violation — incl.
+          // an email conflict that arrives without parsed error detail (terse
+          // Postgres errors / poolers leave err.errors/err.fields empty) — is
+          // treated as an existing email: the anti-enumeration safe default,
+          // never spinning into a 409 "name is full" oracle. (story 7.7)
+          const fields = err.fields || {};
+          const isNameDiscCollision =
+            'discriminator' in fields || 'name' in fields ||
+            (err.errors || []).some((e) => e.path === 'discriminator' || e.path === 'name');
+          if (isNameDiscCollision) {
+            continue;
+          }
+          emailTaken = true; // existing email — anti-enumeration flow below, never thrown/revealed
+          break;
         }
         throw err;
       }
     }
+
+    // Story 7.7 anti-enumeration: an existing email never reveals itself. Notify
+    // the real owner (best-effort) and return the SAME generic response — no
+    // "email already taken" oracle, and no account created. (The new-email path
+    // auto-logs-in below; the resulting behavioural differential is an accepted
+    // beta residual — far weaker than the explicit message it replaces.)
+    if (emailTaken) {
+      // Best-effort: a delivery failure must NOT change or fail the generic
+      // response, otherwise it becomes an enumeration oracle.
+      try {
+        await authEmails.sendSignupAttemptNotice(body.email);
+      } catch (mailErr) {
+        logger.error('Failed to send existing-email signup notice', { error: mailErr.message });
+      }
+      return res.status(200).json({ auth: false, pending: true });
+    }
+
     if (!newUser) {
       // All 9999 discriminators for this name are taken (out of reach at beta scale).
       return next(createError(409, 'This display name is full, please choose another.'));
@@ -69,9 +108,10 @@ const createUser = async (req, res, next) => {
     });
   } catch (err) {
     logger.error('Error registering user:', err.message);
-    if (err.name === 'SequelizeUniqueConstraintError') {
-      return next(createError(400, 'Username or email already taken'));
-    }
+    // No email/name existence oracle (story 7.7): unique-email conflicts are
+    // handled in the loop above (generic pending response). Anything reaching
+    // here is a genuine input validation error (e.g. invalid email, missing
+    // field) whose message is about the submitted data, not account existence.
     next(createError(400, err.message));
   }
 };
@@ -83,17 +123,17 @@ const loginUser = async (req, res, next) => {
     // req.body is undefined when the request body is not JSON (story 7.5); a
     // missing login/password yields the same generic 400 (no enumeration oracle).
     const { login, password } = req.body || {};
-    if (!login || !password) {
+    // Both must be non-empty strings: a non-string `login` (array/object) would
+    // otherwise reach Sequelize as an IN-list / operator value. Same generic 400.
+    if (typeof login !== 'string' || typeof password !== 'string' || !login || !password) {
       return next(createError(400, 'Invalid username/email or password'));
     }
 
+    // Email is the only identifier (story 7.7): no more name login. The email
+    // column is citext (7.2), so an exact equality is already case-insensitive —
+    // no iLike needed.
     const user = await User.scope(null).findOne({
-      where: {
-        [Op.or]: [
-          { email: { [Op.iLike]: login } },
-          { name: { [Op.iLike]: login } }
-        ]
-      }
+      where: { email: login.trim() }
     });
 
     if (!user) {
