@@ -35,7 +35,7 @@
 # - Dev moves story to 'review', then runs code-review (fresh context, different LLM recommended)
 
 generated: 2026-06-07
-last_updated: 2026-06-25  # 7-8 done
+last_updated: 2026-06-25  # 7-9 done
 project: musician-tools
 project_key: NOKEY
 tracking_system: file-system
@@ -99,7 +99,7 @@ development_status:
   7-6-infra-email-resend-authtokens: done                       # prérequis des flux email 7-9/7-10/7-11
   7-7-login-email-only-register-handle-anti-enumeration: done
   7-8-page-profil-nom-et-mot-de-passe: done
-  7-9-verification-email-inscription-soft-gate: backlog         # crée requireVerified (consommé par 7-11)
+  7-9-verification-email-inscription-soft-gate: done            # crée requireVerified (consommé par 7-11)
   7-10-reset-mot-de-passe-par-email: backlog
   7-11-change-email-verify-before-switch: backlog               # dépend de requireVerified (7-9)
   7-12-unicite-topic-insensible-casse: backlog                  # citext topics (repli deferred-work, gap AC10 de 8-2)

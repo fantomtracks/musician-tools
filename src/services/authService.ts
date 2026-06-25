@@ -9,6 +9,9 @@ export type User = {
   // stored user from before; login/register now include them.
   discriminator?: string;
   handle?: string;
+  // Soft-gate verification flag (story 7.9). Drives the VerifyEmailBanner. Optional
+  // for users stored before 7.9 (undefined → banner not shown until next login).
+  emailVerified?: boolean;
 };
 
 export type LoginRequest = {

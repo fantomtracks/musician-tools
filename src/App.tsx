@@ -9,7 +9,9 @@ import MyTopicsPage from './pages/MyTopicsPage';
 import MySessionsPage from './pages/MySessionsPage';
 import MyHeatmapPage from './pages/MyHeatmapPage';
 import ProfilePage from './pages/ProfilePage';
+import VerifyEmailPage from './pages/VerifyEmailPage';
 import Header from './components/Header';
+import VerifyEmailBanner from './components/VerifyEmailBanner';
 import Footer from './components/Footer';
 
 function HomePage() {
@@ -57,6 +59,7 @@ function App() {
   return (
     <div className="flex flex-col min-h-screen bg-gradient-to-br from-gray-50 via-blue-50 to-purple-50 dark:from-gray-900 dark:via-gray-800 dark:to-gray-950">
       <Header />
+      <VerifyEmailBanner />
       <main className="flex-1 flex flex-col">
         <Routes>
           <Route path="/" element={<HomePage />} />
@@ -88,6 +91,8 @@ function App() {
             path="/profile"
             element={isAuthenticated ? <ProfilePage /> : <Navigate to="/login" replace />}
           />
+          {/* Public — reached from the email link, possibly while signed out (story 7.9) */}
+          <Route path="/verify-email" element={<VerifyEmailPage />} />
           <Route path="/login" element={!isAuthenticated ? <LoginPage /> : <Navigate to="/songs" replace />} />
           <Route
             path="/register"

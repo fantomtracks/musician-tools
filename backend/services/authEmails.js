@@ -17,4 +17,18 @@ async function sendSignupAttemptNotice(email) {
   });
 }
 
-module.exports = { sendSignupAttemptNotice };
+// Story 7.9: confirm-your-email link sent after signup (and on resend). The
+// VerifyEmailPage reads ?token=… and posts it back to /api/auth/verify-email.
+async function sendVerifyEmail(email, token) {
+  const appUrl = process.env.APP_BASE_URL;
+  const link = `${appUrl}/verify-email?token=${token}`;
+  return emailService.sendEmail({
+    to: email,
+    subject: 'Confirm your email',
+    html: `<p>Welcome to Musician Tools! Please confirm your email address to finish setting up your account.</p>
+<p><a href="${link}">Confirm my email</a></p>
+<p>This link expires in 24 hours. If you didn't create an account, you can ignore this email.</p>`,
+  });
+}
+
+module.exports = { sendSignupAttemptNotice, sendVerifyEmail };

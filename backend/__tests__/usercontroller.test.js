@@ -2,18 +2,22 @@ jest.mock('../models', () => ({
   User: {
     create: jest.fn(),
     scope: jest.fn(),
+    update: jest.fn(),
+    findByPk: jest.fn(),
   },
   Topic: {
     findOrCreate: jest.fn(async () => [{ uid: 'free-practice-uid' }, true]),
   },
 }));
 
-// emailService is the sole send point (7.6); story 7.7 notifies the owner on an
-// existing-email signup attempt. Mock it so no real email is sent in tests.
-jest.mock('../services/emailService', () => ({ sendEmail: jest.fn() }));
+// Email composition (7.7/7.9) + token issuance (7.6/7.9) are mocked: no real
+// email/token in tests.
+jest.mock('../services/authEmails', () => ({ sendSignupAttemptNotice: jest.fn(), sendVerifyEmail: jest.fn() }));
+jest.mock('../services/authTokenService', () => ({ issueToken: jest.fn(async () => 'tok'), verifyToken: jest.fn() }));
 
 const { User, Topic } = require('../models');
-const emailService = require('../services/emailService');
+const authEmails = require('../services/authEmails');
+const authTokenService = require('../services/authTokenService');
 const controller = require('../controllers/usercontroller');
 const { FREE_PRACTICE_NAME } = require('../constants/topics');
 
@@ -38,6 +42,7 @@ function mockNewUser(uid = 'new-user-1') {
     uid,
     name: 'Ada',
     discriminator: '0001',
+    email: 'ada@example.com',
     getHandle() { return `${this.name}#${this.discriminator}`; },
     dataValues: { uid, name: 'Ada', discriminator: '0001', email: 'ada@example.com', password: 'hashed' },
   };
@@ -130,8 +135,8 @@ describe('usercontroller.createUser', () => {
     expect(res.json).toHaveBeenCalledWith({ auth: false, pending: true });
     expect(next).not.toHaveBeenCalled();
     // Real owner is notified via the sole send point.
-    expect(emailService.sendEmail).toHaveBeenCalledTimes(1);
-    expect(emailService.sendEmail.mock.calls[0][0]).toMatchObject({ to: 'taken@example.com' });
+    expect(authEmails.sendSignupAttemptNotice).toHaveBeenCalledTimes(1);
+    expect(authEmails.sendSignupAttemptNotice).toHaveBeenCalledWith('taken@example.com');
     // No account / no topic seeded.
     expect(Topic.findOrCreate).not.toHaveBeenCalled();
     expect(req.session.loggedIn).toBeUndefined();
@@ -142,7 +147,7 @@ describe('usercontroller.createUser', () => {
     uniqueError.name = 'SequelizeUniqueConstraintError';
     uniqueError.errors = [{ path: 'email' }];
     User.create.mockRejectedValue(uniqueError);
-    emailService.sendEmail.mockRejectedValueOnce(new Error('resend down'));
+    authEmails.sendSignupAttemptNotice.mockRejectedValueOnce(new Error('resend down'));
 
     const res = mockRes();
     const next = mockNext();
@@ -238,5 +243,87 @@ describe('usercontroller.loginUser', () => {
     const next = mockNext();
     await controller.loginUser({ session: {} }, mockRes(), next); // req.body undefined
     expect(next.mock.calls[0][0].status).toBe(400);
+  });
+});
+
+describe('usercontroller — email verification (story 7.9)', () => {
+  beforeEach(() => jest.clearAllMocks());
+
+  test('register issues a verify_email token and stays unverified (soft gate)', async () => {
+    User.create.mockResolvedValue(mockNewUser());
+    Topic.findOrCreate.mockResolvedValue([{ uid: 'fp' }, true]);
+
+    const res = mockRes();
+    await controller.createUser({ body: { name: 'Ada', email: 'ada@example.com', password: VALID_PW }, session: {} }, res, mockNext());
+
+    expect(authTokenService.issueToken).toHaveBeenCalledWith('new-user-1', 'verify_email');
+    expect(authEmails.sendVerifyEmail).toHaveBeenCalledWith('ada@example.com', 'tok');
+    // logged in directly; emailVerified is not forced true here (defaults false).
+    expect(res.status).toHaveBeenCalledWith(201);
+    expect(res.json.mock.calls[0][0].auth).toBe(true);
+  });
+
+  test('register still succeeds (201) when the verification email fails (best-effort)', async () => {
+    User.create.mockResolvedValue(mockNewUser());
+    authTokenService.issueToken.mockRejectedValueOnce(new Error('token store down'));
+
+    const res = mockRes();
+    await controller.createUser({ body: { name: 'Ada', email: 'ada@example.com', password: VALID_PW }, session: {} }, res, mockNext());
+
+    expect(res.status).toHaveBeenCalledWith(201);
+  });
+
+  describe('verifyEmail', () => {
+    test('a valid token marks the user verified and returns success', async () => {
+      authTokenService.verifyToken.mockResolvedValue({ userUid: 'u1', payload: null });
+      const res = mockRes();
+      await controller.verifyEmail({ body: { token: 'good' } }, res, mockNext());
+
+      expect(authTokenService.verifyToken).toHaveBeenCalledWith('good', 'verify_email');
+      expect(User.update).toHaveBeenCalledWith({ emailVerified: true }, { where: { uid: 'u1' } });
+      expect(res.json).toHaveBeenCalledWith({ success: true });
+    });
+
+    test('an invalid/expired/used token → generic 400, no update', async () => {
+      authTokenService.verifyToken.mockResolvedValue(null);
+      const next = mockNext();
+      await controller.verifyEmail({ body: { token: 'bad' } }, mockRes(), next);
+      expect(next.mock.calls[0][0].status).toBe(400);
+      expect(User.update).not.toHaveBeenCalled();
+    });
+
+    test('missing token → 400', async () => {
+      const next = mockNext();
+      await controller.verifyEmail({ body: {} }, mockRes(), next);
+      expect(next.mock.calls[0][0].status).toBe(400);
+    });
+  });
+
+  describe('resendVerification', () => {
+    test('an unverified user gets a fresh token + email', async () => {
+      User.findByPk.mockResolvedValue({ uid: 'u1', email: 'ada@example.com', emailVerified: false });
+      const res = mockRes();
+      await controller.resendVerification({ session: { user: 'u1' } }, res, mockNext());
+
+      expect(authTokenService.issueToken).toHaveBeenCalledWith('u1', 'verify_email');
+      expect(authEmails.sendVerifyEmail).toHaveBeenCalledWith('ada@example.com', 'tok');
+      expect(res.json).toHaveBeenCalledWith({ success: true });
+    });
+
+    test('an already-verified user → generic 200, no email', async () => {
+      User.findByPk.mockResolvedValue({ uid: 'u1', email: 'ada@example.com', emailVerified: true });
+      const res = mockRes();
+      await controller.resendVerification({ session: { user: 'u1' } }, res, mockNext());
+
+      expect(authTokenService.issueToken).not.toHaveBeenCalled();
+      expect(authEmails.sendVerifyEmail).not.toHaveBeenCalled();
+      expect(res.json).toHaveBeenCalledWith({ success: true });
+    });
+
+    test('401 when unauthenticated', async () => {
+      const next = mockNext();
+      await controller.resendVerification({ session: {} }, mockRes(), next);
+      expect(next.mock.calls[0][0].status).toBe(401);
+    });
   });
 });

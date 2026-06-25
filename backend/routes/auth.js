@@ -3,7 +3,7 @@ var router = express.Router();
 const bodyParser = require('body-parser');
 const uc = require('../controllers/usercontroller');
 const authsess = require('../middleware/authsess');
-const { loginLimiter } = require('../middleware/ratelimiters');
+const { loginLimiter, emailSendLimiter } = require('../middleware/ratelimiters');
 
 router.use(bodyParser.json());
 
@@ -15,5 +15,10 @@ router.post('/register', uc.createUser);
 router.post('/login', loginLimiter, uc.loginUser);
 // logout destroys the session — a state-changing action, so POST (CSRF-protected), not GET. (7.3)
 router.post('/logout', uc.logoutUser);
+
+// Email verification (story 7.9). verify-email is public (the token authorizes);
+// resend is for the logged-in user and rate-limited per account.
+router.post('/verify-email', uc.verifyEmail);
+router.post('/verify-email/resend', authsess, emailSendLimiter, uc.resendVerification);
 
 module.exports = router;

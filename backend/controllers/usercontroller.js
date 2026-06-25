@@ -3,6 +3,7 @@ const createError = require('http-errors');
 const logger = require('../logger');
 const { FREE_PRACTICE_NAME } = require('../constants/topics');
 const authEmails = require('../services/authEmails');
+const authTokenService = require('../services/authTokenService');
 
 const createUser = async (req, res, next) => {
   // req.body is undefined when the request body is not JSON (story 7.5) — treat
@@ -95,6 +96,16 @@ const createUser = async (req, res, next) => {
       logger.error('Failed to seed Free practice topic', { uid: newUser.uid, error: seedErr.message });
     }
 
+    // Story 7.9 soft gate: send a verify-email token (24h). Best-effort — the
+    // user is logged in directly with emailVerified=false regardless; a delivery
+    // failure must never fail registration (they can resend from the banner).
+    try {
+      const verifyToken = await authTokenService.issueToken(newUser.uid, 'verify_email');
+      await authEmails.sendVerifyEmail(newUser.email, verifyToken);
+    } catch (verifyErr) {
+      logger.error('Failed to send verification email', { uid: newUser.uid, error: verifyErr.message });
+    }
+
     // Authenticate via the session cookie only — no JWT (story 7.1).
     let newSession = req.session;
     newSession.loggedIn = true;
@@ -163,6 +174,7 @@ const loginUser = async (req, res, next) => {
         discriminator: user.discriminator,
         handle: user.getHandle(), // story 7.8: AuthContext holds the handle
         email: user.email,
+        emailVerified: user.emailVerified, // story 7.9: drives the verify-email banner
         isAdmin: user.isAdmin
       }
     });
@@ -185,8 +197,56 @@ const logoutUser = async (req, res, next) => {
   res.status(200).json({ auth: false });
 };
 
+// POST /api/auth/verify-email — public, token-based (the token IS the authority).
+// Marks the token's user verified. A null result (unknown/used/expired token) is
+// a generic 400 (anti-oracle). (story 7.9)
+const verifyEmail = async (req, res, next) => {
+  try {
+    const { token } = req.body || {};
+    if (!token) {
+      return next(createError(400, 'Invalid or expired verification link'));
+    }
+    const result = await authTokenService.verifyToken(token, 'verify_email');
+    if (!result) {
+      return next(createError(400, 'Invalid or expired verification link'));
+    }
+    await User.update({ emailVerified: true }, { where: { uid: result.userUid } });
+    res.json({ success: true });
+  } catch (err) {
+    logger.error('Email verification error:', err.message);
+    next(createError(500, 'Email verification error'));
+  }
+};
+
+// POST /api/auth/verify-email/resend — authsess + emailSendLimiter. Re-sends a
+// fresh verify-email token for the logged-in user. Generic 200 even if already
+// verified; best-effort send. (story 7.9)
+const resendVerification = async (req, res, next) => {
+  try {
+    const userId = req.session.user;
+    if (!userId) {
+      return next(createError(401, 'Unauthorized'));
+    }
+    const user = await User.findByPk(userId);
+    if (user && !user.emailVerified) {
+      try {
+        const token = await authTokenService.issueToken(user.uid, 'verify_email');
+        await authEmails.sendVerifyEmail(user.email, token);
+      } catch (mailErr) {
+        logger.error('Failed to resend verification email', { uid: userId, error: mailErr.message });
+      }
+    }
+    res.json({ success: true });
+  } catch (err) {
+    logger.error('Resend verification error:', err.message);
+    next(createError(500, 'Resend verification error'));
+  }
+};
+
 module.exports = {
   createUser,
   loginUser,
-  logoutUser
+  logoutUser,
+  verifyEmail,
+  resendVerification
 };
