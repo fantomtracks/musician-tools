@@ -4,6 +4,8 @@ const logger = require('../logger');
 const { FREE_PRACTICE_NAME } = require('../constants/topics');
 const authEmails = require('../services/authEmails');
 const authTokenService = require('../services/authTokenService');
+const sessionService = require('../services/sessionService');
+const { CHECK_YOUR_INBOX } = require('../constants/messages');
 
 const createUser = async (req, res, next) => {
   // req.body is undefined when the request body is not JSON (story 7.5) — treat
@@ -243,10 +245,83 @@ const resendVerification = async (req, res, next) => {
   }
 };
 
+// POST /api/auth/forgot-password — public, rate-limited per IP. ALWAYS returns the
+// same generic response (anti-enumeration): no signal about whether the email
+// exists. If it does, a password_reset token (1h) is issued + emailed (best-effort).
+// (story 7.10)
+const forgotPassword = async (req, res, next) => {
+  try {
+    const { email } = req.body || {};
+    const trimmed = typeof email === 'string' ? email.trim() : '';
+    if (trimmed) {
+      const user = await User.findOne({ where: { email: trimmed } }); // citext, case-insensitive
+      if (user) {
+        try {
+          const token = await authTokenService.issueToken(user.uid, 'password_reset');
+          await authEmails.sendPasswordResetEmail(user.email, token);
+        } catch (mailErr) {
+          logger.error('Failed to send password reset email', { uid: user.uid, error: mailErr.message });
+        }
+      }
+    }
+    // Identical reply whether or not the account exists.
+    res.json({ message: CHECK_YOUR_INBOX });
+  } catch (err) {
+    logger.error('Forgot-password error:', err.message);
+    next(createError(500, 'Forgot-password error'));
+  }
+};
+
+// POST /api/auth/reset-password — public, token-based. Sets a new password and
+// invalidates ALL of the user's sessions (the request itself is unauthenticated,
+// so req.sessionID is anonymous → every real user session is dropped). (story 7.10)
+const resetPassword = async (req, res, next) => {
+  try {
+    const { token, newPassword, confirmPassword } = req.body || {};
+    if (!token) {
+      return next(createError(400, 'Invalid or expired reset link'));
+    }
+    if (typeof newPassword !== 'string' || newPassword.length < 10) {
+      return next(createError(400, 'New password must be at least 10 characters'));
+    }
+    if (newPassword !== confirmPassword) {
+      return next(createError(400, 'New password and confirmation do not match'));
+    }
+
+    const result = await authTokenService.verifyToken(token, 'password_reset');
+    if (!result) {
+      return next(createError(400, 'Invalid or expired reset link'));
+    }
+
+    // defaultScope (password excluded) is fine: we only WRITE the password (the
+    // setter hashes on update) — no need to load the hash, so don't reach for the
+    // login-only scope(null) exception.
+    const user = await User.findByPk(result.userUid);
+    if (!user) {
+      return next(createError(400, 'Invalid or expired reset link'));
+    }
+    await user.update({ password: newPassword }); // setter hashes; never store/return the hash
+
+    // Best-effort: a failed invalidation must not undo a successful reset.
+    try {
+      await sessionService.invalidateOtherSessions(result.userUid, req.sessionID);
+    } catch (invErr) {
+      logger.error('Failed to invalidate sessions after password reset', { uid: result.userUid, error: invErr.message });
+    }
+
+    res.json({ success: true });
+  } catch (err) {
+    logger.error('Reset-password error:', err.message);
+    next(createError(500, 'Reset-password error'));
+  }
+};
+
 module.exports = {
   createUser,
   loginUser,
   logoutUser,
   verifyEmail,
-  resendVerification
+  resendVerification,
+  forgotPassword,
+  resetPassword
 };

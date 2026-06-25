@@ -10,6 +10,8 @@ import MySessionsPage from './pages/MySessionsPage';
 import MyHeatmapPage from './pages/MyHeatmapPage';
 import ProfilePage from './pages/ProfilePage';
 import VerifyEmailPage from './pages/VerifyEmailPage';
+import ForgotPasswordPage from './pages/ForgotPasswordPage';
+import ResetPasswordPage from './pages/ResetPasswordPage';
 import Header from './components/Header';
 import VerifyEmailBanner from './components/VerifyEmailBanner';
 import Footer from './components/Footer';
@@ -91,8 +93,10 @@ function App() {
             path="/profile"
             element={isAuthenticated ? <ProfilePage /> : <Navigate to="/login" replace />}
           />
-          {/* Public — reached from the email link, possibly while signed out (story 7.9) */}
+          {/* Public — reached from the email link, possibly while signed out (story 7.9/7.10) */}
           <Route path="/verify-email" element={<VerifyEmailPage />} />
+          <Route path="/forgot-password" element={<ForgotPasswordPage />} />
+          <Route path="/reset-password" element={<ResetPasswordPage />} />
           <Route path="/login" element={!isAuthenticated ? <LoginPage /> : <Navigate to="/songs" replace />} />
           <Route
             path="/register"

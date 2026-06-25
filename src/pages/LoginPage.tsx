@@ -108,6 +108,12 @@ function LoginPage() {
             </div>
           </div>
 
+          <div className="text-right text-sm">
+            <Link to="/forgot-password" className="text-brand-600 dark:text-brand-400 font-medium hover:text-brand-700 dark:hover:text-brand-300">
+              Forgot password?
+            </Link>
+          </div>
+
           <button
             type="submit"
             className="btn-primary w-full justify-center"

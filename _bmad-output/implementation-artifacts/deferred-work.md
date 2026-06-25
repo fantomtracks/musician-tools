@@ -99,6 +99,10 @@ _Les 4 stories UI/confort (filtres Songlist, refacto SessionHistoryCard, chanson
 
 - **Boucle d'attribution de discriminator dupliquée** — la mécanique « essayer un discriminator, retry random sur collision `(name, discriminator)` » existe désormais en double : `usercontroller.createUser` (7.7, sur `User.create`) et `accountcontroller.updateName` (7.8, sur `user.update`). Extraction non triviale (create vs update = opérations différentes) ; envisager un helper d'ordre supérieur `withFreeDiscriminator(fn)` si une 3ᵉ occurrence apparaît. Inoffensif (les deux copies sont testées). [usercontroller.js, accountcontroller.js]
 
+## Deferred from: code review of story-7.10 (2026-06-25)
+
+- **Validation « nouveau mot de passe » triplée + paire `issueToken+send`** — la règle « ≥10 + confirmation » (messages identiques) existe dans `accountcontroller.changePassword` (7.8) **et** `usercontroller.resetPassword` (7.10) (register valide la longueur seule) ; et le couple best-effort `issueToken(type) + send<X>Email` se répète 3× (`createUser`/`resendVerification`/`forgotPassword`). Extraire un `validateNewPassword(pw, confirm)` + un `MIN_PASSWORD_LENGTH`, et éventuellement un `issueAndSend(uid, email, type)` — à faire délibérément (touche des contrôleurs de stories déjà mergées), pas en marge d'une revue. Inoffensif (tout est testé). [usercontroller.js, accountcontroller.js]
+
 ## Deferred from: code review of story-7.5 (2026-06-23)
 
 - **Garde de format UUID incohérente** — `topic`/`session` rejettent un `uid` malformé en **404** via `UUID_PATTERN` avant la requête ; `song`/`instrument`/`playlist` (et l'`instrumentUid` de `markSongPlayed`) n'ont pas cette garde → un `uid` non-UUID atteint Postgres (colonne `uuid`) et lève une erreur de syntaxe → **500** au lieu de 404. Pré-existant (déjà le cas avec `findByPk`), pas une régression 7.5 ; ce n'est pas une faille (entrée garbage), juste un 500 cosmétique. Fix = généraliser `UUID_PATTERN`→404 sur ces routes (ou un middleware de validation de param). [songcontroller, instrumentcontroller, playlistcontroller]

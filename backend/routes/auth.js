@@ -3,7 +3,7 @@ var router = express.Router();
 const bodyParser = require('body-parser');
 const uc = require('../controllers/usercontroller');
 const authsess = require('../middleware/authsess');
-const { loginLimiter, emailSendLimiter } = require('../middleware/ratelimiters');
+const { loginLimiter, emailSendLimiter, forgotPasswordLimiter } = require('../middleware/ratelimiters');
 
 router.use(bodyParser.json());
 
@@ -20,5 +20,9 @@ router.post('/logout', uc.logoutUser);
 // resend is for the logged-in user and rate-limited per account.
 router.post('/verify-email', uc.verifyEmail);
 router.post('/verify-email/resend', authsess, emailSendLimiter, uc.resendVerification);
+
+// Password reset (story 7.10). Both public; forgot is rate-limited per IP.
+router.post('/forgot-password', forgotPasswordLimiter, uc.forgotPassword);
+router.post('/reset-password', uc.resetPassword);
 
 module.exports = router;
