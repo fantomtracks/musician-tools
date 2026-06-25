@@ -15,10 +15,11 @@ const config = require('./config/config')[env];
 const PORT = process.env.PORT || 3001;
 const { sequelize } = require('./models');
 
-// Fail-fast at boot: required secrets must be present. There is no fallback —
-// an app without a real session secret must not start. (Story 7.1)
+// Fail-fast at boot: required secrets/config must be present. There is no
+// fallback — the session secret (7.1) and the email infra config (7.6:
+// RESEND_API_KEY, EMAIL_FROM, APP_BASE_URL) must be set or the app must not start.
 try {
-  requireEnv(['SESSION_SECRET']);
+  requireEnv(['SESSION_SECRET', 'RESEND_API_KEY', 'EMAIL_FROM', 'APP_BASE_URL']);
 } catch (err) {
   logger.error(`Boot aborted: ${err.message}`);
   process.exit(1);
