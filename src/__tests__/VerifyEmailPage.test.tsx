@@ -6,7 +6,7 @@ import { verificationService } from '../services/verificationService';
 
 jest.mock('../contexts/AuthContext', () => ({ useAuth: jest.fn() }));
 jest.mock('../services/verificationService', () => ({
-  verificationService: { verify: jest.fn(), resend: jest.fn() },
+  verificationService: { verify: jest.fn(), resend: jest.fn(), confirmEmailChange: jest.fn() },
 }));
 
 const mockedUseAuth = useAuth as jest.Mock;
@@ -59,4 +59,17 @@ test('a missing token shows the error state without calling the service', async 
 
   await screen.findByText(/invalid or expired/i);
   expect(svc.verify).not.toHaveBeenCalled();
+});
+
+test('flow=change-email confirms the change (own copy) and patches the new email — story 7.11', async () => {
+  const patchUser = jest.fn();
+  mockedUseAuth.mockReturnValue({ isAuthenticated: true, user: { emailVerified: true }, patchUser });
+  svc.confirmEmailChange.mockResolvedValue('new@example.com');
+
+  renderAt('/verify-email?token=chg&flow=change-email');
+
+  await screen.findByText(/email updated/i);
+  expect(svc.confirmEmailChange).toHaveBeenCalledWith('chg');
+  expect(svc.verify).not.toHaveBeenCalled();
+  expect(patchUser).toHaveBeenCalledWith({ email: 'new@example.com' });
 });

@@ -25,4 +25,7 @@ router.post('/verify-email/resend', authsess, emailSendLimiter, uc.resendVerific
 router.post('/forgot-password', forgotPasswordLimiter, uc.forgotPassword);
 router.post('/reset-password', uc.resetPassword);
 
+// Change-email confirmation (story 7.11). Public; the token authorizes.
+router.post('/change-email/confirm', uc.confirmEmailChange);
+
 module.exports = router;

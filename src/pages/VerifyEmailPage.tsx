@@ -12,6 +12,9 @@ function VerifyEmailPage() {
   const [searchParams] = useSearchParams();
   const { isAuthenticated, user, patchUser } = useAuth();
   const [status, setStatus] = useState<Status>('verifying');
+  // Whether this run is the change-email confirmation (vs the verify-signup flow),
+  // so the success view shows the right copy.
+  const [changeMode, setChangeMode] = useState(false);
   // Run the verify exactly once: the token is single-use, so a second call (React
   // StrictMode double-invoke in dev, or a re-render) would re-POST a now-consumed
   // token and wrongly flip the page to 'error'.
@@ -24,6 +27,20 @@ function VerifyEmailPage() {
     const token = searchParams.get('token');
     if (!token) {
       setStatus('error');
+      return;
+    }
+    // Shared page (story 7.11): a change-email confirmation arrives with
+    // ?flow=change-email; otherwise it's the verify-signup flow (7.9).
+    const isChangeEmail = searchParams.get('flow') === 'change-email';
+    if (isChangeEmail) {
+      setChangeMode(true);
+      verificationService.confirmEmailChange(token)
+        .then((newEmail) => {
+          setStatus('success');
+          // Refresh the cached email so the app stops showing the old one.
+          if (isAuthenticated && newEmail) patchUser({ email: newEmail });
+        })
+        .catch(() => setStatus('error'));
       return;
     }
     verificationService.verify(token)
@@ -52,8 +69,12 @@ function VerifyEmailPage() {
         )}
         {status === 'success' && (
           <>
-            <h1 className="text-2xl font-bold text-gray-900 dark:text-gray-100">Email confirmed ✓</h1>
-            <p className="text-gray-600 dark:text-gray-300">Your email address is now verified.</p>
+            <h1 className="text-2xl font-bold text-gray-900 dark:text-gray-100">
+              {changeMode ? 'Email updated ✓' : 'Email confirmed ✓'}
+            </h1>
+            <p className="text-gray-600 dark:text-gray-300">
+              {changeMode ? 'Your account email address has been changed.' : 'Your email address is now verified.'}
+            </p>
             <Link to="/songs" className="btn-primary inline-flex">Go to the app</Link>
           </>
         )}

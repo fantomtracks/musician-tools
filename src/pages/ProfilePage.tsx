@@ -13,6 +13,12 @@ function ProfilePage() {
   const [nameError, setNameError] = useState<string | null>(null);
   const [savingName, setSavingName] = useState(false);
 
+  // Email (verify-before-switch, story 7.11)
+  const [newEmail, setNewEmail] = useState('');
+  const [emailMsg, setEmailMsg] = useState<string | null>(null);
+  const [emailError, setEmailError] = useState<string | null>(null);
+  const [savingEmail, setSavingEmail] = useState(false);
+
   // Password
   const [currentPassword, setCurrentPassword] = useState('');
   const [newPassword, setNewPassword] = useState('');
@@ -48,6 +54,23 @@ function ProfilePage() {
       setNameError(err instanceof Error ? err.message : 'Failed to update name');
     } finally {
       setSavingName(false);
+    }
+  };
+
+  const handleRequestEmailChange = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setEmailError(null);
+    setEmailMsg(null);
+    try {
+      setSavingEmail(true);
+      await profileService.requestEmailChange(newEmail.trim());
+      // Generic, anti-enumeration message — never reveals if the address is taken.
+      setEmailMsg('If that address is available, we sent a confirmation link to it. Your current email stays until you confirm.');
+      setNewEmail('');
+    } catch (err) {
+      setEmailError(err instanceof Error ? err.message : 'Failed to request the change');
+    } finally {
+      setSavingEmail(false);
     }
   };
 
@@ -109,11 +132,39 @@ function ProfilePage() {
         </form>
       </section>
 
-      {/* Email (read-only in 7.8; change-email lands in 7.11) */}
-      <section className="space-y-2">
+      {/* Email — verify-before-switch (story 7.11) */}
+      <section className="space-y-3">
         <h2 className="text-lg font-semibold text-gray-900 dark:text-gray-100">Email</h2>
         <p className="text-sm text-gray-700 dark:text-gray-300">{profile?.email ?? '—'}</p>
-        <p className="text-xs text-gray-400 dark:text-gray-500">Email changes are managed separately and coming soon.</p>
+        {profile?.pendingEmail && (
+          <p className="text-xs text-amber-700 dark:text-amber-300">
+            Pending change to <span className="font-medium">{profile.pendingEmail}</span> — check that inbox to confirm.
+          </p>
+        )}
+        {profile && !profile.emailVerified ? (
+          // Changing email requires a verified current address (server: requireVerified
+          // → 403). Surface that instead of letting the form fail opaquely.
+          <p className="text-xs text-amber-700 dark:text-amber-300">
+            Verify your current email first (use the banner above) to be able to change it.
+          </p>
+        ) : (
+          <form onSubmit={handleRequestEmailChange} className="space-y-3">
+            {emailError && <p className="text-sm text-red-600 dark:text-red-400">{emailError}</p>}
+            {emailMsg && <p className="text-sm text-green-700 dark:text-green-400">{emailMsg}</p>}
+            <input
+              className="input-base"
+              type="email"
+              value={newEmail}
+              onChange={(e) => setNewEmail(e.target.value)}
+              placeholder="New email address"
+              required
+              disabled={savingEmail}
+            />
+            <button type="submit" className="btn-primary" disabled={savingEmail}>
+              {savingEmail ? 'Sending...' : 'Change email'}
+            </button>
+          </form>
+        )}
       </section>
 
       {/* Password */}

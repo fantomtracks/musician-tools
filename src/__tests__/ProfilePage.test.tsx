@@ -9,6 +9,7 @@ jest.mock('../services/profileService', () => ({
     getProfile: jest.fn(),
     updateName: jest.fn(),
     changePassword: jest.fn(),
+    requestEmailChange: jest.fn(),
   },
 }));
 
@@ -17,7 +18,7 @@ const svc = profileService as jest.Mocked<typeof profileService>;
 
 const PROFILE = {
   uid: 'u1', name: 'Ada', discriminator: '0042', handle: 'Ada#0042',
-  email: 'ada@example.com', emailVerified: true, isAdmin: false,
+  email: 'ada@example.com', pendingEmail: null, emailVerified: true, isAdmin: false,
 };
 
 let patchUser: jest.Mock;
@@ -28,11 +29,24 @@ beforeEach(() => {
   svc.getProfile.mockResolvedValue({ ...PROFILE });
 });
 
-test('loads the profile and shows the handle + email (read-only)', async () => {
+test('loads the profile and shows the handle + email with a change-email control (story 7.11)', async () => {
   render(<ProfilePage />);
   await screen.findByText('Ada#0042');
   expect(screen.getByText('ada@example.com')).toBeInTheDocument();
-  expect(screen.getByText(/managed separately/i)).toBeInTheDocument();
+  expect(screen.getByPlaceholderText(/new email address/i)).toBeInTheDocument();
+});
+
+test('requesting an email change shows the generic message (never reveals availability)', async () => {
+  svc.requestEmailChange.mockResolvedValue(undefined);
+  render(<ProfilePage />);
+  await screen.findByText('Ada#0042');
+
+  fireEvent.change(screen.getByPlaceholderText(/new email address/i), { target: { value: 'new@example.com' } });
+  fireEvent.click(screen.getByRole('button', { name: /change email/i }));
+
+  await waitFor(() => expect(svc.requestEmailChange).toHaveBeenCalledWith('new@example.com'));
+  await screen.findByText(/if that address is available/i);
+  expect(screen.queryByText(/taken|in use|already exists/i)).toBeNull();
 });
 
 test('saving a new name updates the handle and patches the auth user', async () => {

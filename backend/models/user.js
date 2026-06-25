@@ -46,9 +46,16 @@ module.exports = (sequelize) => {
     },
     pendingEmail: {
       // verify-before-switch target (story 7.11); null until a change is pending.
+      // Same isEmail guard as `email`: a value accepted here is guaranteed to pass
+      // when switched into `email` on confirmation (no consume-then-reject dead link).
       type: DataTypes.STRING,
       allowNull: true,
-      field: 'pending_email'
+      field: 'pending_email',
+      validate: {
+        isEmail: {
+          msg: 'Invalid email address'
+        }
+      }
     },
     password: {
       type: DataTypes.STRING,

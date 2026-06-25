@@ -99,9 +99,13 @@ _Les 4 stories UI/confort (filtres Songlist, refacto SessionHistoryCard, chanson
 
 - **Boucle d'attribution de discriminator dupliquée** — la mécanique « essayer un discriminator, retry random sur collision `(name, discriminator)` » existe désormais en double : `usercontroller.createUser` (7.7, sur `User.create`) et `accountcontroller.updateName` (7.8, sur `user.update`). Extraction non triviale (create vs update = opérations différentes) ; envisager un helper d'ordre supérieur `withFreeDiscriminator(fn)` si une 3ᵉ occurrence apparaît. Inoffensif (les deux copies sont testées). [usercontroller.js, accountcontroller.js]
 
+## Deferred from: code review of story-7.11 (2026-06-25)
+
+- **Invalider les tokens `change_email` périmés à chaque nouvelle demande** — demander un changement vers A puis B laisse `token_A` valide 1 h (design payload-autoritatif : chaque token confirme SON adresse). Durcissement : à chaque `requestEmailChange`, marquer `usedAt` les anciens tokens `change_email` non utilisés du user. Faible sévérité (expiration 1 h, initié par l'user). [accountcontroller.js + authTokenService]
+
 ## Deferred from: code review of story-7.10 (2026-06-25)
 
-- **Validation « nouveau mot de passe » triplée + paire `issueToken+send`** — la règle « ≥10 + confirmation » (messages identiques) existe dans `accountcontroller.changePassword` (7.8) **et** `usercontroller.resetPassword` (7.10) (register valide la longueur seule) ; et le couple best-effort `issueToken(type) + send<X>Email` se répète 3× (`createUser`/`resendVerification`/`forgotPassword`). Extraire un `validateNewPassword(pw, confirm)` + un `MIN_PASSWORD_LENGTH`, et éventuellement un `issueAndSend(uid, email, type)` — à faire délibérément (touche des contrôleurs de stories déjà mergées), pas en marge d'une revue. Inoffensif (tout est testé). [usercontroller.js, accountcontroller.js]
+- **Validation « nouveau mot de passe » triplée + paire `issueToken+send` (4 occurrences)** — la règle « ≥10 + confirmation » (messages identiques) existe dans `accountcontroller.changePassword` (7.8) **et** `usercontroller.resetPassword` (7.10) (register valide la longueur seule) ; et le couple best-effort `issueToken(type) + send<X>Email` se répète désormais **4×** (`createUser`/`resendVerification`/`forgotPassword`/`requestEmailChange` de 7.11). Extraire un `validateNewPassword(pw, confirm)` + un `MIN_PASSWORD_LENGTH`, et un `issueAndSend(uid, email, type)` — à faire délibérément (touche des contrôleurs de stories déjà mergées), pas en marge d'une revue. Inoffensif (tout est testé). [usercontroller.js, accountcontroller.js]
 
 ## Deferred from: code review of story-7.5 (2026-06-23)
 

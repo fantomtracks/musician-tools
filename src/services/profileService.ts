@@ -6,6 +6,7 @@ export type Profile = {
   discriminator: string;
   handle: string;
   email: string;
+  pendingEmail: string | null;
   emailVerified: boolean;
   isAdmin: boolean;
 };
@@ -35,6 +36,18 @@ export const profileService = {
     if (res.status === 409) throw new Error('This display name is full, please choose another.');
     if (!res.ok) throw new Error('Failed to update name');
     return res.json();
+  },
+
+  // Request an email change (verify-before-switch, story 7.11). The response is
+  // generic — success just means "request accepted", never "address taken".
+  async requestEmailChange(newEmail: string): Promise<void> {
+    const res = await apiFetch(`${API_BASE}/account/email`, {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ newEmail }),
+      credentials: 'include',
+    });
+    if (!res.ok) throw new Error('Could not request the email change');
   },
 
   async changePassword(currentPassword: string, newPassword: string, confirmPassword: string): Promise<void> {

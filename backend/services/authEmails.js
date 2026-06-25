@@ -50,4 +50,17 @@ async function sendPasswordResetEmail(email, token) {
   });
 }
 
-module.exports = { sendSignupAttemptNotice, sendVerifyEmail, sendPasswordResetEmail };
+// Story 7.11: confirm a NEW email (verify-before-switch). Sent to the new address;
+// the shared VerifyEmailPage reads ?token=…&flow=change-email and confirms it.
+async function sendChangeEmail(newEmail, token) {
+  const link = appLink(`/verify-email?token=${token}&flow=change-email`);
+  return emailService.sendEmail({
+    to: newEmail,
+    subject: 'Confirm your new email',
+    html: `<p>You asked to change your Musician Tools email to this address.</p>
+<p><a href="${link}">Confirm this email</a></p>
+<p>This link expires in 1 hour and can be used once. Until you confirm, your account keeps its current email. If you didn't request this, you can ignore this email.</p>`,
+  });
+}
+
+module.exports = { sendSignupAttemptNotice, sendVerifyEmail, sendPasswordResetEmail, sendChangeEmail };

@@ -2,6 +2,9 @@ const { User } = require('../models');
 const createError = require('http-errors');
 const logger = require('../logger');
 const sessionService = require('../services/sessionService');
+const authTokenService = require('../services/authTokenService');
+const authEmails = require('../services/authEmails');
+const { CHECK_YOUR_INBOX } = require('../constants/messages');
 
 // All account routes act on req.session.user — the caller's OWN record. Loading
 // by findByPk(req.session.user) is the sanctioned self-only case: the uid IS the
@@ -25,6 +28,7 @@ const getProfile = async (req, res, next) => {
       discriminator: user.discriminator,
       handle: user.getHandle(),
       email: user.email,
+      pendingEmail: user.pendingEmail, // story 7.11: a change awaiting confirmation (else null)
       emailVerified: user.emailVerified,
       isAdmin: user.isAdmin,
     });
@@ -144,4 +148,60 @@ const changePassword = async (req, res, next) => {
   }
 };
 
-module.exports = { getProfile, updateName, changePassword };
+// PUT /api/account/email — request an email change (verify-before-switch, story
+// 7.11). Mounted authsess + requireVerified + emailSendLimiter. The current email
+// is NEVER overwritten here: the target goes to pendingEmail (+ token payload) and
+// is only switched in on confirmation. Anti-enumeration: the response is identical
+// whether or not the new address is already taken — the link is only sent if free.
+const requestEmailChange = async (req, res, next) => {
+  try {
+    const userId = req.session.user;
+    if (!userId) {
+      return next(createError(401, 'Unauthorized'));
+    }
+    const { newEmail } = req.body || {};
+    const trimmed = typeof newEmail === 'string' ? newEmail.trim() : '';
+    if (!trimmed) {
+      return next(createError(400, 'A valid email address is required'));
+    }
+
+    const user = await User.findByPk(userId);
+    if (!user) {
+      return next(createError(401, 'Unauthorized'));
+    }
+
+    // Store the target REGARDLESS of availability so getProfile reflects the
+    // request either way — otherwise pendingEmail-only-when-free would leak account
+    // existence to an authenticated prober (anti-enumeration). The model's isEmail
+    // guard rejects malformed input here (same rule as the email column, so a value
+    // accepted now is guaranteed to pass when switched into email on confirmation).
+    try {
+      await user.update({ pendingEmail: trimmed });
+    } catch (validationErr) {
+      if (validationErr.name === 'SequelizeValidationError') {
+        return next(createError(400, 'A valid email address is required'));
+      }
+      throw validationErr;
+    }
+
+    // The confirmation link is only sent if the address is actually free (not held
+    // by ANY account, incl. the user's own current email) — but the HTTP reply is
+    // the same generic message whether or not it was.
+    const taken = await User.findOne({ where: { email: trimmed } }); // citext
+    if (!taken) {
+      try {
+        const token = await authTokenService.issueToken(user.uid, 'change_email', { pendingEmail: trimmed });
+        await authEmails.sendChangeEmail(trimmed, token);
+      } catch (mailErr) {
+        logger.error('Failed to send change-email confirmation', { uid: userId, error: mailErr.message });
+      }
+    }
+
+    res.json({ message: CHECK_YOUR_INBOX });
+  } catch (error) {
+    logger.error('Error requesting email change:', error.message);
+    next(createError(500, 'Error requesting email change'));
+  }
+};
+
+module.exports = { getProfile, updateName, changePassword, requestEmailChange };

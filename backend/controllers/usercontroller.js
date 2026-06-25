@@ -316,6 +316,36 @@ const resetPassword = async (req, res, next) => {
   }
 };
 
+// POST /api/auth/change-email/confirm — public, token-based (story 7.11). Switches
+// pendingEmail (carried in the token payload, authoritative) into email. A null
+// result / missing payload / unique collision (the address was taken meanwhile)
+// all yield the same generic 400.
+const confirmEmailChange = async (req, res, next) => {
+  try {
+    const { token } = req.body || {};
+    if (!token) {
+      return next(createError(400, 'Invalid or expired link'));
+    }
+    const result = await authTokenService.verifyToken(token, 'change_email');
+    const pendingEmail = result && result.payload && result.payload.pendingEmail;
+    if (!result || !pendingEmail) {
+      return next(createError(400, 'Invalid or expired link'));
+    }
+    try {
+      await User.update({ email: pendingEmail, pendingEmail: null }, { where: { uid: result.userUid } });
+    } catch (uniqueErr) {
+      // The address was taken between the request and the click — generic reject.
+      logger.error('Email change collision on confirm:', uniqueErr.message);
+      return next(createError(400, 'Invalid or expired link'));
+    }
+    // Return the new email so the (possibly logged-in) client can refresh it.
+    res.json({ success: true, email: pendingEmail });
+  } catch (err) {
+    logger.error('Confirm email change error:', err.message);
+    next(createError(500, 'Confirm email change error'));
+  }
+};
+
 module.exports = {
   createUser,
   loginUser,
@@ -323,5 +353,6 @@ module.exports = {
   verifyEmail,
   resendVerification,
   forgotPassword,
-  resetPassword
+  resetPassword,
+  confirmEmailChange
 };
