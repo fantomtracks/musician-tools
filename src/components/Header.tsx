@@ -10,6 +10,7 @@ const navLinks: { to: string; label: string; state?: { resetToList: boolean } }[
   { to: '/my-playlists', label: 'Playlists' },
   { to: '/my-topics', label: 'Topics' },
   { to: '/my-instruments', label: 'Instruments' },
+  { to: '/profile', label: 'Profile' },
 ];
 
 function Header() {

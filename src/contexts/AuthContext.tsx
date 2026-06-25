@@ -7,6 +7,7 @@ interface AuthContextType {
   login: (login: string, password: string) => Promise<void>;
   register: (name: string, email: string, password: string) => Promise<RegisterResult>;
   logout: () => Promise<void>;
+  patchUser: (partial: Partial<User>) => void;
   isAuthenticated: boolean;
 }
 
@@ -47,6 +48,15 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     return result;
   };
 
+  // Merge fields into the current user and persist (story 7.8: refresh handle/
+  // discriminator after a display-name change).
+  const patchUser = (partial: Partial<User>) => {
+    if (!user) return;
+    const next = { ...user, ...partial };
+    authService.storeUser(next);
+    setUser(next);
+  };
+
   const logout = async () => {
     try {
       await authService.logout();
@@ -62,6 +72,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     login,
     register,
     logout,
+    patchUser,
     isAuthenticated: !!user,
   };
 

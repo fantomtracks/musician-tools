@@ -82,6 +82,12 @@ module.exports = (sequelize) => {
     return bcryptjs.compare(password, this.password);
   };
 
+  // Discord-style handle `name#NNNN` (story 7.8). Single source of truth for the
+  // format; null-guarded so a missing discriminator never yields "name#null".
+  User.prototype.getHandle = function() {
+    return this.discriminator ? `${this.name}#${this.discriminator}` : this.name;
+  };
+
   User.associate = function(models) {
     User.hasMany(models.Song, { foreignKey: 'userUid' });
   };

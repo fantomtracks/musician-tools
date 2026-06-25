@@ -32,8 +32,15 @@ function mockNext() {
 }
 
 function mockNewUser(uid = 'new-user-1') {
-  // createUser reads newUser.uid and newUser.dataValues (to strip the password)
-  return { uid, dataValues: { uid, name: 'Ada', email: 'ada@example.com', password: 'hashed' } };
+  // createUser reads newUser.uid, newUser.dataValues (to strip the password) and
+  // newUser.getHandle() (story 7.8 — model prototype method).
+  return {
+    uid,
+    name: 'Ada',
+    discriminator: '0001',
+    getHandle() { return `${this.name}#${this.discriminator}`; },
+    dataValues: { uid, name: 'Ada', discriminator: '0001', email: 'ada@example.com', password: 'hashed' },
+  };
 }
 
 describe('usercontroller.createUser', () => {
@@ -186,9 +193,11 @@ describe('usercontroller.loginUser', () => {
     return {
       uid: 'user-1',
       name: 'Ada',
+      discriminator: '0001',
       email: 'ada@example.com',
       isAdmin: false,
       validPassword: jest.fn().mockResolvedValue(true),
+      getHandle() { return `${this.name}#${this.discriminator}`; },
     };
   }
 

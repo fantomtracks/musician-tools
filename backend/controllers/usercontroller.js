@@ -104,6 +104,7 @@ const createUser = async (req, res, next) => {
 
     res.status(201).json({
       ...userWithoutPassword,
+      handle: newUser.getHandle(), // story 7.8: AuthContext holds the handle
       auth: true
     });
   } catch (err) {
@@ -159,6 +160,8 @@ const loginUser = async (req, res, next) => {
       user: {
         uid: user.uid,
         name: user.name,
+        discriminator: user.discriminator,
+        handle: user.getHandle(), // story 7.8: AuthContext holds the handle
         email: user.email,
         isAdmin: user.isAdmin
       }

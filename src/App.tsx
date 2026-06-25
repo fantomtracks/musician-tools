@@ -8,6 +8,7 @@ import MyPlaylistsPage from './pages/MyPlaylistsPage';
 import MyTopicsPage from './pages/MyTopicsPage';
 import MySessionsPage from './pages/MySessionsPage';
 import MyHeatmapPage from './pages/MyHeatmapPage';
+import ProfilePage from './pages/ProfilePage';
 import Header from './components/Header';
 import Footer from './components/Footer';
 
@@ -82,6 +83,10 @@ function App() {
           <Route
             path="/my-heatmap"
             element={isAuthenticated ? <MyHeatmapPage /> : <Navigate to="/login" replace />}
+          />
+          <Route
+            path="/profile"
+            element={isAuthenticated ? <ProfilePage /> : <Navigate to="/login" replace />}
           />
           <Route path="/login" element={!isAuthenticated ? <LoginPage /> : <Navigate to="/songs" replace />} />
           <Route

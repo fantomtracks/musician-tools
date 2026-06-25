@@ -95,6 +95,10 @@ _Les 4 stories UI/confort (filtres Songlist, refacto SessionHistoryCard, chanson
 - **Index non-unique `users_name` redondant** — l'index composite `users_name_discriminator_unique` a `name` en colonne de tête, rendant l'index `users_name` redondant (même cas que le nettoyage 20260621 sur PlaylistSongs). Inoffensif ; à dropper dans une future migration de ménage. [migrations Users]
 - **Format du discriminator non contraint en DB** — l'invariant « 4 chiffres zero-paddés » vit dans le code (backfill + futur register 7.7), pas dans un CHECK SQL. 7.7 (register handle) est le bon endroit pour figer le format ; un CHECK `discriminator ~ '^[0-9]{4}$'` pourrait y être ajouté. [models/user.js]
 
+## Deferred from: code review of story-7.8 (2026-06-25)
+
+- **Boucle d'attribution de discriminator dupliquée** — la mécanique « essayer un discriminator, retry random sur collision `(name, discriminator)` » existe désormais en double : `usercontroller.createUser` (7.7, sur `User.create`) et `accountcontroller.updateName` (7.8, sur `user.update`). Extraction non triviale (create vs update = opérations différentes) ; envisager un helper d'ordre supérieur `withFreeDiscriminator(fn)` si une 3ᵉ occurrence apparaît. Inoffensif (les deux copies sont testées). [usercontroller.js, accountcontroller.js]
+
 ## Deferred from: code review of story-7.5 (2026-06-23)
 
 - **Garde de format UUID incohérente** — `topic`/`session` rejettent un `uid` malformé en **404** via `UUID_PATTERN` avant la requête ; `song`/`instrument`/`playlist` (et l'`instrumentUid` de `markSongPlayed`) n'ont pas cette garde → un `uid` non-UUID atteint Postgres (colonne `uuid`) et lève une erreur de syntaxe → **500** au lieu de 404. Pré-existant (déjà le cas avec `findByPk`), pas une régression 7.5 ; ce n'est pas une faille (entrée garbage), juste un 500 cosmétique. Fix = généraliser `UUID_PATTERN`→404 sur ces routes (ou un middleware de validation de param). [songcontroller, instrumentcontroller, playlistcontroller]

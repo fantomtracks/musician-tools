@@ -5,6 +5,10 @@ export type User = {
   name: string;
   email: string;
   isAdmin: boolean;
+  // Discord-style identity (story 7.2/7.8). Optional for backward-compat with any
+  // stored user from before; login/register now include them.
+  discriminator?: string;
+  handle?: string;
 };
 
 export type LoginRequest = {

@@ -37,4 +37,13 @@ const emailSendLimiter = rateLimit({
   keyGenerator: (req) => (req.session && req.session.user) || ipKeyGenerator(req.ip),
 });
 
-module.exports = { loginLimiter, forgotPasswordLimiter, emailSendLimiter };
+// Change-password — 5 / 15 min / account (story 7.8). Keyed by the authenticated
+// user (req.ip fallback for the v8.2+ validator). Mounted on PUT /api/account/password.
+const changePasswordLimiter = rateLimit({
+  ...base,
+  windowMs: 15 * 60 * 1000,
+  limit: 5,
+  keyGenerator: (req) => (req.session && req.session.user) || ipKeyGenerator(req.ip),
+});
+
+module.exports = { loginLimiter, forgotPasswordLimiter, emailSendLimiter, changePasswordLimiter };

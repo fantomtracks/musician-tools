@@ -7,6 +7,7 @@ var instrumentsRouter = require('./instruments');
 var playlistsRouter = require('./playlists');
 var topicsRouter = require('./topics');
 var sessionsRouter = require('./sessions');
+var accountRouter = require('./account');
 
 // CSRF guard on every /api route (story 7.3): mints a per-session token, exempts
 // safe methods, and rejects mutations without a valid X-CSRF-Token header.
@@ -44,5 +45,8 @@ router.use('/topics', topicsRouter);
 
 // Practice sessions routes
 router.use('/sessions', sessionsRouter);
+
+// Account/profile routes (story 7.8)
+router.use('/account', accountRouter);
 
 module.exports = router;
