@@ -1,6 +1,6 @@
 # Deferred Work
 
-> **Rituel (acté rétro Epic 8, 2026-06-21)** : ce fichier passe en revue **avant le démarrage de chaque nouvelle epic**. Chaque item est tranché — _fix maintenant_ / _story planifiée_ / _gardé-avec-raison_ / _tué_. Il ne doit jamais redevenir un cimetière. Dernière passe : **2026-06-21**.
+> **Rituel (acté rétro Epic 8, 2026-06-21)** : ce fichier passe en revue **avant le démarrage de chaque nouvelle epic**. Chaque item est tranché — _fix maintenant_ / _story planifiée_ / _gardé-avec-raison_ / _tué_. Il ne doit jamais redevenir un cimetière. Dernière passe : **2026-06-26** (clôture Epic 7).
 
 ---
 
@@ -15,13 +15,18 @@ _Vidé le 2026-06-21 : les 3 items (z-index Album/Languages, garde artiste `MyPl
 _Les 4 stories UI/confort (filtres Songlist, refacto SessionHistoryCard, chanson cliquable, nav mobile) ont été regroupées et **livrées dans l'Epic 9** (2026-06-21, branche `feat/epic-9-ui-polish`). Cf. journal « Soldé »._
 
 ### 🔐 Lot sécu → à fusionner dans le brief Epic 7
-> **Décision 2026-06-21** : ces dettes sécu sont le **périmètre du design sécurité qui bloque l'Epic 7** (compte utilisateur). À traiter dans le brief Epic 7, pas en story autonome.
-- **`getSong` sans contrôle d'ownership** (`songcontroller.js:65-76`) : GET /api/songs/:uid accessible sans vérif. Aligner sur 401→404→403.
-- **`markSongPlayed` stocke `instrumentUid` sans vérifier l'ownership** (pré-existant).
-- **403 vs 404 = oracle d'énumération** : un user authentifié distingue « existe mais pas à moi » de « n'existe pas » (pattern maison, instrument/topic/song identiques). Trancher app-wide : 404 partout ou `where: { uid, userUid }`.
-- **Posture CSRF** : routes mutantes sur cookie de session sans token CSRF ni vérif d'origine. Vérifier SameSite (express-session) + stratégie app-wide.
-- **Garde `req.body || {}` absente** des contrôleurs préexistants (topic/instrument/song…) : POST/PUT non-JSON → `req.body` undefined → 500 au lieu de 400. Corrigé dans practicesession (2.1), à généraliser. → **story planifiée : Epic 7, AC d'audit story 7.5** (2026-06-21).
-- **Unicité topic insensible casse/accents (gap AC10, 8-2)** : dédoublonnage garanti client seulement (`foldForSearch`) ; index `(user_uid, name)` sensible. Correctif = `citext`/`LOWER()` serveur — touche la feature topics entière. → **story planifiée : Epic 7, story 7.12** (2026-06-21).
+> ✅ **RÉSOLU — Epic 7 shippée (mergée local 2026-06-26).** Détail des résolutions dans le journal « Soldé » en bas. Vérifié dans le code le 2026-06-26.
+
+### 🔐 Durcissement session — ✅ DEV FAIT le 2026-06-26 (branche `feat/session-hardening`, à merger)
+> Issu de la review 7.3, élargi par 7.13. Implémenté : `sessionService.regenerateSession()` (promisifie `req.session.regenerate`) appelé dans `loginUser` ET `verifyEmail` avant de poser `loggedIn`/`user` → l'ID de session pré-auth + son token CSRF sont jetés. Côté front, `AuthContext` vide le cache CSRF (`clearCsrfToken`) au succès login + verify (`applyAuthenticatedUser`) → 1ʳᵉ mutation avec un token frais, pas de 403. Tests : usercontroller 25 ✓ (regenerate asserté), front 267 ✓, smoke-test login live OK. [usercontroller.js, sessionService.js, contexts/AuthContext.tsx]
+
+### 🧹 Lot ménage dette technique (story planifiée — groupée 2026-06-26)
+> Petits items inoffensifs (tout testé), à faire délibérément en un lot, pas en marge.
+- **Helper `issueAndSend(uid, email, type)` + `validateNewPassword(pw, confirm)`** — le couple `issueToken+send` est désormais **5×** (createUser / resendVerificationPublic(7.13) / forgotPassword / requestEmailChange / register-verify) et la validation mdp ≥10+confirmation 2×. [usercontroller.js, accountcontroller.js]
+- **Index non-unique `users_name` redondant** (couvert par `users_name_discriminator_unique`) → migration de drop. [migrations Users]
+- **CHECK SQL `discriminator ~ '^[0-9]{4}$'`** — l'invariant 4 chiffres ne vit que dans le code. [models/user.js]
+- **Garde format UUID incohérente** — song/instrument/playlist : `uid` non-UUID → 500 au lieu de 404 (cosmétique). Généraliser `UUID_PATTERN`→404. [song/instrument/playlist controllers]
+- **`getCsrfToken` sans dédup en vol** — thundering herd au cold-start (inoffensif). [src/services/csrf.ts]
 
 ---
 
@@ -84,6 +89,18 @@ _Les 4 stories UI/confort (filtres Songlist, refacto SessionHistoryCard, chanson
 - **2 edges migration 8-3** (INNER JOIN sur topic système ; idempotence par valeur) → **clos** : migration one-shot déjà jouée proprement en prod sur la vraie base ; instance morte.
 - **Note 5.7 (vérif FK CASCADE sur vraie base avant merge)** → était une exigence pré-merge, satisfaite ; pas une dette.
 - **Nav mobile (note Correct Course 2026-06-10)** → fusionnée avec la story « Nav mobile responsive + hamburger » ci-dessus (doublon retiré).
+
+## ✅ Soldé / retiré le 2026-06-26 (journal — clôture Epic 7)
+
+**Lot sécu pré-Epic-7 → résolu par l'Epic 7 (vérifié dans le code 2026-06-26) :**
+- **`getSong` / `markSongPlayed` ownership** → **7.5** : `findOne({ where:{ uid, userUid } })` ; instrument vérifié owned avant attache. [songcontroller.js:87, 265]
+- **Oracle 403 vs 404** → **7.5** : collapse en 404 sauf le 403 « topic système » légitime (seul `createError(403` restant = topiccontroller). 
+- **Posture CSRF** → **7.3** : token synchronizer sur toutes les mutations `/api` (middleware csrf).
+- **Garde `req.body || {}`** → **7.5** : généralisée (topic/user/song… renvoient 400 et non 500 sur corps non-JSON).
+- **Unicité topic casse/accents** → **7.12** : index fonctionnel unique `(user_uid, lower(f_unaccent(name)))` + hook afterSync.
+- **Résidu anti-énum register (7.7)** → **7.13** : hard email gate, register/login uniformes (plus de session auto au register).
+
+> Items de review 7.x restés ouverts après l'Epic 7 : **regroupés en 2 stories planifiées** ci-dessus — _Durcissement session_ (session-fixation 7.3) et _Lot ménage dette technique_ (helper issueAndSend/validateNewPassword 7.10, index users_name 7.2, CHECK discriminator 7.2, garde UUID 7.5, dédup getCsrfToken 7.3). Les entrées détaillées ci-dessous restent comme provenance.
 
 ## Deferred from: code review of story-7.1 (2026-06-23)
 

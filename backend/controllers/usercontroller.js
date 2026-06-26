@@ -165,15 +165,18 @@ const loginUser = async (req, res, next) => {
 
     logger.info('User login successful', { uid: user.uid });
 
-    // Authenticate via the session cookie only — no JWT (story 7.1).
-    let newSession = req.session;
-    newSession.loggedIn = true;
-    newSession.user = user.uid;
+    // Rotate the session ID on this privilege elevation (session-fixation
+    // hardening): the pre-auth session and its CSRF token are discarded. The
+    // client clears its cached CSRF token on login so the next mutation mints a
+    // fresh one. Authenticate via the session cookie only — no JWT (story 7.1).
+    await sessionService.regenerateSession(req);
+    req.session.loggedIn = true;
+    req.session.user = user.uid;
 
     res.status(200).json({
       auth: true,
       userId: user.uid,
-      sessionId: newSession.id,
+      sessionId: req.session.id,
       user: {
         uid: user.uid,
         name: user.name,
@@ -223,6 +226,9 @@ const verifyEmail = async (req, res, next) => {
     // The single-use token (emailed to this address) proves ownership → safe to
     // open a session here. Return the user so the client can hydrate auth state.
     const user = await User.scope(null).findByPk(result.userUid);
+    // Rotate the session ID on this privilege elevation (session-fixation
+    // hardening), same as login — discards the pre-auth session + CSRF token.
+    await sessionService.regenerateSession(req);
     req.session.loggedIn = true;
     req.session.user = user.uid;
     res.json({

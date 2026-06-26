@@ -1,5 +1,6 @@
 import { createContext, useContext, useEffect, useState } from 'react';
 import { authService, type User, type RegisterResult } from '../services/authService';
+import { clearCsrfToken } from '../services/csrf';
 
 interface AuthContextType {
   user: User | null;
@@ -38,15 +39,20 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     if (response.user) {
       authService.storeUser(response.user);
       setUser(response.user);
+      // The server rotated the session on login (fixation hardening) → its CSRF
+      // token changed; drop the cached one so the next mutation fetches a fresh one.
+      clearCsrfToken();
     }
     return { needsVerification: false };
   };
 
   // Store + activate a user handed back by an out-of-band login (verify-email
-  // link, story 7.13), so the app treats the visitor as signed in.
+  // link, story 7.13), so the app treats the visitor as signed in. The verify
+  // call also rotated the session server-side → clear the cached CSRF token.
   const applyAuthenticatedUser = (next: User) => {
     authService.storeUser(next);
     setUser(next);
+    clearCsrfToken();
   };
 
   const register = async (name: string, email: string, password: string): Promise<RegisterResult> => {

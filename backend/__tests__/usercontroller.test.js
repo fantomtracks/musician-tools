@@ -35,6 +35,21 @@ function mockNext() {
   return jest.fn();
 }
 
+// Session-fixation hardening: loginUser / verifyEmail call req.session.regenerate
+// before setting loggedIn/user. Simulate express-session's rotation: clear the
+// session fields and swap the id, then invoke the callback.
+function mockSession(id = 'sid-old') {
+  const session = { id };
+  session.regenerate = jest.fn((cb) => {
+    session.id = 'sid-new';
+    delete session.loggedIn;
+    delete session.user;
+    delete session.csrfToken;
+    cb();
+  });
+  return session;
+}
+
 function mockNewUser(uid = 'new-user-1') {
   // createUser reads newUser.uid (logging, topic seed, verify-token issuance).
   // Story 7.13: it no longer logs in or echoes the user, so dataValues/getHandle
@@ -232,7 +247,7 @@ describe('usercontroller.loginUser', () => {
     const findOne = jest.fn().mockResolvedValue(user);
     User.scope.mockReturnValue({ findOne });
 
-    const req = { body: { login: 'ada@example.com', password: VALID_PW }, session: {} };
+    const req = { body: { login: 'ada@example.com', password: VALID_PW }, session: mockSession() };
     const res = mockRes();
     const next = mockNext();
 
@@ -244,7 +259,11 @@ describe('usercontroller.loginUser', () => {
     const payload = res.json.mock.calls[0][0];
     expect(payload).not.toHaveProperty('token');
     expect(payload.auth).toBe(true);
+    // Session-fixation hardening: the id is rotated BEFORE loggedIn/user are set.
+    expect(req.session.regenerate).toHaveBeenCalled();
+    expect(req.session.id).toBe('sid-new');
     expect(req.session.loggedIn).toBe(true);
+    expect(req.session.user).toBe('user-1');
     expect(next).not.toHaveBeenCalled();
   });
 
@@ -253,7 +272,7 @@ describe('usercontroller.loginUser', () => {
     const findOne = jest.fn().mockResolvedValue(user);
     User.scope.mockReturnValue({ findOne });
 
-    const req = { body: { login: 'ada@example.com', password: VALID_PW }, session: {} };
+    const req = { body: { login: 'ada@example.com', password: VALID_PW }, session: mockSession() };
     const res = mockRes();
     const next = mockNext();
 
@@ -261,6 +280,8 @@ describe('usercontroller.loginUser', () => {
 
     expect(res.status).toHaveBeenCalledWith(403);
     expect(res.json).toHaveBeenCalledWith({ auth: false, code: 'email_not_verified' });
+    // Rejected before elevation → no session rotation, no login.
+    expect(req.session.regenerate).not.toHaveBeenCalled();
     expect(req.session.loggedIn).toBeUndefined();
     expect(next).not.toHaveBeenCalled();
   });
@@ -337,13 +358,15 @@ describe('usercontroller — email verification (story 7.9 + hard gate 7.13)', (
       };
       User.scope.mockReturnValue({ findByPk: jest.fn().mockResolvedValue(verifiedUser) });
 
-      const req = { body: { token: 'good' }, session: {} };
+      const req = { body: { token: 'good' }, session: mockSession() };
       const res = mockRes();
       await controller.verifyEmail(req, res, mockNext());
 
       expect(authTokenService.verifyToken).toHaveBeenCalledWith('good', 'verify_email');
       expect(User.update).toHaveBeenCalledWith({ emailVerified: true }, { where: { uid: 'u1' } });
-      // Auto-login: a session is opened for the verified user.
+      // Auto-login WITH session-fixation rotation: regenerate before set.
+      expect(req.session.regenerate).toHaveBeenCalled();
+      expect(req.session.id).toBe('sid-new');
       expect(req.session.loggedIn).toBe(true);
       expect(req.session.user).toBe('u1');
       const payload = res.json.mock.calls[0][0];
