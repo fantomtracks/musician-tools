@@ -129,6 +129,25 @@ describe('topiccontroller', () => {
     expect(err.status).toBe(409);
   });
 
+  // Story 7.12: the per-user uniqueness is now case- AND accent-insensitive
+  // (functional index lower(f_unaccent(name))). A case/accent collision surfaces
+  // as the same DB unique violation → 409. (The DB folding itself is validated by
+  // running the migration locally; here we pin the controller's normalized reply.)
+  test.each([
+    ['case collision (Pentatonique vs pentatonique)', 'pentatonique'],
+    ['accent collision (Pentatonique vs Pentatônique)', 'Pentatônique'],
+  ])('createTopic maps a %s to 409', async (_label, name) => {
+    const uniqueError = new Error('duplicate');
+    uniqueError.name = 'SequelizeUniqueConstraintError';
+    Topic.create.mockRejectedValueOnce(uniqueError);
+
+    const req = { session: { user: 'user-1' }, body: { name } };
+    const next = mockNext();
+    await controller.createTopic(req, mockRes(), next);
+
+    expect(next.mock.calls[0][0].status).toBe(409);
+  });
+
   test('createTopic rejects unauthenticated requests with 401', async () => {
     const req = { session: {}, body: { name: 'Scales' } };
     const res = mockRes();
@@ -284,6 +303,20 @@ describe('topiccontroller', () => {
       const next = mockNext();
 
       await controller.updateTopic(req, res, next);
+
+      expect(next.mock.calls[0][0].status).toBe(409);
+    });
+
+    // Story 7.12: rename into a case/accent collision → same unique violation → 409.
+    test('maps a case/accent collision on rename to 409', async () => {
+      const uniqueError = new Error('duplicate');
+      uniqueError.name = 'SequelizeUniqueConstraintError';
+      const topic = mockTopic({ update: jest.fn().mockRejectedValue(uniqueError) });
+      Topic.findOne.mockResolvedValue(topic);
+
+      const req = { params: { uid: '11111111-1111-4111-8111-111111111111' }, session: { user: 'user-1' }, body: { name: 'Pentatônique' } };
+      const next = mockNext();
+      await controller.updateTopic(req, mockRes(), next);
 
       expect(next.mock.calls[0][0].status).toBe(409);
     });
