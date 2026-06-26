@@ -6,6 +6,23 @@ project adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+## [1.6.0] — 2026-06-26
+
+### Added
+- **Sign in with your email** — accounts now use your email address to sign in (no more username login).
+- **Confirm your email to activate your account** — after signing up you get a confirmation link; clicking it signs you in. You can't sign in until your email is verified, and you can re-send the link anytime.
+- **Reset a forgotten password** — a "Forgot password?" link emails you a secure, single-use link to choose a new one.
+- **Change your account email** — request a new address from your profile; we email a confirmation link to it and only switch once you confirm (your old email keeps working until then).
+- **A Profile page** — edit your display name and change your password in one place.
+
+### Changed
+- **Login screen tidy-up** — "Forgot password?" moved below the Sign in button (Tab now goes straight from password to Sign in), and the email field is labelled accordingly.
+- **Profile and Sign out are now in a menu** — a 👤 button next to the light/dark toggle holds Profile and Sign out, decluttering the top bar.
+- **Topic names ignore case and accents** — "Pentatonique", "pentatonique" and "Pentatônique" now count as the same topic, so you won't get near-duplicates.
+
+### Security
+- Hardened the account system: responses never reveal whether an email is registered, rate-limiting on sign-in / password-reset / email actions, CSRF protection on all changes, and session-id rotation on sign-in (anti session-fixation).
+
 ## [1.5.0] — 2026-06-21
 
 ### Added
