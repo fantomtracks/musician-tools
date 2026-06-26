@@ -52,15 +52,15 @@ Anomalies / notes :
 
 ---
 
-## ▶ 7.13 — Hard email-verification gate *(À TESTER — nouveau)*
+## 7.13 — Hard email-verification gate ✅
 
-- [ ] **Register email neuf** → écran « Check your email », **PAS** connecté (pas de redirection app), mail de vérif reçu
-- [ ] **Register email existant** → **même** écran exactement (indiscernable), notice au vrai propriétaire
-- [ ] **Login avant vérif** (bons identifiants) → bloqué avec prompt « Verify your email to sign in » + bouton **Resend** ; **pas** connecté
-- [ ] **Login mauvais mdp** (compte non vérifié) → erreur générique normale (PAS le prompt verify — pas d'oracle)
-- [ ] **Resend** depuis l'écran register OU le prompt login → nouveau mail ; spam → rate limit (IP)
-- [ ] **Clic lien de vérif** (déconnecté) → **connexion automatique** → « Email confirmed » → « Go to the app » entre direct dans l'app (connecté)
-- [ ] **Login après vérif** avec le bon mdp → OK
+- [x] **Register email neuf** → écran « Check your email », **PAS** connecté (pas de redirection app), mail de vérif reçu
+- [x] **Register email existant** → **même** écran exactement (indiscernable), notice au vrai propriétaire
+- [x] **Login avant vérif** (bons identifiants) → bloqué avec prompt « Verify your email to sign in » + bouton **Resend** ; **pas** connecté
+- [x] **Login mauvais mdp** (compte non vérifié) → erreur générique normale (PAS le prompt verify — pas d'oracle)
+- [x] **Resend** depuis l'écran register OU le prompt login → nouveau mail ; spam → rate limit (IP)
+- [x] **Clic lien de vérif** (déconnecté) → **connexion automatique** → « Email confirmed » → « Go to the app » entre direct dans l'app (connecté)
+- [x] **Login après vérif** avec le bon mdp → OK
 
 Anomalies / notes :
 - Tests auto : back 220 ✓ + front 265 ✓, tsc clean. Comptes de test créés non vérifiés avant 7.13 ne peuvent plus se connecter (attendu) → en recréer / les vérifier.
@@ -69,9 +69,9 @@ Anomalies / notes :
 
 ## 7.10 — Reset mot de passe par email
 
-- [ ] Forgot password email existant → confirmation **générique** ; email inconnu → **même** confirmation ; spam → rate limit (forgotPasswordLimiter)
-- [ ] Mail « Reset your password » → lien → nouveau mdp → login OK
-- [ ] Rejouer le même lien → refusé (usage unique) ; lien > 1 h → refusé
+- [x] Forgot password email existant → confirmation **générique** ; email inconnu → **même** confirmation ; spam → rate limit (forgotPasswordLimiter)
+- [x] Mail « Reset your password » → lien → nouveau mdp → login OK
+- [x] Rejouer le même lien → refusé (usage unique) ; lien > 1 h → refusé
 
 Anomalies / notes :
 -
@@ -80,10 +80,10 @@ Anomalies / notes :
 
 ## 7.11 — Change email (verify-before-switch)
 
-- [ ] Compte vérifié → demande de changement → mail « Confirm your new email » à la **nouvelle** adresse
-- [ ] Avant clic : email **inchangé** → login avec l'**ancien** email marche toujours
-- [ ] Clic lien (`…&flow=change-email`) → email **basculé** ; login avec le **nouveau** OK
-- [ ] Rejouer le lien / lien > 1 h → refusé ; depuis compte non vérifié → 403
+- [x] Compte vérifié → demande de changement → mail « Confirm your new email » à la **nouvelle** adresse
+- [x] Avant clic : email **inchangé** → login avec l'**ancien** email marche toujours
+- [x] Clic lien (`…&flow=change-email`) → email **basculé** ; login avec le **nouveau** OK
+- [x] Rejouer le lien / lien > 1 h → refusé. (~~depuis compte non vérifié → 403~~ : sans objet sous le hard gate 7.13 — on ne peut plus être connecté non vérifié)
 
 Anomalies / notes :
 -
@@ -105,8 +105,8 @@ Anomalies / notes :
 
 ## Transversal
 
-- [ ] Logout → token CSRF purgé ; action mutante après logout → **401** (pas un faux 403)
-- [ ] Après login, créer/éditer topic ou session → pas de « Failed to obtain CSRF token »
+- [x] Logout → token CSRF purgé ; action mutante après logout → **401** (pas un faux 403)
+- [x] Après login, créer/éditer topic ou session → pas de « Failed to obtain CSRF token »
 
 Anomalies / notes :
 -
@@ -115,6 +115,7 @@ Anomalies / notes :
 
 ## Bilan epic
 
-- [ ] Toutes les stories testées
-- [ ] Correctifs intégrés sur la branche
-- [ ] Prêt à merger sur `main` (par northwood)
+- [x] Stories fonctionnelles testées : 7.7, 7.8, 7.9, 7.10, 7.11, 7.13 ✅ + transversal ✅
+- [ ] **7.12** (unicité topic casse/accents) : **pas re-testé en UI cette session** — validé indirectement (index fonctionnel présent sur la base + tests unitaires contrôleur 409). Spot-check UI optionnel avant merge.
+- [x] Correctifs intégrés sur la branche (incident infra email + course-correct 7.13)
+- [ ] Prêt à merger sur `main` (par northwood) — épingler le rappel `fly secrets set RESEND_API_KEY` (nouvelle clé) avant le déploiement prod
