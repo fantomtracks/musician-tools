@@ -2,6 +2,7 @@ import React, { useState } from 'react';
 import { useNavigate, Link } from 'react-router-dom';
 
 import { useAuth } from '../contexts/AuthContext';
+import { verificationService } from '../services/verificationService';
 
 function LoginPage() {
   const [formData, setFormData] = useState({
@@ -11,6 +12,11 @@ function LoginPage() {
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
   const [showPassword, setShowPassword] = useState(false);
+  // Story 7.13: correct credentials on an unverified account → show a verify
+  // prompt with a resend action instead of an error.
+  const [needsVerification, setNeedsVerification] = useState(false);
+  const [resendMessage, setResendMessage] = useState<string | null>(null);
+  const [resending, setResending] = useState(false);
   const { login } = useAuth();
   const navigate = useNavigate();
 
@@ -22,15 +28,33 @@ function LoginPage() {
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     setError(null);
+    setResendMessage(null);
 
     try {
       setLoading(true);
-      await login(formData.login, formData.password);
+      const { needsVerification: unverified } = await login(formData.login, formData.password);
+      if (unverified) {
+        setNeedsVerification(true);
+        return;
+      }
       navigate('/songs');
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Login failed');
     } finally {
       setLoading(false);
+    }
+  };
+
+  const handleResend = async () => {
+    setResendMessage(null);
+    try {
+      setResending(true);
+      await verificationService.resend(formData.login);
+      setResendMessage('Verification email sent — check your inbox.');
+    } catch {
+      setResendMessage('Could not send right now, please try again later.');
+    } finally {
+      setResending(false);
     }
   };
 
@@ -54,6 +78,23 @@ function LoginPage() {
         {error && (
           <div className="rounded-lg border border-red-200 bg-red-50 text-red-700 px-4 py-3 text-sm">
             {error}
+          </div>
+        )}
+
+        {/* Story 7.13: email not verified — prompt to confirm + resend the link. */}
+        {needsVerification && (
+          <div className="rounded-lg border border-amber-200 bg-amber-50 text-amber-800 dark:border-amber-800 dark:bg-amber-900/40 dark:text-amber-200 px-4 py-3 text-sm space-y-2" role="status">
+            <p className="font-medium">Verify your email to sign in</p>
+            <p>We sent a confirmation link to your email. Click it to activate your account, then sign in.</p>
+            <button
+              type="button"
+              onClick={handleResend}
+              disabled={resending}
+              className="font-medium underline hover:no-underline disabled:opacity-60"
+            >
+              {resending ? 'Sending...' : 'Resend verification email'}
+            </button>
+            {resendMessage && <span className="block text-amber-700 dark:text-amber-300">{resendMessage}</span>}
           </div>
         )}
 

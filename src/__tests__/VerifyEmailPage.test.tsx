@@ -22,20 +22,23 @@ function renderAt(url: string) {
 
 beforeEach(() => jest.clearAllMocks());
 
-test('a valid token verifies and (when signed in) refreshes emailVerified', async () => {
-  const patchUser = jest.fn();
-  mockedUseAuth.mockReturnValue({ isAuthenticated: true, patchUser });
-  svc.verify.mockResolvedValue(undefined);
+test('a valid token verifies, hydrates auth from the returned user, and shows success (hard gate 7.13)', async () => {
+  const applyAuthenticatedUser = jest.fn();
+  // Clicked while logged OUT (register no longer auto-logs-in); verify returns
+  // the user the server just signed in, which the page applies to auth state.
+  mockedUseAuth.mockReturnValue({ isAuthenticated: false, user: null, patchUser: jest.fn(), applyAuthenticatedUser });
+  const user = { uid: 'u1', name: 'Ada', email: 'ada@example.com', emailVerified: true, isAdmin: false };
+  svc.verify.mockResolvedValue(user);
 
   renderAt('/verify-email?token=good');
 
   await screen.findByText(/email confirmed/i);
   expect(svc.verify).toHaveBeenCalledWith('good');
-  expect(patchUser).toHaveBeenCalledWith({ emailVerified: true });
+  expect(applyAuthenticatedUser).toHaveBeenCalledWith(user);
 });
 
 test('an invalid token shows the error state', async () => {
-  mockedUseAuth.mockReturnValue({ isAuthenticated: false, user: null, patchUser: jest.fn() });
+  mockedUseAuth.mockReturnValue({ isAuthenticated: false, user: null, patchUser: jest.fn(), applyAuthenticatedUser: jest.fn() });
   svc.verify.mockRejectedValue(new Error('bad'));
 
   renderAt('/verify-email?token=bad');
@@ -44,7 +47,7 @@ test('an invalid token shows the error state', async () => {
 });
 
 test('a consumed token shows success when the logged-in user is already verified (refresh/2nd click)', async () => {
-  mockedUseAuth.mockReturnValue({ isAuthenticated: true, user: { emailVerified: true }, patchUser: jest.fn() });
+  mockedUseAuth.mockReturnValue({ isAuthenticated: true, user: { emailVerified: true }, patchUser: jest.fn(), applyAuthenticatedUser: jest.fn() });
   svc.verify.mockRejectedValue(new Error('token used'));
 
   renderAt('/verify-email?token=alreadyused');
@@ -53,7 +56,7 @@ test('a consumed token shows success when the logged-in user is already verified
 });
 
 test('a missing token shows the error state without calling the service', async () => {
-  mockedUseAuth.mockReturnValue({ isAuthenticated: false, patchUser: jest.fn() });
+  mockedUseAuth.mockReturnValue({ isAuthenticated: false, patchUser: jest.fn(), applyAuthenticatedUser: jest.fn() });
 
   renderAt('/verify-email');
 
@@ -63,7 +66,7 @@ test('a missing token shows the error state without calling the service', async 
 
 test('flow=change-email confirms the change (own copy) and patches the new email — story 7.11', async () => {
   const patchUser = jest.fn();
-  mockedUseAuth.mockReturnValue({ isAuthenticated: true, user: { emailVerified: true }, patchUser });
+  mockedUseAuth.mockReturnValue({ isAuthenticated: true, user: { emailVerified: true }, patchUser, applyAuthenticatedUser: jest.fn() });
   svc.confirmEmailChange.mockResolvedValue('new@example.com');
 
   renderAt('/verify-email?token=chg&flow=change-email');

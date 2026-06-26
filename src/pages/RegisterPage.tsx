@@ -1,6 +1,7 @@
 import React, { useState } from 'react';
 import { useNavigate, Link } from 'react-router-dom';
 import { useAuth } from '../contexts/AuthContext';
+import { verificationService } from '../services/verificationService';
 
 function RegisterPage() {
   const [formData, setFormData] = useState({
@@ -12,8 +13,23 @@ function RegisterPage() {
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
   const [submitted, setSubmitted] = useState(false);
+  const [resendMessage, setResendMessage] = useState<string | null>(null);
+  const [resending, setResending] = useState(false);
   const { register } = useAuth();
   const navigate = useNavigate();
+
+  const handleResend = async () => {
+    setResendMessage(null);
+    try {
+      setResending(true);
+      await verificationService.resend(formData.email);
+      setResendMessage('Verification email sent — check your inbox.');
+    } catch {
+      setResendMessage('Could not send right now, please try again later.');
+    } finally {
+      setResending(false);
+    }
+  };
 
   const handleChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     const { name, value } = e.target;
@@ -71,15 +87,25 @@ function RegisterPage() {
 
         {submitted ? (
           /* Neutral, ambiguous confirmation — never reveals whether the email
-             already exists (story 7.7 anti-enumeration). Shown only on a
-             'pending' result; a new email is auto-logged-in and redirected. */
+             already exists (story 7.7 + hard gate 7.13: register no longer
+             auto-logs-in, so a new and an existing email show the SAME screen).
+             You must click the link to activate the account before signing in. */
           <div className="rounded-lg border border-gray-200 bg-gray-50 text-gray-700 dark:border-gray-700 dark:bg-gray-800 dark:text-gray-200 px-4 py-4 text-sm space-y-2" role="status">
             <p className="font-medium">Check your email</p>
             <p>
-              If this email isn&apos;t already registered, your account is set up. If you already have an account,
-              we&apos;ve sent you an email about it — try signing in.
+              We&apos;ve sent a confirmation link. Click it to activate your account, then sign in. If you already have
+              an account, we&apos;ve emailed you about it instead.
             </p>
-            <Link to="/login" className="inline-block text-brand-600 dark:text-brand-400 font-medium hover:text-brand-700 dark:hover:text-brand-300">
+            <button
+              type="button"
+              onClick={handleResend}
+              disabled={resending}
+              className="font-medium underline hover:no-underline disabled:opacity-60"
+            >
+              {resending ? 'Sending...' : 'Resend the link'}
+            </button>
+            {resendMessage && <span className="block text-gray-600 dark:text-gray-300">{resendMessage}</span>}
+            <Link to="/login" className="block text-brand-600 dark:text-brand-400 font-medium hover:text-brand-700 dark:hover:text-brand-300">
               Go to sign in
             </Link>
           </div>

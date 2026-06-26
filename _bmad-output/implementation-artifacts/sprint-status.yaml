@@ -35,7 +35,7 @@
 # - Dev moves story to 'review', then runs code-review (fresh context, different LLM recommended)
 
 generated: 2026-06-07
-last_updated: 2026-06-26  # 7-12 review
+last_updated: 2026-06-26  # 7-12 review + 7-13 hard email gate
 project: musician-tools
 project_key: NOKEY
 tracking_system: file-system
@@ -103,6 +103,7 @@ development_status:
   7-10-reset-mot-de-passe-par-email: done
   7-11-change-email-verify-before-switch: done                  # dépend de requireVerified (7-9)
   7-12-unicite-topic-insensible-casse: review                   # citext topics (repli deferred-work, gap AC10 de 8-2)
+  7-13-hard-email-verification-gate: review                     # course-correct 2026-06-26 : plus de connexion sans email vérifié (remplace le soft gate 7-9 ; résout le résidu anti-énum 7-7)
   epic-7-retrospective: optional
 
   # Epic 8: Refonte temps de session — « tout est entrée » (Correct Course 2026-06-18 ; PRD amendé FR13/FR15/FR24 + FR25/FR26)

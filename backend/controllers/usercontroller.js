@@ -108,18 +108,13 @@ const createUser = async (req, res, next) => {
       logger.error('Failed to send verification email', { uid: newUser.uid, error: verifyErr.message });
     }
 
-    // Authenticate via the session cookie only — no JWT (story 7.1).
-    let newSession = req.session;
-    newSession.loggedIn = true;
-    newSession.user = newUser.uid;
-
-    const { password, ...userWithoutPassword } = newUser.dataValues;
-
-    res.status(201).json({
-      ...userWithoutPassword,
-      handle: newUser.getHandle(), // story 7.8: AuthContext holds the handle
-      auth: true
-    });
+    // Story 7.13 (hard email gate): registration no longer auto-logs-in. The
+    // account exists but stays unverified; the user must confirm via the email
+    // link before they can sign in. Return the SAME generic response as the
+    // existing-email path above → register is uniform and reveals nothing about
+    // whether the email already existed (anti-enumeration, supersedes the 7.7
+    // auto-login residual).
+    return res.status(200).json({ auth: false, pending: true });
   } catch (err) {
     logger.error('Error registering user:', err.message);
     // No email/name existence oracle (story 7.7): unique-email conflicts are
@@ -157,6 +152,15 @@ const loginUser = async (req, res, next) => {
     const isValidPassword = await user.validPassword(password);
     if (!isValidPassword) {
       return next(createError(400, 'Invalid username/email or password'));
+    }
+
+    // Hard email gate (story 7.13): an unverified account cannot sign in. This is
+    // surfaced ONLY after correct credentials (the caller has proven they own the
+    // account), so it is not an enumeration oracle — a wrong password still gets
+    // the generic 400 above. The client offers a "resend verification" action.
+    if (!user.emailVerified) {
+      logger.info('Login blocked: email not verified', { uid: user.uid });
+      return res.status(403).json({ auth: false, code: 'email_not_verified' });
     }
 
     logger.info('User login successful', { uid: user.uid });
@@ -213,7 +217,26 @@ const verifyEmail = async (req, res, next) => {
       return next(createError(400, 'Invalid or expired verification link'));
     }
     await User.update({ emailVerified: true }, { where: { uid: result.userUid } });
-    res.json({ success: true });
+
+    // Story 7.13 (hard email gate): clicking the link is reached while logged OUT
+    // (registration no longer auto-logs-in), so confirm + sign in in one step.
+    // The single-use token (emailed to this address) proves ownership → safe to
+    // open a session here. Return the user so the client can hydrate auth state.
+    const user = await User.scope(null).findByPk(result.userUid);
+    req.session.loggedIn = true;
+    req.session.user = user.uid;
+    res.json({
+      success: true,
+      user: {
+        uid: user.uid,
+        name: user.name,
+        discriminator: user.discriminator,
+        handle: user.getHandle(),
+        email: user.email,
+        emailVerified: true,
+        isAdmin: user.isAdmin
+      }
+    });
   } catch (err) {
     logger.error('Email verification error:', err.message);
     next(createError(500, 'Email verification error'));
@@ -223,26 +246,30 @@ const verifyEmail = async (req, res, next) => {
 // POST /api/auth/verify-email/resend — authsess + emailSendLimiter. Re-sends a
 // fresh verify-email token for the logged-in user. Generic 200 even if already
 // verified; best-effort send. (story 7.9)
-const resendVerification = async (req, res, next) => {
+// Story 7.13: public resend, keyed by email (the user isn't logged in under the
+// hard gate). Always returns the SAME generic success — it must never reveal
+// whether the email exists or is already verified (anti-enumeration). Rate-limited
+// per IP at the route. Reached from the post-register screen and the login
+// "verify your email" prompt.
+const resendVerificationPublic = async (req, res) => {
   try {
-    const userId = req.session.user;
-    if (!userId) {
-      return next(createError(401, 'Unauthorized'));
-    }
-    const user = await User.findByPk(userId);
-    if (user && !user.emailVerified) {
-      try {
-        const token = await authTokenService.issueToken(user.uid, 'verify_email');
-        await authEmails.sendVerifyEmail(user.email, token);
-      } catch (mailErr) {
-        logger.error('Failed to resend verification email', { uid: userId, error: mailErr.message });
+    const { email } = req.body || {};
+    if (typeof email === 'string' && email.trim()) {
+      const user = await User.scope(null).findOne({ where: { email: email.trim() } });
+      if (user && !user.emailVerified) {
+        try {
+          const token = await authTokenService.issueToken(user.uid, 'verify_email');
+          await authEmails.sendVerifyEmail(user.email, token);
+        } catch (mailErr) {
+          logger.error('Failed to resend verification email', { error: mailErr.message });
+        }
       }
     }
-    res.json({ success: true });
   } catch (err) {
+    // Never surface an error: a thrown 500 vs a 200 would itself be an oracle.
     logger.error('Resend verification error:', err.message);
-    next(createError(500, 'Resend verification error'));
   }
+  res.json({ success: true });
 };
 
 // POST /api/auth/forgot-password — public, rate-limited per IP. ALWAYS returns the
@@ -351,7 +378,7 @@ module.exports = {
   loginUser,
   logoutUser,
   verifyEmail,
-  resendVerification,
+  resendVerificationPublic,
   forgotPassword,
   resetPassword,
   confirmEmailChange

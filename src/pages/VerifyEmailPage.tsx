@@ -10,7 +10,7 @@ type Status = 'verifying' | 'success' | 'error';
 // refreshes emailVerified so the banner disappears.
 function VerifyEmailPage() {
   const [searchParams] = useSearchParams();
-  const { isAuthenticated, user, patchUser } = useAuth();
+  const { isAuthenticated, user, patchUser, applyAuthenticatedUser } = useAuth();
   const [status, setStatus] = useState<Status>('verifying');
   // Whether this run is the change-email confirmation (vs the verify-signup flow),
   // so the success view shows the right copy.
@@ -44,9 +44,11 @@ function VerifyEmailPage() {
       return;
     }
     verificationService.verify(token)
-      .then(() => {
+      .then((verifiedUser) => {
         setStatus('success');
-        if (isAuthenticated) patchUser({ emailVerified: true });
+        // Hard gate (story 7.13): the server auto-logged-in and returned the
+        // user → hydrate auth state so "Go to the app" lands signed in.
+        if (verifiedUser) applyAuthenticatedUser(verifiedUser);
       })
       .catch(() => {
         // A consumed token on a redundant click / refresh isn't a real failure if

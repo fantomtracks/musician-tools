@@ -15,10 +15,11 @@ function VerifyEmailBanner() {
   }
 
   const handleResend = async () => {
+    if (!user) return;
     setMessage(null);
     try {
       setSending(true);
-      await verificationService.resend();
+      await verificationService.resend(user.email);
       setMessage('Verification email sent — check your inbox.');
     } catch {
       setMessage('Could not send right now, please try again later.');
