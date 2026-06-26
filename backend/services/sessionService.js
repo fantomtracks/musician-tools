@@ -21,4 +21,15 @@ async function invalidateOtherSessions(userUid, currentSid) {
   return undefined;
 }
 
-module.exports = { invalidateOtherSessions };
+// Rotate the session ID on privilege elevation — login, and the verify-email
+// auto-login (story 7.13). Prevents session fixation: the pre-auth session ID
+// (and the CSRF token minted on it) must not carry into the authenticated
+// session. Promisifies express-session's callback-based regenerate; callers set
+// loggedIn/user on the FRESH session it produces.
+function regenerateSession(req) {
+  return new Promise((resolve, reject) => {
+    req.session.regenerate((err) => (err ? reject(err) : resolve()));
+  });
+}
+
+module.exports = { invalidateOtherSessions, regenerateSession };
