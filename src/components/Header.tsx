@@ -1,8 +1,10 @@
 import { Link, useNavigate } from 'react-router-dom';
 import { useAuth } from '../contexts/AuthContext';
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 
-// Single source of truth for the nav links, mapped for both the desktop bar and the mobile menu.
+// Single source of truth for the main nav links, mapped for both the desktop bar
+// and the mobile menu. Account items (Profile, Sign out) live in the account
+// dropdown on desktop / the account section of the mobile menu, not here.
 const navLinks: { to: string; label: string; state?: { resetToList: boolean } }[] = [
   { to: '/songs', label: 'Songlist', state: { resetToList: true } },
   { to: '/my-heatmap', label: 'Heatmap' },
@@ -10,13 +12,14 @@ const navLinks: { to: string; label: string; state?: { resetToList: boolean } }[
   { to: '/my-playlists', label: 'Playlists' },
   { to: '/my-topics', label: 'Topics' },
   { to: '/my-instruments', label: 'Instruments' },
-  { to: '/profile', label: 'Profile' },
 ];
 
 function Header() {
   const { isAuthenticated, logout } = useAuth();
   const navigate = useNavigate();
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
+  const [accountMenuOpen, setAccountMenuOpen] = useState(false);
+  const accountMenuRef = useRef<HTMLDivElement>(null);
   const [darkMode, setDarkMode] = useState(() => {
     if (typeof window === 'undefined') return false;
     const saved = localStorage.getItem('darkMode');
@@ -55,6 +58,25 @@ function Header() {
     window.addEventListener('keydown', onKey);
     return () => window.removeEventListener('keydown', onKey);
   }, [mobileMenuOpen]);
+
+  // Close the account dropdown on Escape or a click outside it.
+  useEffect(() => {
+    if (!accountMenuOpen) return;
+    const onKey = (event: KeyboardEvent) => {
+      if (event.key === 'Escape') setAccountMenuOpen(false);
+    };
+    const onClick = (event: MouseEvent) => {
+      if (accountMenuRef.current && !accountMenuRef.current.contains(event.target as Node)) {
+        setAccountMenuOpen(false);
+      }
+    };
+    window.addEventListener('keydown', onKey);
+    document.addEventListener('mousedown', onClick);
+    return () => {
+      window.removeEventListener('keydown', onKey);
+      document.removeEventListener('mousedown', onClick);
+    };
+  }, [accountMenuOpen]);
 
   const handleLogout = async () => {
     await logout();
@@ -120,13 +142,43 @@ function Header() {
               )}
             </button>
             {isAuthenticated ? (
-              <button
-                type="button"
-                onClick={handleLogout}
-                className="btn-secondary text-sm hidden lg:inline-flex"
-              >
-                Sign out
-              </button>
+              /* Account dropdown (desktop ≥ lg): Profile + Sign out. On mobile these
+                 live in the hamburger menu instead, so this is lg-only. */
+              <div className="relative hidden lg:block" ref={accountMenuRef}>
+                <button
+                  type="button"
+                  onClick={() => setAccountMenuOpen(open => !open)}
+                  className="w-9 h-9 rounded-lg bg-gray-100 hover:bg-gray-200 dark:bg-gray-700 dark:hover:bg-gray-600 flex items-center justify-center transition-colors"
+                  aria-label="Account menu"
+                  aria-haspopup="menu"
+                  aria-expanded={accountMenuOpen}
+                >
+                  <span className="text-lg" aria-hidden="true">👤</span>
+                </button>
+                {accountMenuOpen && (
+                  <div
+                    role="menu"
+                    className="absolute right-0 mt-2 w-44 rounded-lg border border-gray-200 bg-white shadow-lg py-1 dark:border-gray-700 dark:bg-gray-800 z-50"
+                  >
+                    <Link
+                      to="/profile"
+                      role="menuitem"
+                      onClick={() => setAccountMenuOpen(false)}
+                      className="block px-4 py-2 text-sm text-gray-700 hover:bg-gray-100 hover:text-brand-600 transition-colors dark:text-gray-300 dark:hover:bg-gray-700 dark:hover:text-brand-400"
+                    >
+                      Profile
+                    </Link>
+                    <button
+                      type="button"
+                      role="menuitem"
+                      onClick={() => { setAccountMenuOpen(false); handleLogout(); }}
+                      className="block w-full text-left px-4 py-2 text-sm text-gray-700 hover:bg-gray-100 hover:text-brand-600 transition-colors dark:text-gray-300 dark:hover:bg-gray-700 dark:hover:text-brand-400"
+                    >
+                      Sign out
+                    </button>
+                  </div>
+                )}
+              </div>
             ) : (
               <>
                 <Link to="/login" className="btn-secondary text-sm">
@@ -156,8 +208,16 @@ function Header() {
                 {link.label}
               </Link>
             ))}
-            {/* Sign out lives in the menu on mobile (it is hidden in the top bar below md) */}
+            {/* Account section (Profile + Sign out) — on mobile these live in the
+                menu since the desktop account dropdown is hidden below lg. */}
             <div className="mt-1 pt-1 border-t border-gray-200 dark:border-gray-700">
+              <Link
+                to="/profile"
+                onClick={() => setMobileMenuOpen(false)}
+                className="block rounded-lg px-3 py-3 text-gray-700 hover:bg-gray-100 hover:text-brand-600 font-medium transition-colors dark:text-gray-300 dark:hover:bg-gray-700 dark:hover:text-brand-400"
+              >
+                Profile
+              </Link>
               <button
                 type="button"
                 onClick={() => { setMobileMenuOpen(false); handleLogout(); }}

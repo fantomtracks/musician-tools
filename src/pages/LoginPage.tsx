@@ -101,12 +101,12 @@ function LoginPage() {
         {/* Form */}
         <form onSubmit={handleSubmit} className="space-y-4">
           <div>
-            <label className="label-base">Username or Email</label>
+            <label className="label-base">Email</label>
             <input
               className="input-base"
-              type="text"
+              type="email"
               name="login"
-              placeholder="Enter your username or email"
+              placeholder="Enter your email"
               value={formData.login}
               onChange={handleChange}
               required
@@ -149,12 +149,6 @@ function LoginPage() {
             </div>
           </div>
 
-          <div className="text-right text-sm">
-            <Link to="/forgot-password" className="text-brand-600 dark:text-brand-400 font-medium hover:text-brand-700 dark:hover:text-brand-300">
-              Forgot password?
-            </Link>
-          </div>
-
           <button
             type="submit"
             className="btn-primary w-full justify-center"
@@ -162,6 +156,14 @@ function LoginPage() {
           >
             {loading ? 'Signing in...' : 'Sign in'}
           </button>
+
+          {/* Below Sign in so the tab order is login → password → Sign in
+              (typing the password, Tab lands on the submit button, not here). */}
+          <div className="text-center text-sm">
+            <Link to="/forgot-password" className="text-brand-600 dark:text-brand-400 font-medium hover:text-brand-700 dark:hover:text-brand-300">
+              Forgot password?
+            </Link>
+          </div>
         </form>
 
         {/* Sign up link */}
