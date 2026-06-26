@@ -85,3 +85,36 @@ test('unauthenticated: no hamburger and no nav links, but sign-in actions remain
   expect(screen.getByRole('link', { name: /sign in/i })).toBeInTheDocument();
   expect(screen.getByRole('link', { name: /create account/i })).toBeInTheDocument();
 });
+
+// Profile + Sign out moved out of the main nav into a desktop account dropdown.
+test('account dropdown is collapsed by default and reveals Profile + Sign out', () => {
+  mockedUseAuth.mockReturnValue({ isAuthenticated: true, logout: jest.fn() });
+  renderHeader();
+
+  // Not in the main desktop nav anymore, and hidden until the dropdown opens.
+  expect(screen.queryByRole('link', { name: 'Profile' })).not.toBeInTheDocument();
+
+  const toggle = screen.getByRole('button', { name: /account menu/i });
+  expect(toggle).toHaveAttribute('aria-expanded', 'false');
+
+  fireEvent.click(toggle);
+
+  expect(toggle).toHaveAttribute('aria-expanded', 'true');
+  const menu = screen.getByRole('menu');
+  expect(within(menu).getByRole('menuitem', { name: 'Profile' })).toBeInTheDocument();
+  expect(within(menu).getByRole('menuitem', { name: 'Sign out' })).toBeInTheDocument();
+});
+
+test('account dropdown: Escape closes it, and Sign out logs out', () => {
+  const logout = jest.fn().mockResolvedValue(undefined);
+  mockedUseAuth.mockReturnValue({ isAuthenticated: true, logout });
+  renderHeader();
+
+  fireEvent.click(screen.getByRole('button', { name: /account menu/i }));
+  fireEvent.keyDown(document.body, { key: 'Escape' });
+  expect(screen.queryByRole('menu')).not.toBeInTheDocument();
+
+  fireEvent.click(screen.getByRole('button', { name: /account menu/i }));
+  fireEvent.click(within(screen.getByRole('menu')).getByRole('menuitem', { name: 'Sign out' }));
+  expect(logout).toHaveBeenCalled();
+});
