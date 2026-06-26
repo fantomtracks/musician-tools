@@ -36,8 +36,9 @@ function mockNext() {
 }
 
 function mockNewUser(uid = 'new-user-1') {
-  // createUser reads newUser.uid, newUser.dataValues (to strip the password) and
-  // newUser.getHandle() (story 7.8 — model prototype method).
+  // createUser reads newUser.uid (logging, topic seed, verify-token issuance).
+  // Story 7.13: it no longer logs in or echoes the user, so dataValues/getHandle
+  // aren't read on the create path anymore — kept here for completeness.
   return {
     uid,
     name: 'Ada',
@@ -68,11 +69,11 @@ describe('usercontroller.createUser', () => {
     const arg = Topic.findOrCreate.mock.calls[0][0];
     expect(arg.where).toEqual({ userUid: newUser.uid, name: FREE_PRACTICE_NAME });
     expect(arg.defaults.isSystem).toBe(true);
-    expect(res.status).toHaveBeenCalledWith(201);
+    expect(res.status).toHaveBeenCalledWith(200);
     expect(next).not.toHaveBeenCalled();
   });
 
-  test('a new email logs in directly: 201 + auth, no JWT in response or session (7.1/7.7)', async () => {
+  test('a new email does NOT auto-log-in: generic pending response, no session (hard gate 7.13)', async () => {
     const newUser = mockNewUser();
     User.create.mockResolvedValue(newUser);
 
@@ -82,15 +83,15 @@ describe('usercontroller.createUser', () => {
 
     await controller.createUser(req, res, next);
 
-    expect(res.status).toHaveBeenCalledWith(201);
-    const payload = res.json.mock.calls[0][0];
-    expect(payload).not.toHaveProperty('token');
-    expect(payload.auth).toBe(true);
-    expect(req.session).not.toHaveProperty('token');
-    expect(req.session.loggedIn).toBe(true);
+    // Same generic response as an existing email → register is uniform (anti-enum).
+    expect(res.status).toHaveBeenCalledWith(200);
+    expect(res.json).toHaveBeenCalledWith({ auth: false, pending: true });
+    // No session is opened — the user must verify before signing in.
+    expect(req.session.loggedIn).toBeUndefined();
+    expect(req.session.user).toBeUndefined();
   });
 
-  test('registration still succeeds (201) when seeding the topic fails', async () => {
+  test('registration still succeeds (200) when seeding the topic fails', async () => {
     User.create.mockResolvedValue(mockNewUser());
     Topic.findOrCreate.mockRejectedValueOnce(new Error('seed boom'));
 
@@ -100,7 +101,7 @@ describe('usercontroller.createUser', () => {
 
     await controller.createUser(req, res, next);
 
-    expect(res.status).toHaveBeenCalledWith(201);
+    expect(res.status).toHaveBeenCalledWith(200);
     expect(next).not.toHaveBeenCalled();
   });
 
@@ -142,6 +143,24 @@ describe('usercontroller.createUser', () => {
     expect(req.session.loggedIn).toBeUndefined();
   });
 
+  test('new-email and existing-email responses are INDISTINGUISHABLE (story 7.13 anti-enum)', async () => {
+    // New email
+    User.create.mockResolvedValueOnce(mockNewUser());
+    const resNew = mockRes();
+    await controller.createUser({ body: { name: 'Ada', email: 'new@example.com', password: VALID_PW }, session: {} }, resNew, mockNext());
+
+    // Existing email
+    const dup = new Error('dup');
+    dup.name = 'SequelizeUniqueConstraintError';
+    dup.errors = [{ path: 'email' }];
+    User.create.mockRejectedValueOnce(dup);
+    const resExisting = mockRes();
+    await controller.createUser({ body: { name: 'Ada', email: 'taken@example.com', password: VALID_PW }, session: {} }, resExisting, mockNext());
+
+    expect(resNew.status.mock.calls).toEqual(resExisting.status.mock.calls);
+    expect(resNew.json.mock.calls).toEqual(resExisting.json.mock.calls);
+  });
+
   test('the owner notification is best-effort: a send failure still returns the generic response', async () => {
     const uniqueError = new Error('dup');
     uniqueError.name = 'SequelizeUniqueConstraintError';
@@ -167,7 +186,7 @@ describe('usercontroller.createUser', () => {
 
     await controller.createUser(req, res, next);
 
-    expect(res.status).toHaveBeenCalledWith(201);
+    expect(res.status).toHaveBeenCalledWith(200);
     expect(User.create.mock.calls[0][0].discriminator).toMatch(/^\d{4}$/);
   });
 
@@ -184,7 +203,7 @@ describe('usercontroller.createUser', () => {
     await controller.createUser(req, res, next);
 
     expect(User.create).toHaveBeenCalledTimes(2);
-    expect(res.status).toHaveBeenCalledWith(201);
+    expect(res.status).toHaveBeenCalledWith(200);
     expect(next).not.toHaveBeenCalled();
   });
 });
@@ -194,15 +213,17 @@ describe('usercontroller.loginUser', () => {
     jest.clearAllMocks();
   });
 
-  function mockLoginUser() {
+  function mockLoginUser(overrides = {}) {
     return {
       uid: 'user-1',
       name: 'Ada',
       discriminator: '0001',
       email: 'ada@example.com',
       isAdmin: false,
+      emailVerified: true, // story 7.13: only verified accounts can sign in
       validPassword: jest.fn().mockResolvedValue(true),
       getHandle() { return `${this.name}#${this.discriminator}`; },
+      ...overrides,
     };
   }
 
@@ -227,6 +248,40 @@ describe('usercontroller.loginUser', () => {
     expect(next).not.toHaveBeenCalled();
   });
 
+  test('correct credentials but unverified email → 403 email_not_verified, no session (hard gate 7.13)', async () => {
+    const user = mockLoginUser({ emailVerified: false });
+    const findOne = jest.fn().mockResolvedValue(user);
+    User.scope.mockReturnValue({ findOne });
+
+    const req = { body: { login: 'ada@example.com', password: VALID_PW }, session: {} };
+    const res = mockRes();
+    const next = mockNext();
+
+    await controller.loginUser(req, res, next);
+
+    expect(res.status).toHaveBeenCalledWith(403);
+    expect(res.json).toHaveBeenCalledWith({ auth: false, code: 'email_not_verified' });
+    expect(req.session.loggedIn).toBeUndefined();
+    expect(next).not.toHaveBeenCalled();
+  });
+
+  test('a wrong password is rejected BEFORE the verification check → generic 400 (no oracle)', async () => {
+    // Even if the account is unverified, a bad password must not reveal the
+    // account's existence/state — it gets the same generic 400 as any bad login.
+    const user = mockLoginUser({ emailVerified: false, validPassword: jest.fn().mockResolvedValue(false) });
+    const findOne = jest.fn().mockResolvedValue(user);
+    User.scope.mockReturnValue({ findOne });
+
+    const req = { body: { login: 'ada@example.com', password: 'wrong-password' }, session: {} };
+    const res = mockRes();
+    const next = mockNext();
+
+    await controller.loginUser(req, res, next);
+
+    expect(next.mock.calls[0][0].status).toBe(400);
+    expect(res.status).not.toHaveBeenCalledWith(403);
+  });
+
   test('login by name no longer works → 400 (no row matches the email query)', async () => {
     const findOne = jest.fn().mockResolvedValue(null); // a name is not an email → no match
     User.scope.mockReturnValue({ findOne });
@@ -246,10 +301,10 @@ describe('usercontroller.loginUser', () => {
   });
 });
 
-describe('usercontroller — email verification (story 7.9)', () => {
+describe('usercontroller — email verification (story 7.9 + hard gate 7.13)', () => {
   beforeEach(() => jest.clearAllMocks());
 
-  test('register issues a verify_email token and stays unverified (soft gate)', async () => {
+  test('register issues a verify_email token and returns the generic pending response', async () => {
     User.create.mockResolvedValue(mockNewUser());
     Topic.findOrCreate.mockResolvedValue([{ uid: 'fp' }, true]);
 
@@ -258,72 +313,113 @@ describe('usercontroller — email verification (story 7.9)', () => {
 
     expect(authTokenService.issueToken).toHaveBeenCalledWith('new-user-1', 'verify_email');
     expect(authEmails.sendVerifyEmail).toHaveBeenCalledWith('ada@example.com', 'tok');
-    // logged in directly; emailVerified is not forced true here (defaults false).
-    expect(res.status).toHaveBeenCalledWith(201);
-    expect(res.json.mock.calls[0][0].auth).toBe(true);
+    // No auto-login (hard gate): generic pending response, account stays unverified.
+    expect(res.status).toHaveBeenCalledWith(200);
+    expect(res.json).toHaveBeenCalledWith({ auth: false, pending: true });
   });
 
-  test('register still succeeds (201) when the verification email fails (best-effort)', async () => {
+  test('register still succeeds (200) when the verification email fails (best-effort)', async () => {
     User.create.mockResolvedValue(mockNewUser());
     authTokenService.issueToken.mockRejectedValueOnce(new Error('token store down'));
 
     const res = mockRes();
     await controller.createUser({ body: { name: 'Ada', email: 'ada@example.com', password: VALID_PW }, session: {} }, res, mockNext());
 
-    expect(res.status).toHaveBeenCalledWith(201);
+    expect(res.status).toHaveBeenCalledWith(200);
   });
 
   describe('verifyEmail', () => {
-    test('a valid token marks the user verified and returns success', async () => {
+    test('a valid token verifies, auto-logs-in, and returns the user (story 7.13)', async () => {
       authTokenService.verifyToken.mockResolvedValue({ userUid: 'u1', payload: null });
+      const verifiedUser = {
+        uid: 'u1', name: 'Ada', discriminator: '0001', email: 'ada@example.com', isAdmin: false,
+        getHandle() { return `${this.name}#${this.discriminator}`; },
+      };
+      User.scope.mockReturnValue({ findByPk: jest.fn().mockResolvedValue(verifiedUser) });
+
+      const req = { body: { token: 'good' }, session: {} };
       const res = mockRes();
-      await controller.verifyEmail({ body: { token: 'good' } }, res, mockNext());
+      await controller.verifyEmail(req, res, mockNext());
 
       expect(authTokenService.verifyToken).toHaveBeenCalledWith('good', 'verify_email');
       expect(User.update).toHaveBeenCalledWith({ emailVerified: true }, { where: { uid: 'u1' } });
-      expect(res.json).toHaveBeenCalledWith({ success: true });
+      // Auto-login: a session is opened for the verified user.
+      expect(req.session.loggedIn).toBe(true);
+      expect(req.session.user).toBe('u1');
+      const payload = res.json.mock.calls[0][0];
+      expect(payload.success).toBe(true);
+      expect(payload.user).toMatchObject({ uid: 'u1', email: 'ada@example.com', emailVerified: true, handle: 'Ada#0001' });
     });
 
-    test('an invalid/expired/used token → generic 400, no update', async () => {
+    test('an invalid/expired/used token → generic 400, no update, no session', async () => {
       authTokenService.verifyToken.mockResolvedValue(null);
+      const req = { body: { token: 'bad' }, session: {} };
       const next = mockNext();
-      await controller.verifyEmail({ body: { token: 'bad' } }, mockRes(), next);
+      await controller.verifyEmail(req, mockRes(), next);
       expect(next.mock.calls[0][0].status).toBe(400);
       expect(User.update).not.toHaveBeenCalled();
+      expect(req.session.loggedIn).toBeUndefined();
     });
 
     test('missing token → 400', async () => {
       const next = mockNext();
-      await controller.verifyEmail({ body: {} }, mockRes(), next);
+      await controller.verifyEmail({ body: {}, session: {} }, mockRes(), next);
       expect(next.mock.calls[0][0].status).toBe(400);
     });
   });
 
-  describe('resendVerification', () => {
-    test('an unverified user gets a fresh token + email', async () => {
-      User.findByPk.mockResolvedValue({ uid: 'u1', email: 'ada@example.com', emailVerified: false });
+  describe('resendVerificationPublic (by email, story 7.13)', () => {
+    test('an unverified email gets a fresh token + email', async () => {
+      const findOne = jest.fn().mockResolvedValue({ uid: 'u1', email: 'ada@example.com', emailVerified: false });
+      User.scope.mockReturnValue({ findOne });
       const res = mockRes();
-      await controller.resendVerification({ session: { user: 'u1' } }, res, mockNext());
+      await controller.resendVerificationPublic({ body: { email: 'ada@example.com' } }, res);
 
+      expect(findOne).toHaveBeenCalledWith({ where: { email: 'ada@example.com' } });
       expect(authTokenService.issueToken).toHaveBeenCalledWith('u1', 'verify_email');
       expect(authEmails.sendVerifyEmail).toHaveBeenCalledWith('ada@example.com', 'tok');
       expect(res.json).toHaveBeenCalledWith({ success: true });
     });
 
-    test('an already-verified user → generic 200, no email', async () => {
-      User.findByPk.mockResolvedValue({ uid: 'u1', email: 'ada@example.com', emailVerified: true });
+    test('an already-verified email → generic 200, no email (no oracle)', async () => {
+      const findOne = jest.fn().mockResolvedValue({ uid: 'u1', email: 'ada@example.com', emailVerified: true });
+      User.scope.mockReturnValue({ findOne });
       const res = mockRes();
-      await controller.resendVerification({ session: { user: 'u1' } }, res, mockNext());
+      await controller.resendVerificationPublic({ body: { email: 'ada@example.com' } }, res);
 
       expect(authTokenService.issueToken).not.toHaveBeenCalled();
       expect(authEmails.sendVerifyEmail).not.toHaveBeenCalled();
       expect(res.json).toHaveBeenCalledWith({ success: true });
     });
 
-    test('401 when unauthenticated', async () => {
-      const next = mockNext();
-      await controller.resendVerification({ session: {} }, mockRes(), next);
-      expect(next.mock.calls[0][0].status).toBe(401);
+    test('an unknown email → generic 200, no email (no oracle)', async () => {
+      const findOne = jest.fn().mockResolvedValue(null);
+      User.scope.mockReturnValue({ findOne });
+      const res = mockRes();
+      await controller.resendVerificationPublic({ body: { email: 'nobody@example.com' } }, res);
+
+      expect(authTokenService.issueToken).not.toHaveBeenCalled();
+      expect(authEmails.sendVerifyEmail).not.toHaveBeenCalled();
+      expect(res.json).toHaveBeenCalledWith({ success: true });
+    });
+
+    test('no email in body → generic 200, no lookup', async () => {
+      const findOne = jest.fn();
+      User.scope.mockReturnValue({ findOne });
+      const res = mockRes();
+      await controller.resendVerificationPublic({ body: {} }, res);
+
+      expect(findOne).not.toHaveBeenCalled();
+      expect(res.json).toHaveBeenCalledWith({ success: true });
+    });
+
+    test('a lookup/send failure still returns the generic success (never an oracle)', async () => {
+      const findOne = jest.fn().mockRejectedValue(new Error('db down'));
+      User.scope.mockReturnValue({ findOne });
+      const res = mockRes();
+      await controller.resendVerificationPublic({ body: { email: 'ada@example.com' } }, res);
+
+      expect(res.json).toHaveBeenCalledWith({ success: true });
     });
   });
 });

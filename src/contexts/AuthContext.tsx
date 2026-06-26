@@ -4,10 +4,15 @@ import { authService, type User, type RegisterResult } from '../services/authSer
 interface AuthContextType {
   user: User | null;
   loading: boolean;
-  login: (login: string, password: string) => Promise<void>;
+  // Returns { needsVerification: true } when the credentials are correct but the
+  // email isn't verified yet (story 7.13) — the caller shows a resend prompt.
+  login: (login: string, password: string) => Promise<{ needsVerification: boolean }>;
   register: (name: string, email: string, password: string) => Promise<RegisterResult>;
   logout: () => Promise<void>;
   patchUser: (partial: Partial<User>) => void;
+  // Hydrate auth state from a user the server just logged in out-of-band (story
+  // 7.13: the verify-email link auto-logs-in and returns the user).
+  applyAuthenticatedUser: (user: User) => void;
   isAuthenticated: boolean;
 }
 
@@ -25,16 +30,23 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     setLoading(false);
   }, []);
 
-  const login = async (login: string, password: string) => {
-    try {
-      const response = await authService.login(login, password);
-      if (response.user) {
-        authService.storeUser(response.user);
-        setUser(response.user);
-      }
-    } catch (error) {
-      throw error;
+  const login = async (login: string, password: string): Promise<{ needsVerification: boolean }> => {
+    const response = await authService.login(login, password);
+    if (response.needsVerification) {
+      return { needsVerification: true };
     }
+    if (response.user) {
+      authService.storeUser(response.user);
+      setUser(response.user);
+    }
+    return { needsVerification: false };
+  };
+
+  // Store + activate a user handed back by an out-of-band login (verify-email
+  // link, story 7.13), so the app treats the visitor as signed in.
+  const applyAuthenticatedUser = (next: User) => {
+    authService.storeUser(next);
+    setUser(next);
   };
 
   const register = async (name: string, email: string, password: string): Promise<RegisterResult> => {
@@ -73,6 +85,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     register,
     logout,
     patchUser,
+    applyAuthenticatedUser,
     isAuthenticated: !!user,
   };
 

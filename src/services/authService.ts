@@ -29,6 +29,10 @@ export type AuthResponse = {
   auth: boolean;
   userId?: string;
   user?: User;
+  // Story 7.13 (hard email gate): correct credentials but the email isn't
+  // verified yet → the caller shows a "verify your email" prompt + resend,
+  // instead of treating it as a failed login.
+  needsVerification?: boolean;
 };
 
 // Register has two non-error outcomes (story 7.7, anti-enumeration):
@@ -80,6 +84,14 @@ export const authService = {
       credentials: 'include',
       body: JSON.stringify({ login, password }),
     });
+    // Story 7.13: correct credentials on an unverified account → 403 with an
+    // explicit code. Not a failure: surface it so the UI offers a resend.
+    if (response.status === 403) {
+      const body = await response.json().catch(() => ({}));
+      if (body && body.code === 'email_not_verified') {
+        return { auth: false, needsVerification: true };
+      }
+    }
     if (!response.ok) {
       const error = await response.json();
       throw new Error(error.message || 'Login failed');

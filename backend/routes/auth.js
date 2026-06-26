@@ -2,7 +2,6 @@ var express = require('express');
 var router = express.Router();
 const bodyParser = require('body-parser');
 const uc = require('../controllers/usercontroller');
-const authsess = require('../middleware/authsess');
 const { loginLimiter, emailSendLimiter, forgotPasswordLimiter } = require('../middleware/ratelimiters');
 
 router.use(bodyParser.json());
@@ -16,10 +15,12 @@ router.post('/login', loginLimiter, uc.loginUser);
 // logout destroys the session — a state-changing action, so POST (CSRF-protected), not GET. (7.3)
 router.post('/logout', uc.logoutUser);
 
-// Email verification (story 7.9). verify-email is public (the token authorizes);
-// resend is for the logged-in user and rate-limited per account.
+// Email verification (story 7.9 + hard gate 7.13). verify-email is public (the
+// token authorizes, and it auto-logs-in on success). resend is public-by-email
+// (under the hard gate the user isn't logged in) and rate-limited per IP; it
+// always returns a generic success (anti-enumeration).
 router.post('/verify-email', uc.verifyEmail);
-router.post('/verify-email/resend', authsess, emailSendLimiter, uc.resendVerification);
+router.post('/verify-email/resend', emailSendLimiter, uc.resendVerificationPublic);
 
 // Password reset (story 7.10). Both public; forgot is rate-limited per IP.
 router.post('/forgot-password', forgotPasswordLimiter, uc.forgotPassword);
