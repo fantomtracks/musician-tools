@@ -5,7 +5,7 @@ arch_decision: "Unicité nom de playlist par user, CÔTÉ SERVEUR, via index uni
 
 # Story 10.1: Unicité de nom de playlist insensible à la casse (côté serveur)
 
-Status: review
+Status: done
 
 <!-- Note: Validation is optional. Run validate-create-story for quality check before dev-story. -->
 
@@ -164,4 +164,19 @@ claude-opus-4-8[1m] (dev-story workflow)
 
 | Date       | Version | Description                                                                 |
 |------------|---------|-----------------------------------------------------------------------------|
+| 2026-06-28 | 0.2     | Code review 3 couches : 2 patches appliqués — (1) trim `name` à l'écriture + garde ≤255 (corrige le `playlist: null` du 409 sur noms espacés, mirror topic) ; (2) suffixe de dédup basé sur l'uid + borné (anti-collision `Rock (2)` / anti-overflow), **re-validé sur base dev**. +1 test (trim). 1 report (hook afterSync parité dev/CI). Back 241 ✓, lint clean. Statut → done. |
 | 2026-06-28 | 0.1     | Story 10.1 — unicité de nom de playlist insensible à la casse (serveur). Index unique **fonctionnel** `(user_uid, lower(name))` + dédoublonnage **RENAME** non destructif (migration `20260628000200`, idempotente, **testée sur la vraie base dev** : rename/index/rejet 23505/down-up/idempotence). Contrôleurs `create`/`update` → 409 `{ message, playlist }` (mirror `topiccontroller`, scopé `user_uid`). Back 240 ✓ (+2), lint clean, front 290 ✓. ⚠️ `main` = prod : migration validée localement avant merge. Statut → review. |
+
+## Review Findings
+
+_Code review adversariale 3 couches (Blind Hunter / Edge Case Hunter / Acceptance Auditor) — 2026-06-28. Aucun bug bloquant ; les 6 AC satisfaites. 2 patches, 1 report, 4 écartés (bruit/déjà géré)._
+
+- [x] [Review][Patch→Fixed] **Trimmer `name` à l'écriture (create + update)** [backend/controllers/playlistcontroller.js] — `createPlaylist`/`updatePlaylist` stockaient `name` brut alors que `foldedNameMatch` trim et l'index est `lower(name)` → deux playlists `" Rock"` (espaces) collident sur l'index, le 409 part, mais `findExistingByName` renvoie `playlist: null` → le client 10.2 ne peut pas sélectionner l'existante. Convergent Blind+Edge+Auditor. **Corrigé** : `name` trimmé avant `create`/`update` (mirror `topiccontroller`) + garde longueur ≤255 (400 au lieu d'un 500). Test de régression ajouté (« trims the name before persisting »).
+- [x] [Review][Patch→Fixed] **Suffixe de dédoublonnage robuste (anti-collision + anti-overflow)** [backend/migrations/20260628000200-playlists-name-ci-unique.js] — le suffixe numérique `(rn)` pouvait colider avec un littéral pré-existant `Rock (2)` → la création de l'index unique **abort** dans la transaction → **deploy bloqué** (Blind High) ; et dépasser `varchar(255)` (Edge Low). **Corrigé** : suffixe basé sur le fragment d'`uid` (unique par construction) + base bornée à 240 chars (`left(name,240) || ' (' || left(uid::text,8) || ')'`). **Re-validé sur la base dev** avec le cas `Rock`/`rock`/`Rock (2)` : `rock` → `rock (0ae0a428)` (pas `rock (2)`), index construit sans abort (l'ancien suffixe aurait planté).
+- [x] [Review][Defer] **Pas de hook `afterSync` de parité sur Playlist → DB construites par `sync` (dev/CI) sans unicité** [backend/models/playlist.js:21-29] — sur une base montée par `sync({alter:false})` seul (dev local, CI), l'index n'existe pas → le 409 est du code mort en dev, les doublons de casse passent (les tests sont mockés, ne le voient pas). Prod protégée (release-migrate). `Topic` a ajouté un hook `afterSync` pour exactement ça (`topic.js:54-121`) — mais ce hook est **lui-même** une dette de maintenance déjà reportée (review 7.12). — deferred, divergence dev/prod assumée, même posture que la dette afterSync 7.12 ; à traiter en lot si on durcit la parité sync.
+
+### Findings écartés (bruit / déjà géré, non persistés)
+- **409 suppose l'index de nom** (autre contrainte unique mal étiquetée) — Edge a vérifié : seuls `playlists_user_uid_name_ci` + PK sur Playlists ; l'unique `PlaylistSongs` est inatteignable (dédup `seen` dans `syncPlaylistSongs`). `topiccontroller` ne garde pas non plus → mirror fidèle. Écarté (inatteignable).
+- **Lookup `name` vide/undefined** — `create` exige `name` (400 avant) ; `update` sans `name` ne renomme pas → pas de violation d'unicité de nom. Inatteignable. Écarté.
+- **Nom NULL non contraint** — `name` est `allowNull:false` → aucun NULL. Écarté (géré).
+- **`down` sans transaction** — un seul `DROP INDEX`, inoffensif. Écarté (cosmétique).

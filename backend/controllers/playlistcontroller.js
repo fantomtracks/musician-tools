@@ -134,14 +134,21 @@ const createPlaylist = async (req, res, next) => {
 
     const { name, description, songUids } = req.body || {};
 
-    if (!name) {
+    // Trim before persist (mirror topiccontroller) so the stored name matches the
+    // lower(name) unique index and the foldedNameMatch lookup — otherwise a
+    // whitespace-padded name collides on the index but cannot be resolved.
+    const trimmedName = typeof name === 'string' ? name.trim() : '';
+    if (!trimmedName) {
       return next(createError(400, 'Name is required'));
+    }
+    if (trimmedName.length > 255) {
+      return next(createError(400, 'Name must be at most 255 characters'));
     }
 
     const { playlist, finalUids } = await sequelize.transaction(async (transaction) => {
       const created = await Playlist.create({
         userUid: userId,
-        name,
+        name: trimmedName,
         description: description || null
       }, { transaction });
       const persisted = await syncPlaylistSongs(created.uid, songUids, userId, transaction);
@@ -180,9 +187,23 @@ const updatePlaylist = async (req, res, next) => {
 
     const { name, description, songUids } = req.body || {};
 
+    // Trim + validate a renamed name (mirror topiccontroller); an omitted name
+    // leaves the existing one untouched.
+    let nextName = playlist.name;
+    if (name !== undefined) {
+      const trimmedName = typeof name === 'string' ? name.trim() : '';
+      if (!trimmedName) {
+        return next(createError(400, 'Name is required'));
+      }
+      if (trimmedName.length > 255) {
+        return next(createError(400, 'Name must be at most 255 characters'));
+      }
+      nextName = trimmedName;
+    }
+
     const finalUids = await sequelize.transaction(async (transaction) => {
       await playlist.update({
-        name: name !== undefined ? name : playlist.name,
+        name: nextName,
         description: description !== undefined ? description : playlist.description
       }, { transaction });
       // Only re-sync on a real array; an omitted (or null) songUids means

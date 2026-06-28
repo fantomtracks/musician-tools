@@ -22,13 +22,13 @@ module.exports = {
       // 1. One-shot de-dup BEFORE creating the unique index, else the index build
       // aborts where a user holds e.g. "Rock"+"rock". Survivor per
       // (user_uid, lower(name)) group = oldest, then uid; the losers (rn > 1) are
-      // RENAMED with a numeric suffix so all names in a group become distinct.
-      // Edge (rare at this scale): a renamed "Rock (2)" could itself collide with a
-      // pre-existing "Rock (2)"; with a single beta user there are no duplicate
-      // names in practice, so this branch is effectively a no-op.
+      // RENAMED with a suffix built from the row's own uid — unique by
+      // construction, so it can never collide with a pre-existing "Rock (2)"
+      // literal (which a plain numeric suffix could). The base name is bounded to
+      // 240 chars so the result can't overflow varchar(255).
       await sequelize.query(`
         UPDATE "Playlists" p
-        SET name = p.name || ' (' || g.rn || ')'
+        SET name = left(p.name, 240) || ' (' || left(p.uid::text, 8) || ')'
         FROM (
           SELECT uid,
                  row_number() OVER (

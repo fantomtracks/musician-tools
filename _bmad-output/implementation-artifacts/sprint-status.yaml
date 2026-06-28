@@ -35,7 +35,7 @@
 # - Dev moves story to 'review', then runs code-review (fresh context, different LLM recommended)
 
 generated: 2026-06-07
-last_updated: 2026-06-28  # 10-1 (unicité nom playlist serveur) → review (implémentée + migration testée) ; 10-2 backlog
+last_updated: 2026-06-28  # 10-1 (unicité nom playlist serveur) → done (review 3 couches, 2 patches) ; 10-2 backlog
 project: musician-tools
 project_key: NOKEY
 tracking_system: file-system
@@ -124,5 +124,5 @@ development_status:
   # Epic 10: Confort / playlists (post-rétro Epic 7 — issu deferred-work 2026-06-28)
   # Découpage façon 7.12→8.2 : 10-1 unicité serveur (prérequis) → 10-2 create on the fly (front)
   epic-10: in-progress
-  10-1-unicite-nom-playlist-serveur: review          # backend ; migration (user_uid, lower(name)) + RENAME dedup + 409 ; testée sur base dev ; back 240✓ front 290✓
+  10-1-unicite-nom-playlist-serveur: done            # backend ; migration (user_uid, lower(name)) + RENAME dedup + 409 ; review 3 couches OK (2 patches : trim + suffixe uid robuste) ; back 241✓ front 290✓
   10-2-creer-playlist-a-la-volee: backlog            # front ; mirror 8.2 ; consomme le 409 de 10-1 ; finaliser via create-story après 10-1 done

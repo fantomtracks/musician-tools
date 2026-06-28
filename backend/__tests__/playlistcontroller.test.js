@@ -124,6 +124,21 @@ describe('createPlaylist', () => {
     expect(Playlist.create).not.toHaveBeenCalled();
   });
 
+  test('trims the name before persisting (matches the lower(name) unique index)', async () => {
+    // Story 10.1 review: store the trimmed name so it lines up with the index and
+    // the conflict lookup; whitespace-only names are rejected.
+    Playlist.create.mockResolvedValue(ownedPlaylist());
+    await controller.createPlaylist(createReq({ name: '  My set  ', songUids: [] }), mockRes(), mockNext());
+    expect(Playlist.create).toHaveBeenCalledWith(
+      expect.objectContaining({ name: 'My set' }),
+      expect.anything()
+    );
+
+    const next = mockNext();
+    await controller.createPlaylist(createReq({ name: '   ', songUids: [] }), mockRes(), next);
+    expect(next.mock.calls[0][0].status).toBe(400);
+  });
+
   test('401 when not authenticated', async () => {
     const next = mockNext();
     await controller.createPlaylist({ session: {}, body: { name: 'X' } }, mockRes(), next);
