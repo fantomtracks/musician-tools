@@ -18,6 +18,11 @@ module.exports = (sequelize, DataTypes) => {
       },
       onDelete: 'CASCADE'
     },
+    // Story 10.1: uniqueness per user is case-insensitive, enforced by the
+    // FUNCTIONAL unique index `playlists_user_uid_name_ci` on
+    // (user_uid, lower(name)) — see migration 20260628000200. It is not
+    // expressible via the Sequelize index DSL, so it lives in the migration only
+    // (sync({alter:false}) must not try to create/drop it).
     name: {
       type: DataTypes.STRING,
       allowNull: false

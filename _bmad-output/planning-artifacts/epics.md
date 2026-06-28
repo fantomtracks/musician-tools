@@ -1010,3 +1010,54 @@ So that je passe de l'historique à l'édition de la chanson sans la rechercher.
 **Then** pas de lien (texte statique), pas de navigation cassée
 
 **And** dépend de 9.3 (le lien vit dans le composant partagé) ; pas de régression d'affichage
+
+## Epic 10: Confort / playlists
+
+_Ajouté 2026-06-28 — issu de la revue `deferred-work.md` (rituel avant nouvelle epic). Epic de **confort**, exécution **légère**. Première story : la création de playlist à la volée depuis la fiche chanson (planifiée 2026-06-26)._
+
+**Objectif :** réduire les frottements autour des playlists. Première brique : ranger une chanson dans une **nouvelle** playlist sans quitter l'écran d'édition, en mirrorant le « créer un sujet à la volée » de la story 8.2.
+
+**Découpage (façon 7.12→8.2) :** les noms de playlist ne sont **pas** uniques en base (pas de 409, contrairement aux topics). On pose d'abord l'unicité serveur (**10.1**, prérequis), puis la création à la volée côté front (**10.2**) qui consomme ce 409.
+
+**Ordre :** 10.1 (backend, unicité serveur) → 10.2 (front, dépend de 10.1).
+
+### Story 10.1: Unicité de nom de playlist insensible à la casse (côté serveur)
+
+As a musicien qui range ses chansons,
+I want que mes playlists ne se dédoublonnent pas selon la casse,
+So that je n'aie jamais deux playlists au même nom et que la création à la volée (10.2) retombe proprement sur l'existante.
+
+**Acceptance Criteria:**
+
+**Given** les playlists d'un user
+**When** la migration s'exécute
+**Then** un index unique fonctionnel `(user_uid, lower(name))` est posé après dédoublonnage one-shot des collisions existantes (reco : **RENAME** non destructif des perdantes, survivant = la plus ancienne) ; idempotente, testée localement avant merge (`main` = prod)
+
+**Given** une création ou un rename de playlist en collision (casse comprise) avec une playlist existante du user
+**Then** le contrôleur répond **409** `{ message: 'Playlist already exists', playlist: <existante> }` (scopé `user_uid`, pas d'oracle), en mirrorant `topiccontroller`
+
+**And** parité avec le picker (`.toLowerCase()`) → granularité **`lower(name)`** (casse seule, pas d'accents/`f_unaccent`) recommandée ; pas de front, pas de dépendance npm ; calqué sur la story 7.12.
+
+### Story 10.2: Créer une playlist à la volée depuis l'édition d'une chanson
+
+As a musicien qui édite une chanson,
+I want créer une nouvelle playlist et y ajouter la chanson en cours sans quitter l'écran,
+So that ranger une chanson dans une nouvelle playlist reste un seul geste, sans détour par la page Playlists.
+
+**Dépend de 10.1** (unicité serveur + 409).
+
+**Acceptance Criteria:**
+
+**Given** le picker de playlists de la fiche chanson (mode édition) et une recherche non vide qui ne matche **aucune** playlist existante (`.toLowerCase()`)
+**When** la liste déroulante s'affiche
+**Then** une option « Create playlist "&lt;texte&gt;" » apparaît en bas ; absente si le nom matche une playlist existante ou si la saisie est vide
+
+**Given** l'option « Create playlist "…" »
+**When** je la choisis
+**Then** la playlist est créée avec la chanson dedans (`createPlaylist({ name, songUids: [<uid>] })`), ajoutée à l'état + sélectionnée (chip), sans fermer ni soumettre le formulaire ; le diff on-Save reste cohérent (pas de double-ajout)
+
+**Given** une création qui passe la garde client mais collide côté serveur (catalogue périmé)
+**When** `createPlaylist` rejette `PlaylistConflictError`
+**Then** la playlist existante (renvoyée dans le 409) est sélectionnée à la place — pas d'erreur bloquante, pas de doublon (façon 8.2 AC10)
+
+**And** création possible même sans aucune playlist (combobox dispo) ; nav clavier (Entrée sélectionne sans soumettre) ; échec réseau → toast non bloquant ; périmètre **mode édition** ; pas de régression du picker existant.

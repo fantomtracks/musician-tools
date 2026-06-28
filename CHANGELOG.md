@@ -6,6 +6,9 @@ project adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+### Changed
+- **Playlist names ignore case** — "Rock" and "rock" now count as the same playlist, so you won't end up with accidental duplicates. (Any pre-existing duplicates are kept and quietly renamed, e.g. "rock (2)".)
+
 ## [1.6.1] — 2026-06-28
 
 ### Fixed

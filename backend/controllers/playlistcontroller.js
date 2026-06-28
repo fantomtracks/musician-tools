@@ -1,4 +1,5 @@
 const { Playlist, PlaylistSong, Song, sequelize } = require('../models');
+const { Op, fn, col, where: whereFn } = require('sequelize');
 const createError = require('http-errors');
 const logger = require('../logger');
 const { isUuid } = require('../utils/uuid');
@@ -6,6 +7,30 @@ const { isUuid } = require('../utils/uuid');
 // Story 5.7: songs live in the PlaylistSongs join table (real FK), not the
 // legacy Playlist.song_uids JSON column. The API contract is unchanged — every
 // response still carries an ordered `songUids` array, derived from the join.
+
+// Story 10.1: mirror the unique index expression `lower(name)` so a name
+// collision can be resolved to the canonical existing playlist. Case-only
+// (the index is lower(name)) → exact parity with the .toLowerCase() picker.
+function foldedNameMatch(name) {
+  return whereFn(fn('lower', col('name')), String(name == null ? '' : name).trim().toLowerCase());
+}
+
+// Resolve the existing playlist that a name conflict (23505) refers to, with its
+// derived songUids, so the client can select it deterministically. Returns null
+// if it cannot be resolved (best-effort, never throws).
+const findExistingByName = async (userId, name, excludeUid) => {
+  try {
+    const and = [{ userUid: userId }, foldedNameMatch(name)];
+    if (excludeUid) and.push({ uid: { [Op.ne]: excludeUid } });
+    const existing = await Playlist.findOne({ where: { [Op.and]: and } });
+    if (!existing) return null;
+    const byPlaylist = await songUidsByPlaylist([existing.uid]);
+    return withSongUids(existing, byPlaylist.get(existing.uid) || []);
+  } catch (lookupError) {
+    logger.error('Playlist conflict lookup failed:', lookupError);
+    return null;
+  }
+};
 
 // Ordered songUids for a set of playlists, as Map<playlistUid, string[]>.
 const songUidsByPlaylist = async (playlistUids, transaction) => {
@@ -125,6 +150,12 @@ const createPlaylist = async (req, res, next) => {
 
     res.status(201).json(withSongUids(playlist, finalUids));
   } catch (error) {
+    // Story 10.1: a duplicate name (case-insensitive) hits the functional unique
+    // index → return the canonical existing playlist so the client selects it.
+    if (error.name === 'SequelizeUniqueConstraintError') {
+      const existing = await findExistingByName(req.session.user, (req.body || {}).name);
+      return res.status(409).json({ message: 'Playlist already exists', playlist: existing });
+    }
     logger.error('Error creating playlist:', error);
     next(createError(500, 'Error creating playlist'));
   }
@@ -165,6 +196,12 @@ const updatePlaylist = async (req, res, next) => {
 
     res.json(withSongUids(playlist, finalUids));
   } catch (error) {
+    // Story 10.1: a rename onto a name already taken (case-insensitive) → 409
+    // with the existing playlist (excluding the one being edited).
+    if (error.name === 'SequelizeUniqueConstraintError') {
+      const existing = await findExistingByName(req.session.user, (req.body || {}).name, req.params.uid);
+      return res.status(409).json({ message: 'Playlist already exists', playlist: existing });
+    }
     logger.error('Error updating playlist:', error);
     next(createError(500, 'Error updating playlist'));
   }

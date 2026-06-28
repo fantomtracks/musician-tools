@@ -129,6 +129,24 @@ describe('createPlaylist', () => {
     await controller.createPlaylist({ session: {}, body: { name: 'X' } }, mockRes(), next);
     expect(next.mock.calls[0][0].status).toBe(401);
   });
+
+  test('409 with the existing playlist when the name collides (case-insensitive)', async () => {
+    // Story 10.1: the functional unique index (user_uid, lower(name)) rejects the insert
+    Playlist.create.mockRejectedValue({ name: 'SequelizeUniqueConstraintError' });
+    Playlist.findOne.mockResolvedValue(ownedPlaylist({ json: { uid: '11111111-1111-4111-8111-111111111111', name: 'My set' } }));
+
+    const res = mockRes();
+    const next = mockNext();
+    // 'my set' (different case) collides with the existing 'My set'
+    await controller.createPlaylist(createReq({ name: 'my set', songUids: [] }), res, next);
+
+    expect(res.status).toHaveBeenCalledWith(409);
+    expect(res.json).toHaveBeenCalledWith(expect.objectContaining({
+      message: 'Playlist already exists',
+      playlist: expect.objectContaining({ uid: '11111111-1111-4111-8111-111111111111' })
+    }));
+    expect(next).not.toHaveBeenCalled();
+  });
 });
 
 describe('updatePlaylist', () => {
@@ -146,6 +164,31 @@ describe('updatePlaylist', () => {
     // No re-sync: the join table is left untouched
     expect(PlaylistSong.destroy).not.toHaveBeenCalled();
     expect(res.json).toHaveBeenCalledWith(expect.objectContaining({ songUids: ['22222222-2222-4222-8222-222222222222'] }));
+  });
+
+  test('409 when renamed onto a name already taken (case-insensitive)', async () => {
+    // Story 10.1: rename collision → unique index rejects the update
+    const editing = ownedPlaylist();
+    editing.update.mockRejectedValue({ name: 'SequelizeUniqueConstraintError' });
+    Playlist.findOne
+      .mockResolvedValueOnce(editing) // scoped lookup of the playlist being edited
+      .mockResolvedValueOnce(ownedPlaylist({ // conflict lookup of the existing 'Taken'
+        uid: '99999999-9999-4999-8999-999999999999',
+        json: { uid: '99999999-9999-4999-8999-999999999999', name: 'Taken' }
+      }));
+
+    const res = mockRes();
+    const next = mockNext();
+    await controller.updatePlaylist(
+      { session: { user: 'user-1' }, params: { uid: '11111111-1111-4111-8111-111111111111' }, body: { name: 'taken' } }, res, next
+    );
+
+    expect(res.status).toHaveBeenCalledWith(409);
+    expect(res.json).toHaveBeenCalledWith(expect.objectContaining({
+      message: 'Playlist already exists',
+      playlist: expect.objectContaining({ uid: '99999999-9999-4999-8999-999999999999' })
+    }));
+    expect(next).not.toHaveBeenCalled();
   });
 });
 
