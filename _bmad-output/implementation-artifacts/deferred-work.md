@@ -34,7 +34,12 @@ _Les 4 stories UI/confort (filtres Songlist, refacto SessionHistoryCard, chanson
 - [x] **Garde UUID→404 généralisée** — `backend/utils/uuid.js` partagé ; gardes ajoutées sur song/instrument/playlist ; topic+practicesession basculés dessus. (item 4)
 - [x] **`getCsrfToken` dédup en vol** — promesse `inFlight` partagée pour les appels concurrents au cold-start. (item 5)
 
-### 🎵 Créer une playlist à la volée depuis l'édition d'une chanson (story planifiée — 2026-06-26)
+### 🔒 Lot parité-sync (unicité dev/CI) — story planifiée (rétro Epic 10, 2026-06-28)
+- Ni les topics (7.12, index `topics_user_uid_name_ci_unaccent`) ni les playlists (10.1, index `playlists_user_uid_name_ci`) ne posent leur **index unique fonctionnel** sur une base montée par `sync({alter:false})` seul (dev local, CI). → en dev/CI, **pas d'unicité** : doublons de casse possibles, le 409 de `create`/`update` est du code mort, et les tests (mockés) ne le voient pas. **Prod protégée** (release-migrate joue les migrations).
+- À cadrer : approche commune et **propre** (le hook `afterSync` de 7.12 est lui-même une dette — duplique la SQL, exige `CREATE EXTENSION` au boot). Pistes : `make migrate` au boot dev/CI au lieu de hooks ; ou un hook partagé minimal. **Décision rétro Epic 10 : promu de « gardé » à « story planifiée ».** [`backend/models/topic.js:54-121`, `backend/models/playlist.js:21-29`]
+
+### 🎵 Créer une playlist à la volée depuis l'édition d'une chanson — ✅ LIVRÉ (Epic 10, story 10.2, 2026-06-28)
+> Branche `feat/epic-10-confort-playlists` (à merger). Option « Create playlist "…" » dans le picker de la fiche chanson (mirror 8.2), `PlaylistConflictError` + 409 backstop, combobox toujours rendu. Précédé de 10.1 (unicité nom playlist serveur, `lower(name)` + dédup RENAME). Review 3 couches : 1 HIGH (reseed-clobber) + patches corrigés. _Cadrage initial ci-dessous conservé pour provenance._
 - Depuis la fiche d'édition d'une chanson, pouvoir **créer une nouvelle playlist et y ajouter la chanson** sans quitter l'écran (taper un nom inexistant → « Créer la playlist … » → créée + chanson ajoutée). Même pattern UX que le « créer un sujet à la volée » du sélecteur d'entrée (8.2). À cadrer : emplacement dans `SongForm` (une section playlists ?), création + ajout en une action, lien `playlist_songs` (FK 5.7), feedback. [Songs.tsx/SongForm, MyPlaylistsPage, playlistcontroller]
 
 ### 🐛 Navigation clavier comboboxes — ✅ RÉSOLU (2026-06-28, branche `fix/songform-combobox-keyboard`, à merger)
