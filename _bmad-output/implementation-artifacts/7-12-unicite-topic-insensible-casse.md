@@ -4,7 +4,7 @@ baseline_commit: d5f05691d7105c2020ce991c76f29b82868dd696
 
 # Story 7.12: Unicité de topic insensible à la casse ET aux accents (côté serveur)
 
-Status: review
+Status: done
 
 <!-- Note: Validation is optional. Run validate-create-story for quality check before dev-story. -->
 
@@ -130,3 +130,12 @@ claude-opus-4-8 (1M context)
 ### Change Log
 
 - 2026-06-25 — Story 7.12 : unicité topic insensible **casse + accents** (option B, validée PO). Index unique **fonctionnel** `(user_uid, lower(f_unaccent(name)))` + extension `unaccent` + wrapper `f_unaccent` IMMUTABLE ; migration idempotente avec **dédoublonnage one-shot** (repoint `SessionItems` avant delete), **testée en local** (dédoublonnage/repoint/rejet/idempotence/down-up). Contrôleurs inchangés (déjà 23505→409). Back 215 verts ; pas de front, pas de dépendance. ⚠️ Prod : vérifier le privilège `CREATE EXTENSION unaccent` avant push.
+
+## Review Findings
+
+_Code review adversariale 3 couches (Blind / Edge / Auditor) — 2026-06-28. Tous les AC satisfaits ; aucun bug bloquant. Findings résiduels :_
+
+- [ ] [Review][Decision] Folding client (NFD) plus étroit que le serveur (`unaccent`) — `src/pages/MySessionsPage.tsx:23` `foldForSearch` strippe uniquement les diacritiques **combinants** (`é è à ç` OK) ; le serveur `lower(f_unaccent(name))` folde aussi les lettres **non-décomposables** (`ø æ œ ß ł đ`). Conséquence : pour « Køln » vs « Koln » existant, le combobox propose **Create** (`:85`/`:415`) mais le serveur renvoie un `409 Topic already exists` surprise. Sévérité Medium (déclenché seulement par caractères exotiques, rares dans des topics FR/EN).
+- [x] [Review][Defer] Hook `afterSync` duplique la logique migration + exige `CREATE EXTENSION` au boot + ne drop pas l'index legacy sur DB sync [`backend/models/topic.js:54-121`] — deferred, dette de maintenance (dev/CI uniquement, prod OK via migration).
+- [x] [Review][Defer] Migration hardcode `public.unaccent` [`backend/migrations/20260625000000-topics-name-ci-unaccent.js:84`] — deferred, fragile sur PG managé à schéma `extensions` dédié (prod validée via citext 7.2, OK aujourd'hui).
+- [x] [Review][Defer] Tests collision casse/accent tautologiques [`backend/__tests__/topiccontroller.test.js:13-26`] — deferred, mockent `Topic.create` → ne testent pas le folding réel (validé seulement par migration locale ; le projet mocke les modèles, pas de DB en test).

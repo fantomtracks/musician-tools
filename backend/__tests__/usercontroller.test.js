@@ -264,6 +264,9 @@ describe('usercontroller.loginUser', () => {
     expect(req.session.id).toBe('sid-new');
     expect(req.session.loggedIn).toBe(true);
     expect(req.session.user).toBe('user-1');
+    // App-wide hard gate (7.13): the session is stamped verified so authsess
+    // enforces it on every request, not just at login.
+    expect(req.session.emailVerified).toBe(true);
     expect(next).not.toHaveBeenCalled();
   });
 
@@ -369,9 +372,23 @@ describe('usercontroller — email verification (story 7.9 + hard gate 7.13)', (
       expect(req.session.id).toBe('sid-new');
       expect(req.session.loggedIn).toBe(true);
       expect(req.session.user).toBe('u1');
+      expect(req.session.emailVerified).toBe(true); // app-wide hard gate (7.13)
       const payload = res.json.mock.calls[0][0];
       expect(payload.success).toBe(true);
       expect(payload.user).toMatchObject({ uid: 'u1', email: 'ada@example.com', emailVerified: true, handle: 'Ada#0001' });
+    });
+
+    test('a valid token for a since-deleted user → generic 400, no session (no 500)', async () => {
+      authTokenService.verifyToken.mockResolvedValue({ userUid: 'gone', payload: null });
+      User.scope.mockReturnValue({ findByPk: jest.fn().mockResolvedValue(null) });
+
+      const req = { body: { token: 'good' }, session: mockSession() };
+      const next = mockNext();
+      await controller.verifyEmail(req, mockRes(), next);
+
+      expect(next.mock.calls[0][0].status).toBe(400);
+      expect(req.session.regenerate).not.toHaveBeenCalled();
+      expect(req.session.loggedIn).toBeUndefined();
     });
 
     test('an invalid/expired/used token → generic 400, no update, no session', async () => {

@@ -11,7 +11,12 @@ const authsess = async (req, res, next) => {
   
   const session = req.session;
 
-  if (session.loggedIn === true) {
+  // Story 7.13 (hard email gate, app-wide): a session is authoritative only if it
+  // was opened past the verification check. loginUser / verifyEmail stamp
+  // `emailVerified = true`; any session lacking it (an unverified soft-gate-era
+  // session, or one predating this guard) is denied → the user must re-login,
+  // where the gate blocks them until they verify. Cheap: no DB lookup.
+  if (session.loggedIn === true && session.emailVerified === true) {
     try {
       logger.info('User authenticated', { userId: session.user });
       next();

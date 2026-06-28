@@ -28,6 +28,23 @@ _Les 4 stories UI/confort (filtres Songlist, refacto SessionHistoryCard, chanson
 - **Garde format UUID incohérente** — song/instrument/playlist : `uid` non-UUID → 500 au lieu de 404 (cosmétique). Généraliser `UUID_PATTERN`→404. [song/instrument/playlist controllers]
 - **`getCsrfToken` sans dédup en vol** — thundering herd au cold-start (inoffensif). [src/services/csrf.ts]
 
+### 🎵 Créer une playlist à la volée depuis l'édition d'une chanson (story planifiée — 2026-06-26)
+- Depuis la fiche d'édition d'une chanson, pouvoir **créer une nouvelle playlist et y ajouter la chanson** sans quitter l'écran (taper un nom inexistant → « Créer la playlist … » → créée + chanson ajoutée). Même pattern UX que le « créer un sujet à la volée » du sélecteur d'entrée (8.2). À cadrer : emplacement dans `SongForm` (une section playlists ?), création + ajout en une action, lien `playlist_songs` (FK 5.7), feedback. [Songs.tsx/SongForm, MyPlaylistsPage, playlistcontroller]
+
+### 🐛 Navigation clavier cassée dans les comboboxes artiste/album/genre (bug — noté 2026-06-27)
+- Dans `SongForm`, taper p.ex. « fun » dans Genre puis **flèche bas** ne surligne aucune suggestion et **Entrée soumet le formulaire** (retour à la liste) au lieu de sélectionner « funk ». Très frustrant. La gestion clavier (ArrowDown/Up + highlight + Entrée=sélection + `preventDefault`) existe sur **certains** champs (~`SongForm.tsx:247`, `:466`) mais **pas** artiste/album/genre → Entrée retombe sur le submit. Fix = uniformiser le pattern combobox (index surligné + Entrée sélectionne + preventDefault) sur tous les champs à suggestions. [src/components/SongForm.tsx]
+
+## Deferred from: code review of 7-12 + 7-13 (2026-06-28)
+
+> Issus de la review adversariale 3 couches. Aucun bloquant — tous les AC des deux stories sont satisfaits. Items reportés (les findings `decision`/`patch` restent dans les stories) :
+
+- **7-12 — Hook `afterSync` duplique la migration** : re-exécute `CREATE EXTENSION` + `f_unaccent` + dédoublonnage + index sur chaque DB construite par `sync({alter:false})`, exige le privilège `CREATE EXTENSION` au boot et ne drop pas l'index legacy `topics_user_uid_name` (dev/CI gardent les 2 index). Prod OK (chemin migration). Dette de maintenance : 2 copies de la SQL de dédup à garder en phase. [`backend/models/topic.js:54-121`]
+- **7-12 — Migration hardcode `public.unaccent`** : `'public.unaccent'::regdictionary` casse si l'extension est installée dans un schéma `extensions` dédié (PG managé). Prod actuelle OK (citext 7.2 déjà dans `public`), mais hypothèse d'environnement non gardée. [`backend/migrations/20260625000000-topics-name-ci-unaccent.js:84`]
+- **7-12 — Tests collision casse/accent tautologiques** : mockent `Topic.create` → testent le mapping 23505→409, pas le folding réel (validé seulement par migration locale). Le projet mocke les modèles, donc un vrai test de folding demanderait une DB. [`backend/__tests__/topiccontroller.test.js:13-26`]
+- **7-13 — Token consommé sur 2e device → « invalid/expired » malgré succès** : après vérification sur l'appareil A, rouvrir le même lien sur le téléphone B (jamais loggé) affiche une erreur, le backend ne distinguant pas un token consommé-valide d'un token invalide. UX trompeuse. [`src/pages/VerifyEmailPage.tsx:53-61`]
+- **7-13 — Oracle de timing sur `resendVerificationPublic`** : l'envoi email n'est awaité (avant `res.json`) que sur la branche existant-non-vérifié → la latence distingue « compte non vérifié » de « inconnu/vérifié » malgré le body uniforme. Même résidu accepté que `forgotPassword`. [`backend/controllers/usercontroller.js:260-279`]
+- **7-13 — UI vérif Login/Register sans test front** : seul `VerifyEmailPage` a une couverture automatisée ; les branches `needsVerification` (Login) et le bouton Resend (Register) ne sont pas testées. Dans le plan de test déclaré de la story. [`src/pages/LoginPage.tsx` / `RegisterPage.tsx`]
+
 ---
 
 ## 💭 À brainstormer

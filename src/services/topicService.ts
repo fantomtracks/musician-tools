@@ -17,6 +17,18 @@ export type UpdateTopicDTO = Partial<CreateTopicDTO>;
 
 const API_BASE = '/api';
 
+// Thrown on a 409 from create/update. Carries the canonical existing topic (when
+// the server could resolve it) so callers select it deterministically rather
+// than re-folding the name client-side (which the server's unaccent outruns).
+export class TopicConflictError extends Error {
+  existingTopic?: Topic;
+  constructor(existingTopic?: Topic) {
+    super('Topic already exists');
+    this.name = 'TopicConflictError';
+    this.existingTopic = existingTopic;
+  }
+}
+
 export const topicService = {
   async getAll(): Promise<Topic[]> {
     const res = await apiFetch(`${API_BASE}/topics`, {
@@ -32,7 +44,10 @@ export const topicService = {
       body: JSON.stringify(payload),
       credentials: 'include'
     });
-    if (res.status === 409) throw new Error('Topic already exists');
+    if (res.status === 409) {
+      const body = await res.json().catch(() => ({} as { topic?: Topic }));
+      throw new TopicConflictError(body.topic ?? undefined);
+    }
     if (!res.ok) throw new Error('Failed to create topic');
     return res.json();
   },

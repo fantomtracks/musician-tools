@@ -4,7 +4,7 @@ baseline_commit: 4c338754393d71515373a871abf10282f0d9d59b
 
 # Story 7.13: Hard email-verification gate (plus de connexion sans email vérifié)
 
-Status: review
+Status: done
 
 > **Course-correct 2026-06-26** (pendant le test manuel Epic 7) : northwood change
 > d'avis sur le *soft gate* de 7.9. On passe à un **hard gate** : un compte ne peut
@@ -75,3 +75,15 @@ jamais l'existence d'un email.
 - À vérifier au test manuel : les comptes de test créés non vérifiés ne peuvent plus
   se connecter (attendu) ; un vrai beta user grandfathered (`email_verified=true` via
   backfill 7.2) n'est pas impacté.
+
+## Review Findings
+
+_Code review adversariale 3 couches (Blind / Edge / Auditor) — 2026-06-28. Tous les AC satisfaits ; la session-fixation soupçonnée par le Blind Hunter est un **faux positif** (`regenerateSession` confirmé à `usercontroller.js:231`). Findings résiduels :_
+
+- [ ] [Review][Decision] Le « hard gate » n'évince pas les sessions actives non vérifiées de l'ère soft-gate — la garde n'existe qu'au `loginUser` (`usercontroller.js:161`) ; `middleware/authsess.js` n'autorise que sur `loggedIn === true`, jamais `emailVerified`. Un user non vérifié (inscrit pendant la fenêtre soft-gate 7.9) avec une session vivante garde l'accès complet jusqu'au logout. Le gate ne force la vérification que pour les **nouvelles** connexions. Sévérité Medium.
+- [ ] [Review][Patch] `authService.login` lit le body deux fois sur un 403 sans `email_not_verified` → `TypeError: body stream already read` au lieu d'une erreur propre [`src/services/authService.ts:89-97`] (reachable via un 403 CSRF).
+- [ ] [Review][Patch] `verifyEmail` : `User.scope(null).findByPk` peut renvoyer `null` (compte supprimé entre update et fetch) → `user.uid` jette → 500 opaque au lieu d'un 400 « token invalide » [`backend/controllers/usercontroller.js:228-233`].
+- [ ] [Review][Patch] Bannière `needsVerification` de LoginPage jamais réinitialisée au re-submit → bannière « Verify your email » fantôme à côté d'une erreur classique [`src/pages/LoginPage.tsx` handleSubmit].
+- [x] [Review][Defer] Token consommé rouvert sur un 2e device affiche « invalid/expired » malgré la vérification réussie [`src/pages/VerifyEmailPage.tsx:53-61`] — deferred, le backend ne distingue pas consommé-valide d'invalide après usage.
+- [x] [Review][Defer] Oracle de timing sur `resendVerificationPublic` (envoi email awaité avant la réponse seulement sur la branche existant-non-vérifié) [`backend/controllers/usercontroller.js:260-279`] — deferred, même résidu que `forgotPassword` (anti-énum géré au niveau body).
+- [x] [Review][Defer] UI vérification de Login/Register sans test front automatisé [`src/pages/LoginPage.tsx` / `RegisterPage.tsx`] — deferred, dans le plan de test déclaré de la story (seul VerifyEmailPage couvert).

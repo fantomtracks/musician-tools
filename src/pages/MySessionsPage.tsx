@@ -2,7 +2,7 @@ import { useEffect, useMemo, useRef, useState } from 'react';
 import { practiceSessionService, type CreatePracticeSessionDTO, type CreateSessionItemDTO, type UpdateSessionItemDTO, type UpdatePracticeSessionDTO, type PracticeSession } from '../services/practiceSessionService';
 import { SessionHistoryCard } from '../components/SessionHistoryCard';
 import { songService, type Song } from '../services/songService';
-import { topicService, type Topic } from '../services/topicService';
+import { topicService, TopicConflictError, type Topic } from '../services/topicService';
 import { ConfirmDialog } from '../components/ConfirmDialog';
 import { instrumentTypeOptions } from '../constants/instrumentTypes';
 import { digitsOnly } from '../utils/digitsOnly';
@@ -405,17 +405,21 @@ function MySessionsPage() {
       setTopics(prev => [created, ...prev]);
       updateEntry(key, { ref: `topic:${created.uid}` });
     } catch (err) {
-      if (err instanceof Error && err.message === 'Topic already exists') {
-        // The picker only offers Create when no loaded topic folds to this name,
-        // so the existing one is, by construction, absent from `topics` here —
-        // reload the catalog to find it (no point checking the stale state).
-        try {
-          const all = await topicService.getAll();
-          setTopics(all);
-          const found = all.find(t => foldForSearch(t.name) === foldForSearch(name));
-          if (found) updateEntry(key, { ref: `topic:${found.uid}` });
-        } catch {
-          showToast('Could not add topic');
+      if (err instanceof TopicConflictError) {
+        // A 409 (the topic already exists, case/accents aside) is not an error —
+        // select the existing one. The server resolves the canonical topic for us
+        // (its unaccent folding outruns the client's), so prefer that; only fall
+        // back to a client fold-match if the server couldn't supply it.
+        const existing = err.existingTopic
+          ?? (await topicService.getAll().then(
+                all => { setTopics(all); return all.find(t => foldForSearch(t.name) === foldForSearch(name)); },
+                () => undefined
+              ));
+        if (existing) {
+          setTopics(prev => prev.some(t => t.uid === existing.uid) ? prev : [existing, ...prev]);
+          updateEntry(key, { ref: `topic:${existing.uid}` });
+        } else {
+          showToast(`A topic matching "${name}" already exists`);
         }
       } else {
         showToast('Could not add topic');

@@ -29,6 +29,7 @@ function LoginPage() {
     e.preventDefault();
     setError(null);
     setResendMessage(null);
+    setNeedsVerification(false); // clear a prior "verify your email" banner on resubmit
 
     try {
       setLoading(true);

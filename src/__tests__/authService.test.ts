@@ -43,6 +43,29 @@ describe('authService excluded from the 401 interceptor', () => {
     await expect(authService.login('bob', 'wrong')).rejects.toThrow('Invalid credentials');
     expect(assignMock).not.toHaveBeenCalled();
   });
+
+  test('a 403 with code email_not_verified → { needsVerification } (not an error)', async () => {
+    global.fetch = mockFetchWithCsrf({
+      ok: false,
+      status: 403,
+      json: async () => ({ auth: false, code: 'email_not_verified' }),
+    }) as unknown as typeof fetch;
+
+    await expect(authService.login('ada@example.com', 'pw')).resolves.toEqual({
+      auth: false,
+      needsVerification: true,
+    });
+  });
+
+  test('a 403 WITHOUT that code throws a clean error (regression: body read only once)', async () => {
+    // The body must be read a single time — a second response.json() on the same
+    // response would throw "body stream already read" instead of a login error.
+    const json = jest.fn().mockResolvedValue({ message: 'Forbidden' });
+    global.fetch = mockFetchWithCsrf({ ok: false, status: 403, json }) as unknown as typeof fetch;
+
+    await expect(authService.login('ada@example.com', 'pw')).rejects.toThrow('Forbidden');
+    expect(json).toHaveBeenCalledTimes(1);
+  });
 });
 
 // Best-effort logout (story 7.3): a dead backend / network failure must still

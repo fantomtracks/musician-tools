@@ -172,6 +172,11 @@ const loginUser = async (req, res, next) => {
     await sessionService.regenerateSession(req);
     req.session.loggedIn = true;
     req.session.user = user.uid;
+    // Story 7.13 (hard gate, app-wide): stamp the verified state onto the
+    // session so authsess can enforce it on EVERY request, not just at this
+    // door. A session is only ever created here and in verifyEmail — both past
+    // the verification check — so loggedIn always implies emailVerified.
+    req.session.emailVerified = true;
 
     res.status(200).json({
       auth: true,
@@ -226,11 +231,17 @@ const verifyEmail = async (req, res, next) => {
     // The single-use token (emailed to this address) proves ownership → safe to
     // open a session here. Return the user so the client can hydrate auth state.
     const user = await User.scope(null).findByPk(result.userUid);
+    // The account could have been deleted between token issuance and this click;
+    // a valid token for a vanished user is treated as an expired link, not a 500.
+    if (!user) {
+      return next(createError(400, 'Invalid or expired verification link'));
+    }
     // Rotate the session ID on this privilege elevation (session-fixation
     // hardening), same as login — discards the pre-auth session + CSRF token.
     await sessionService.regenerateSession(req);
     req.session.loggedIn = true;
     req.session.user = user.uid;
+    req.session.emailVerified = true; // app-wide hard gate (see loginUser)
     res.json({
       success: true,
       user: {

@@ -21,15 +21,28 @@ jest.mock('../services/songService', () => ({
   },
 }));
 
-jest.mock('../services/topicService', () => ({
-  topicService: {
-    getAll: jest.fn(),
-    create: jest.fn(),
-  },
-}));
+jest.mock('../services/topicService', () => {
+  // Self-contained so the component and this test share one class identity for
+  // `instanceof TopicConflictError` (a module-level mock can't reference outer scope).
+  class TopicConflictError extends Error {
+    existingTopic?: import('../services/topicService').Topic;
+    constructor(existingTopic?: import('../services/topicService').Topic) {
+      super('Topic already exists');
+      this.name = 'TopicConflictError';
+      this.existingTopic = existingTopic;
+    }
+  }
+  return {
+    TopicConflictError,
+    topicService: {
+      getAll: jest.fn(),
+      create: jest.fn(),
+    },
+  };
+});
 
 import { songService } from '../services/songService';
-import { topicService } from '../services/topicService';
+import { topicService, TopicConflictError } from '../services/topicService';
 
 const mockedService = practiceSessionService as jest.Mocked<typeof practiceSessionService>;
 const mockedSongService = songService as jest.Mocked<typeof songService>;
@@ -407,10 +420,34 @@ test('8.2: no "Create topic" option for a name that already matches a topic exac
   expect(within(listbox).queryByRole('group', { name: 'Create' })).not.toBeInTheDocument();
 });
 
-test('8.2: a 409 on create selects the existing topic instead of erroring (AC10)', async () => {
-  // The client offered Create (no match in its stale catalog), but the server
-  // already has the topic → 409. We reload, find it, and select it silently.
-  mockedTopicService.create.mockRejectedValue(new Error('Topic already exists'));
+test('8.2: a 409 on create selects the server-resolved existing topic (AC10)', async () => {
+  // The client offered Create, but the server already has the topic (its unaccent
+  // folding outruns the client) → 409 carrying the canonical topic. We select it
+  // directly — no catalog reload, no error toast.
+  mockedTopicService.create.mockRejectedValue(
+    new TopicConflictError({ uid: 'server-uid', name: 'Sweep picking', isSystem: false }),
+  );
+
+  render(<MemoryRouter><MySessionsPage /></MemoryRouter>);
+  fireEvent.click(screen.getByRole('button', { name: 'Add entry' }));
+  const input = await screen.findByLabelText('Entry 1');
+  fireEvent.focus(input);
+  fireEvent.change(input, { target: { value: 'Sweep picking' } });
+
+  const listbox = await screen.findByRole('listbox', { name: 'Entry 1 suggestions' });
+  const createGroup = within(listbox).getByRole('group', { name: 'Create' });
+  fireEvent.mouseDown(within(createGroup).getByRole('option', { name: 'Create topic "Sweep picking"' }));
+
+  await waitFor(() => expect(mockedTopicService.create).toHaveBeenCalled());
+  // Selected directly from the error payload — getAll fired only on initial load.
+  expect(mockedTopicService.getAll).toHaveBeenCalledTimes(1);
+  await waitFor(() => expect(screen.getByLabelText('Entry 1')).toHaveValue('Sweep picking'));
+  expect(screen.queryByText('Could not add topic')).not.toBeInTheDocument();
+});
+
+test('8.2: a 409 without a resolved topic falls back to reloading the catalog (AC10)', async () => {
+  // Older path: the server could not resolve the row → reload and fold-match.
+  mockedTopicService.create.mockRejectedValue(new TopicConflictError());
   mockedTopicService.getAll
     .mockResolvedValueOnce([]) // initial page load: empty catalog
     .mockResolvedValueOnce([{ uid: 'server-uid', name: 'Sweep picking' }]); // reload after 409
@@ -426,7 +463,6 @@ test('8.2: a 409 on create selects the existing topic instead of erroring (AC10)
   fireEvent.mouseDown(within(createGroup).getByRole('option', { name: 'Create topic "Sweep picking"' }));
 
   await waitFor(() => expect(mockedTopicService.create).toHaveBeenCalled());
-  // The reloaded existing topic is selected; no blocking error toast appears
   await waitFor(() => expect(screen.getByLabelText('Entry 1')).toHaveValue('Sweep picking'));
   expect(screen.queryByText('Could not add topic')).not.toBeInTheDocument();
 });

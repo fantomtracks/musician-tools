@@ -114,10 +114,14 @@ describe('topiccontroller', () => {
     }
   });
 
-  test('createTopic maps unique constraint violation to 409', async () => {
+  test('createTopic maps a unique violation to 409 and echoes the canonical existing topic', async () => {
     const uniqueError = new Error('duplicate');
     uniqueError.name = 'SequelizeUniqueConstraintError';
     Topic.create.mockRejectedValueOnce(uniqueError);
+    // Story 7.12 review: the server resolves the conflicting row (its unaccent
+    // folding outruns the client) so the client can select it deterministically.
+    const existing = { uid: 'existing-uid', name: 'Pentatonic scale' };
+    Topic.findOne.mockResolvedValue(existing);
 
     const req = { session: { user: 'user-1' }, body: { name: 'Pentatonic scale' } };
     const res = mockRes();
@@ -125,8 +129,23 @@ describe('topiccontroller', () => {
 
     await controller.createTopic(req, res, next);
 
-    const err = next.mock.calls[0][0];
-    expect(err.status).toBe(409);
+    expect(res.status).toHaveBeenCalledWith(409);
+    expect(res.json).toHaveBeenCalledWith({ message: 'Topic already exists', topic: existing });
+    expect(next).not.toHaveBeenCalled();
+  });
+
+  test('createTopic still returns a clean 409 (topic: null) when the conflict lookup fails', async () => {
+    const uniqueError = new Error('duplicate');
+    uniqueError.name = 'SequelizeUniqueConstraintError';
+    Topic.create.mockRejectedValueOnce(uniqueError);
+    Topic.findOne.mockRejectedValueOnce(new Error('db down'));
+
+    const req = { session: { user: 'user-1' }, body: { name: 'Pentatonic scale' } };
+    const res = mockRes();
+    await controller.createTopic(req, res, mockNext());
+
+    expect(res.status).toHaveBeenCalledWith(409);
+    expect(res.json).toHaveBeenCalledWith({ message: 'Topic already exists', topic: null });
   });
 
   // Story 7.12: the per-user uniqueness is now case- AND accent-insensitive
@@ -136,16 +155,19 @@ describe('topiccontroller', () => {
   test.each([
     ['case collision (Pentatonique vs pentatonique)', 'pentatonique'],
     ['accent collision (Pentatonique vs Pentatônique)', 'Pentatônique'],
-  ])('createTopic maps a %s to 409', async (_label, name) => {
+  ])('createTopic maps a %s to 409 with the canonical existing topic', async (_label, name) => {
     const uniqueError = new Error('duplicate');
     uniqueError.name = 'SequelizeUniqueConstraintError';
     Topic.create.mockRejectedValueOnce(uniqueError);
+    const existing = { uid: 'existing-uid', name: 'Pentatonique' };
+    Topic.findOne.mockResolvedValue(existing);
 
     const req = { session: { user: 'user-1' }, body: { name } };
-    const next = mockNext();
-    await controller.createTopic(req, mockRes(), next);
+    const res = mockRes();
+    await controller.createTopic(req, res, mockNext());
 
-    expect(next.mock.calls[0][0].status).toBe(409);
+    expect(res.status).toHaveBeenCalledWith(409);
+    expect(res.json).toHaveBeenCalledWith({ message: 'Topic already exists', topic: existing });
   });
 
   test('createTopic rejects unauthenticated requests with 401', async () => {

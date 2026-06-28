@@ -35,7 +35,7 @@
 # - Dev moves story to 'review', then runs code-review (fresh context, different LLM recommended)
 
 generated: 2026-06-07
-last_updated: 2026-06-26  # 7-12 review + 7-13 hard email gate
+last_updated: 2026-06-28  # 7-12 + 7-13 code review → done ; Epic 7 clos
 project: musician-tools
 project_key: NOKEY
 tracking_system: file-system
@@ -90,7 +90,7 @@ development_status:
 
   # Epic 7: Compte utilisateur + durcissement sécurité app-wide (HORS PRD ; cadré 2026-06-21 — brief + addendum + architecture + 12 stories)
   # Ordre/dépendances : 7-1 -> 7-2 -> 7-3 ∥ 7-4 -> 7-5 -> 7-6 -> 7-7 -> 7-8 -> 7-9 (crée requireVerified) -> {7-10 ∥ 7-11} ; 7-12 indépendante (après 7-2)
-  epic-7: in-progress
+  epic-7: done
   7-1-durcir-socle-auth-secret-jwt-trust-proxy: done
   7-2-migration-users-identite-discord-backfill: done        # risque max : migration prod sans staging
   7-3-csrf-token-sur-mutations: done                           # prérequis transverse des flux suivants
@@ -102,8 +102,8 @@ development_status:
   7-9-verification-email-inscription-soft-gate: done            # crée requireVerified (consommé par 7-11)
   7-10-reset-mot-de-passe-par-email: done
   7-11-change-email-verify-before-switch: done                  # dépend de requireVerified (7-9)
-  7-12-unicite-topic-insensible-casse: review                   # citext topics (repli deferred-work, gap AC10 de 8-2)
-  7-13-hard-email-verification-gate: review                     # course-correct 2026-06-26 : plus de connexion sans email vérifié (remplace le soft gate 7-9 ; résout le résidu anti-énum 7-7)
+  7-12-unicite-topic-insensible-casse: done                     # citext topics ; code review 2026-06-28 OK — fix 409 renvoie le topic existant (branche fix/post-review-7-12-7-13, à merger)
+  7-13-hard-email-verification-gate: done                       # course-correct 2026-06-26 ; code review 2026-06-28 OK — gate app-wide via session.emailVerified (authsess) + null-guard verifyEmail + authService body-read once (branche fix/post-review-7-12-7-13, à merger)
   epic-7-retrospective: optional
 
   # Epic 8: Refonte temps de session — « tout est entrée » (Correct Course 2026-06-18 ; PRD amendé FR13/FR15/FR24 + FR25/FR26)

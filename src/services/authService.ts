@@ -84,17 +84,16 @@ export const authService = {
       credentials: 'include',
       body: JSON.stringify({ login, password }),
     });
-    // Story 7.13: correct credentials on an unverified account → 403 with an
-    // explicit code. Not a failure: surface it so the UI offers a resend.
-    if (response.status === 403) {
-      const body = await response.json().catch(() => ({}));
-      if (body && body.code === 'email_not_verified') {
+    if (!response.ok) {
+      // Read the body once: a second response.json() on the same response throws
+      // "body stream already read". Story 7.13: correct credentials on an
+      // unverified account → 403 with an explicit code — not a failure, surface
+      // it so the UI offers a resend; any other error throws.
+      const body = await response.json().catch(() => ({} as { code?: string; message?: string }));
+      if (response.status === 403 && body.code === 'email_not_verified') {
         return { auth: false, needsVerification: true };
       }
-    }
-    if (!response.ok) {
-      const error = await response.json();
-      throw new Error(error.message || 'Login failed');
+      throw new Error(body.message || 'Login failed');
     }
     return response.json();
   },
