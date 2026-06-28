@@ -6,6 +6,11 @@ project adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+## [1.6.1] — 2026-06-28
+
+### Fixed
+- **Keyboard navigation in the song form's pickers** — the Genres, Languages and "Add to playlists" dropdowns are now fully keyboard-navigable: arrow keys move the highlight, Enter selects the highlighted option (instead of submitting the form), the list scrolls to keep it in view, and Tab moves cleanly on to the next field. Mouse hover and keyboard now share a single highlight, and the pickers are properly announced to screen readers.
+
 ## [1.6.0] — 2026-06-26
 
 ### Added
