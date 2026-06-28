@@ -150,3 +150,67 @@ test('hides album suggestions when exact single match (parity with artist)', () 
   const dropdowns = screen.queryAllByRole('button', { name: 'Revolver' });
   expect(dropdowns.length).toBe(0);
 });
+
+// Keyboard navigation on the multi-select search comboboxes (Genres, Languages).
+// Regression: typing then ArrowDown highlighted nothing and Enter submitted the
+// form instead of selecting a suggestion.
+function renderWithCallbacks() {
+  const onToggleGenre = jest.fn();
+  const onToggleLanguage = jest.fn();
+  const onSubmit = jest.fn((e: React.FormEvent) => e.preventDefault());
+  render(
+    <SongForm
+      mode="add"
+      form={baseForm}
+      loading={false}
+      onChange={jest.fn()}
+      onSetDurationSeconds={jest.fn()}
+      onToggleGenre={onToggleGenre}
+      onToggleLanguage={onToggleLanguage}
+      onChangeInstruments={jest.fn()}
+      onSetTechniques={jest.fn()}
+      onSetMyInstrumentUid={jest.fn()}
+      onToggleTechnique={jest.fn()}
+      onSubmit={onSubmit}
+      onCancel={jest.fn()}
+      suggestedAlbums={[]}
+      suggestedArtists={[]}
+    />,
+  );
+  return { onToggleGenre, onToggleLanguage, onSubmit };
+}
+
+test('genre combobox: ArrowDown highlights then Enter selects it, without submitting the form', () => {
+  const { onToggleGenre, onSubmit } = renderWithCallbacks();
+  fireEvent.click(screen.getByText('Details'));
+  const input = screen.getByPlaceholderText('Search or select a genre');
+  fireEvent.focus(input);
+  fireEvent.change(input, { target: { value: 'blues' } });
+  fireEvent.keyDown(input, { key: 'ArrowDown' });
+  fireEvent.keyDown(input, { key: 'Enter' });
+  expect(onToggleGenre).toHaveBeenCalledWith('Blues');
+  expect(onSubmit).not.toHaveBeenCalled();
+});
+
+test('genre combobox: Enter with no highlight neither selects nor submits', () => {
+  const { onToggleGenre, onSubmit } = renderWithCallbacks();
+  fireEvent.click(screen.getByText('Details'));
+  const input = screen.getByPlaceholderText('Search or select a genre');
+  fireEvent.focus(input);
+  fireEvent.change(input, { target: { value: 'blues' } });
+  fireEvent.keyDown(input, { key: 'Enter' });
+  expect(onToggleGenre).not.toHaveBeenCalled();
+  expect(onSubmit).not.toHaveBeenCalled();
+});
+
+test('language combobox: ArrowDown + Enter selects the highlighted language (parity with genre)', () => {
+  const { onToggleLanguage, onSubmit } = renderWithCallbacks();
+  fireEvent.click(screen.getByText('Details'));
+  const input = screen.getByPlaceholderText('Search or select a language');
+  fireEvent.focus(input);
+  fireEvent.change(input, { target: { value: 'french' } });
+  fireEvent.keyDown(input, { key: 'ArrowDown' });
+  fireEvent.keyDown(input, { key: 'Enter' });
+  expect(onToggleLanguage).toHaveBeenCalledWith('French');
+  expect(onSubmit).not.toHaveBeenCalled();
+});

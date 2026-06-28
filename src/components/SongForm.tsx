@@ -47,6 +47,34 @@ type SongFormProps = {
 const keyOptions = ['C','C#','Db','D','Eb','E','F','F#','Gb','G','Ab','A','Bb','B'];
 const timeSignatureOptions = ['2/4', '3/4', '4/4', '5/4', '6/8', '7/8', '9/8', '12/8', '5/8', '7/4', '3/8', 'Other'];
 const modeOptions = ['Major', 'Minor', 'Dorian', 'Phrygian', 'Lydian', 'Mixolydian', 'Aeolian', 'Locrian', 'Other'];
+
+// Shared keyboard navigation for the multi-select search comboboxes (Genres,
+// Languages): arrows move the highlight, Enter selects the highlighted option
+// WITHOUT submitting the form, Escape closes. Mirrors the single-select
+// artist/album inputs, whose Enter never reached the form's submit.
+function handleComboKeyDown<T>(
+  e: React.KeyboardEvent<HTMLInputElement>,
+  options: T[],
+  index: number,
+  setIndex: React.Dispatch<React.SetStateAction<number>>,
+  setOpen: React.Dispatch<React.SetStateAction<boolean>>,
+  onSelect: (option: T) => void,
+): void {
+  if (e.key === 'ArrowDown') {
+    e.preventDefault();
+    setOpen(true);
+    setIndex(prev => (prev < options.length - 1 ? prev + 1 : prev));
+  } else if (e.key === 'ArrowUp') {
+    e.preventDefault();
+    setIndex(prev => (prev > 0 ? prev - 1 : -1));
+  } else if (e.key === 'Enter') {
+    e.preventDefault(); // never let Enter submit the form while picking
+    if (index >= 0 && index < options.length) onSelect(options[index]);
+  } else if (e.key === 'Escape') {
+    setOpen(false);
+    setIndex(-1);
+  }
+}
 const genreOptions = [
   'Acoustic',
   'Alternative',
@@ -135,8 +163,10 @@ export function SongForm(props: SongFormProps) {
   }, [form.durationSeconds]);
   const [genreSearchOpen, setGenreSearchOpen] = useState(false);
   const [genreSearchQuery, setGenreSearchQuery] = useState('');
+  const [selectedGenreIndex, setSelectedGenreIndex] = useState(-1);
   const [languageSearchOpen, setLanguageSearchOpen] = useState(false);
   const [languageSearchQuery, setLanguageSearchQuery] = useState('');
+  const [selectedLanguageIndex, setSelectedLanguageIndex] = useState(-1);
   const [albumSearchOpen, setAlbumSearchOpen] = useState(false);
   const [selectedAlbumIndex, setSelectedAlbumIndex] = useState(-1);
   const [artistSearchOpen, setArtistSearchOpen] = useState(false);
@@ -162,6 +192,14 @@ export function SongForm(props: SongFormProps) {
       onSetTechniques(nextTechniques);
     }
   }, [currentInstruments, currentTechniques, onSetTechniques]);
+
+  // Lifted so the keyboard handler and the rendered dropdown index the SAME list.
+  const filteredGenreOptions = genreOptions.filter(
+    g => !currentGenres.includes(g) && g.toLowerCase().includes(genreSearchQuery.toLowerCase()),
+  );
+  const filteredLanguageOptions = languageOptions.filter(
+    language => !currentLanguages.includes(language) && language.toLowerCase().includes(languageSearchQuery.toLowerCase()),
+  );
 
   return (
     <form onSubmit={onSubmit} className="space-y-4">
@@ -377,8 +415,12 @@ export function SongForm(props: SongFormProps) {
                   type="text"
                   placeholder="Search or select a genre"
                   value={genreSearchQuery}
-                  onChange={(e) => setGenreSearchQuery(e.target.value)}
+                  onChange={(e) => { setGenreSearchQuery(e.target.value); setSelectedGenreIndex(-1); }}
                   onFocus={() => setGenreSearchOpen(true)}
+                  onKeyDown={(e) => handleComboKeyDown(
+                    e, filteredGenreOptions, selectedGenreIndex, setSelectedGenreIndex, setGenreSearchOpen,
+                    (genre) => { onToggleGenre(genre); setGenreSearchQuery(''); setGenreSearchOpen(false); setSelectedGenreIndex(-1); },
+                  )}
                   className="mt-1 block w-full rounded-md border border-gray-300 dark:border-gray-600 p-2 focus:outline-none focus:ring-2 focus:ring-brand-500 dark:bg-gray-700 dark:text-gray-100"
                   disabled={loading}
                 />
@@ -397,9 +439,7 @@ export function SongForm(props: SongFormProps) {
                       tabIndex={-1}
                     />
                     <div className="absolute top-full left-0 right-0 z-50 mt-1 rounded-md border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 shadow-lg max-h-32 overflow-y-auto">
-                      {genreOptions
-                        .filter(g => !currentGenres.includes(g) && g.toLowerCase().includes(genreSearchQuery.toLowerCase()))
-                        .map(genre => (
+                      {filteredGenreOptions.map((genre, index) => (
                           <button
                             key={genre}
                             type="button"
@@ -407,14 +447,19 @@ export function SongForm(props: SongFormProps) {
                               onToggleGenre(genre);
                               setGenreSearchQuery('');
                               setGenreSearchOpen(false);
+                              setSelectedGenreIndex(-1);
                             }}
-                            className="w-full text-left px-3 py-2 hover:bg-gray-100 dark:hover:bg-gray-600 text-gray-700 dark:text-gray-100"
+                            className={`w-full text-left px-3 py-2 text-gray-700 dark:text-gray-100 ${
+                              index === selectedGenreIndex
+                                ? 'bg-brand-100 dark:bg-brand-900/40'
+                                : 'hover:bg-gray-100 dark:hover:bg-gray-600'
+                            }`}
                             disabled={loading}
                           >
                             {genre}
                           </button>
                         ))}
-                      {genreOptions.filter(g => !currentGenres.includes(g) && g.toLowerCase().includes(genreSearchQuery.toLowerCase())).length === 0 && (
+                      {filteredGenreOptions.length === 0 && (
                         <div className="px-3 py-2 text-sm text-gray-500 dark:text-gray-400">No genres found</div>
                       )}
                     </div>
@@ -540,8 +585,12 @@ export function SongForm(props: SongFormProps) {
                   type="text"
                   placeholder="Search or select a language"
                   value={languageSearchQuery}
-                  onChange={(e) => setLanguageSearchQuery(e.target.value)}
+                  onChange={(e) => { setLanguageSearchQuery(e.target.value); setSelectedLanguageIndex(-1); }}
                   onFocus={() => setLanguageSearchOpen(true)}
+                  onKeyDown={(e) => handleComboKeyDown(
+                    e, filteredLanguageOptions, selectedLanguageIndex, setSelectedLanguageIndex, setLanguageSearchOpen,
+                    (language) => { onToggleLanguage(language); setLanguageSearchQuery(''); setLanguageSearchOpen(false); setSelectedLanguageIndex(-1); },
+                  )}
                   className="mt-1 block w-full rounded-md border border-gray-300 dark:border-gray-600 p-2 focus:outline-none focus:ring-2 focus:ring-brand-500 dark:bg-gray-700 dark:text-gray-100"
                   disabled={loading}
                 />
@@ -560,9 +609,7 @@ export function SongForm(props: SongFormProps) {
                       tabIndex={-1}
                     />
                     <div className="absolute top-full left-0 right-0 z-50 mt-1 rounded-md border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 shadow-lg max-h-32 overflow-y-auto">
-                      {languageOptions
-                        .filter(language => !currentLanguages.includes(language) && language.toLowerCase().includes(languageSearchQuery.toLowerCase()))
-                        .map(language => (
+                      {filteredLanguageOptions.map((language, index) => (
                           <button
                             key={language}
                             type="button"
@@ -570,14 +617,19 @@ export function SongForm(props: SongFormProps) {
                               onToggleLanguage(language);
                               setLanguageSearchQuery('');
                               setLanguageSearchOpen(false);
+                              setSelectedLanguageIndex(-1);
                             }}
-                            className="w-full text-left px-3 py-2 hover:bg-gray-100 dark:hover:bg-gray-600 text-gray-700 dark:text-gray-100"
+                            className={`w-full text-left px-3 py-2 text-gray-700 dark:text-gray-100 ${
+                              index === selectedLanguageIndex
+                                ? 'bg-brand-100 dark:bg-brand-900/40'
+                                : 'hover:bg-gray-100 dark:hover:bg-gray-600'
+                            }`}
                             disabled={loading}
                           >
                             {language}
                           </button>
                         ))}
-                      {languageOptions.filter(language => !currentLanguages.includes(language) && language.toLowerCase().includes(languageSearchQuery.toLowerCase())).length === 0 && (
+                      {filteredLanguageOptions.length === 0 && (
                         <div className="px-3 py-2 text-sm text-gray-500 dark:text-gray-400">No languages found</div>
                       )}
                     </div>
