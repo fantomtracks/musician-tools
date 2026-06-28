@@ -1771,6 +1771,7 @@ function Songs() {
                         value={playlistSearchQuery}
                         onChange={(e) => { setPlaylistSearchQuery(e.target.value); setSelectedPlaylistIndex(-1); }}
                         onFocus={() => setPlaylistSearchOpen(true)}
+                        onBlur={() => setTimeout(() => setPlaylistSearchOpen(false), 200)}
                         onKeyDown={(e) => handleComboKeyDown(
                           e, filteredPlaylists, selectedPlaylistIndex, setSelectedPlaylistIndex, setPlaylistSearchOpen,
                           (playlist) => { handleTogglePlaylist(playlist.uid); setPlaylistSearchQuery(''); setPlaylistSearchOpen(false); setSelectedPlaylistIndex(-1); },
@@ -1779,15 +1780,6 @@ function Songs() {
                         {...comboboxInputAria('song-playlists-list', playlistSearchOpen, selectedPlaylistIndex)}
                       />
                       {playlistSearchOpen && (
-                        <>
-                          <button
-                            type="button"
-                            className="fixed inset-0 z-10"
-                            onClick={() => setPlaylistSearchOpen(false)}
-                            onKeyDown={(e) => { if (e.key === 'Escape' || e.key === 'Enter') setPlaylistSearchOpen(false); }}
-                            aria-label="Close playlist dropdown"
-                            tabIndex={-1}
-                          />
                           <div ref={playlistListRef} id="song-playlists-list" role="listbox" className="absolute top-full left-0 right-0 z-50 mt-1 rounded-md border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 shadow-lg max-h-32 overflow-y-auto">
                             {filteredPlaylists.map((playlist, index) => (
                                 <button
@@ -1812,7 +1804,6 @@ function Songs() {
                               <div className="px-3 py-2 text-sm text-gray-500 dark:text-gray-400">No playlists found</div>
                             )}
                           </div>
-                        </>
                       )}
                     </div>
                     {selectedPlaylistUids.size > 0 && (

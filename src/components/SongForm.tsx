@@ -401,6 +401,7 @@ export function SongForm(props: SongFormProps) {
                   value={genreSearchQuery}
                   onChange={(e) => { setGenreSearchQuery(e.target.value); setSelectedGenreIndex(-1); }}
                   onFocus={() => setGenreSearchOpen(true)}
+                  onBlur={() => setTimeout(() => setGenreSearchOpen(false), 200)}
                   onKeyDown={(e) => handleComboKeyDown(
                     e, filteredGenreOptions, selectedGenreIndex, setSelectedGenreIndex, setGenreSearchOpen,
                     (genre) => { onToggleGenre(genre); setGenreSearchQuery(''); setGenreSearchOpen(false); setSelectedGenreIndex(-1); },
@@ -410,19 +411,6 @@ export function SongForm(props: SongFormProps) {
                   {...comboboxInputAria('song-genres-list', genreSearchOpen, selectedGenreIndex)}
                 />
                 {genreSearchOpen && (
-                  <>
-                    <button
-                      type="button"
-                      className="fixed inset-0 z-10"
-                      onClick={() => setGenreSearchOpen(false)}
-                      onKeyDown={(e) => {
-                        if (e.key === 'Escape' || e.key === 'Enter') {
-                          setGenreSearchOpen(false);
-                        }
-                      }}
-                      aria-label="Close genre dropdown"
-                      tabIndex={-1}
-                    />
                     <div ref={genreListRef} id="song-genres-list" role="listbox" className="absolute top-full left-0 right-0 z-50 mt-1 rounded-md border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 shadow-lg max-h-32 overflow-y-auto">
                       {filteredGenreOptions.map((genre, index) => (
                           <button
@@ -448,7 +436,6 @@ export function SongForm(props: SongFormProps) {
                         <div className="px-3 py-2 text-sm text-gray-500 dark:text-gray-400">No genres found</div>
                       )}
                     </div>
-                  </>
                 )}
               </div>
               {currentGenres.length > 0 && (
@@ -573,6 +560,7 @@ export function SongForm(props: SongFormProps) {
                   value={languageSearchQuery}
                   onChange={(e) => { setLanguageSearchQuery(e.target.value); setSelectedLanguageIndex(-1); }}
                   onFocus={() => setLanguageSearchOpen(true)}
+                  onBlur={() => setTimeout(() => setLanguageSearchOpen(false), 200)}
                   onKeyDown={(e) => handleComboKeyDown(
                     e, filteredLanguageOptions, selectedLanguageIndex, setSelectedLanguageIndex, setLanguageSearchOpen,
                     (language) => { onToggleLanguage(language); setLanguageSearchQuery(''); setLanguageSearchOpen(false); setSelectedLanguageIndex(-1); },
@@ -582,19 +570,6 @@ export function SongForm(props: SongFormProps) {
                   {...comboboxInputAria('song-languages-list', languageSearchOpen, selectedLanguageIndex)}
                 />
                 {languageSearchOpen && (
-                  <>
-                    <button
-                      type="button"
-                      className="fixed inset-0 z-10"
-                      onClick={() => setLanguageSearchOpen(false)}
-                      onKeyDown={(e) => {
-                        if (e.key === 'Escape' || e.key === 'Enter') {
-                          setLanguageSearchOpen(false);
-                        }
-                      }}
-                      aria-label="Close language dropdown"
-                      tabIndex={-1}
-                    />
                     <div ref={languageListRef} id="song-languages-list" role="listbox" className="absolute top-full left-0 right-0 z-50 mt-1 rounded-md border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 shadow-lg max-h-32 overflow-y-auto">
                       {filteredLanguageOptions.map((language, index) => (
                           <button
@@ -620,7 +595,6 @@ export function SongForm(props: SongFormProps) {
                         <div className="px-3 py-2 text-sm text-gray-500 dark:text-gray-400">No languages found</div>
                       )}
                     </div>
-                  </>
                 )}
               </div>
               {currentLanguages.length > 0 && (

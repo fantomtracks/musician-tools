@@ -16,12 +16,15 @@ export function comboboxInputAria(listId: string, isOpen: boolean, activeIndex: 
 // Spread onto each option element so the active descendant the input points at
 // actually exists and is marked selected. `activeIndex` drives the highlight;
 // pair with `onMouseEnter={() => setActiveIndex(index)}` so mouse and keyboard
-// share ONE active state (and one visual style).
+// share ONE active state (and one visual style). `tabIndex: -1` keeps the
+// options OUT of the tab order — Tab leaves the combobox instead of stepping
+// into the list; navigation stays on the input via arrows + aria-activedescendant.
 export function comboboxOptionAria(listId: string, index: number, activeIndex: number) {
   return {
     role: 'option' as const,
     id: `${listId}-opt-${index}`,
     'aria-selected': index === activeIndex,
+    tabIndex: -1,
   };
 }
 

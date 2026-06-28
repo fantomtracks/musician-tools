@@ -4,6 +4,7 @@ import {
   handleComboKeyDown,
   useScrollHighlightIntoView,
   useScrollAriaSelectedIntoView,
+  comboboxOptionAria,
 } from '../utils/comboboxKeyboard';
 
 function keyEvent(key: string) {
@@ -59,6 +60,21 @@ describe('handleComboKeyDown', () => {
     handleComboKeyDown(keyEvent('Escape'), options, 1, setIndex, setOpen, onSelect);
     expect(setOpen).toHaveBeenCalledWith(false);
     expect(setIndex).toHaveBeenCalledWith(-1);
+  });
+});
+
+describe('comboboxOptionAria', () => {
+  test('keeps options out of the tab order (Tab leaves the combobox, not into the list)', () => {
+    expect(comboboxOptionAria('list', 2, 2).tabIndex).toBe(-1);
+  });
+
+  test('wires role/id/aria-selected for the active descendant pattern', () => {
+    expect(comboboxOptionAria('list', 2, 2)).toMatchObject({
+      role: 'option',
+      id: 'list-opt-2',
+      'aria-selected': true,
+    });
+    expect(comboboxOptionAria('list', 0, 2)['aria-selected']).toBe(false);
   });
 });
 

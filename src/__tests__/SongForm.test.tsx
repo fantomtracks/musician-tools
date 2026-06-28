@@ -246,6 +246,9 @@ test('genre combobox: ARIA wiring + hovering an option makes it the single activ
   expect(before.length).toBeGreaterThan(1);
 
   // Mouse and keyboard share ONE active state: hovering sets the active descendant.
+  // Options are not tab stops — Tab leaves the combobox instead of entering the list.
+  expect(before[0]).toHaveAttribute('tabindex', '-1');
+
   fireEvent.mouseEnter(before[1]);
   const options = screen.getAllByRole('option');
   expect(options[1]).toHaveAttribute('aria-selected', 'true');
