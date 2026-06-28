@@ -1,6 +1,6 @@
 # Deferred Work
 
-> **Rituel (acté rétro Epic 8, 2026-06-21)** : ce fichier passe en revue **avant le démarrage de chaque nouvelle epic**. Chaque item est tranché — _fix maintenant_ / _story planifiée_ / _gardé-avec-raison_ / _tué_. Il ne doit jamais redevenir un cimetière. Dernière passe : **2026-06-26** (clôture Epic 7).
+> **Rituel (acté rétro Epic 8, 2026-06-21)** : ce fichier passe en revue **avant le démarrage de chaque nouvelle epic**. Chaque item est tranché — _fix maintenant_ / _story planifiée_ / _gardé-avec-raison_ / _tué_. Il ne doit jamais redevenir un cimetière. Dernière passe : **2026-06-28** (post-rétro Epic 7).
 
 ---
 
@@ -17,7 +17,7 @@ _Les 4 stories UI/confort (filtres Songlist, refacto SessionHistoryCard, chanson
 ### 🔐 Lot sécu → à fusionner dans le brief Epic 7
 > ✅ **RÉSOLU — Epic 7 shippée (mergée local 2026-06-26).** Détail des résolutions dans le journal « Soldé » en bas. Vérifié dans le code le 2026-06-26.
 
-### 🔐 Durcissement session — ✅ DEV FAIT le 2026-06-26 (branche `feat/session-hardening`, à merger)
+### 🔐 Durcissement session — ✅ MERGÉ EN PROD (v1.6.0, merge `0d758eb`)
 > Issu de la review 7.3, élargi par 7.13. Implémenté : `sessionService.regenerateSession()` (promisifie `req.session.regenerate`) appelé dans `loginUser` ET `verifyEmail` avant de poser `loggedIn`/`user` → l'ID de session pré-auth + son token CSRF sont jetés. Côté front, `AuthContext` vide le cache CSRF (`clearCsrfToken`) au succès login + verify (`applyAuthenticatedUser`) → 1ʳᵉ mutation avec un token frais, pas de 403. Tests : usercontroller 25 ✓ (regenerate asserté), front 267 ✓, smoke-test login live OK. [usercontroller.js, sessionService.js, contexts/AuthContext.tsx]
 
 ### 🧹 Lot ménage dette technique (story planifiée — groupée 2026-06-26)
@@ -31,8 +31,8 @@ _Les 4 stories UI/confort (filtres Songlist, refacto SessionHistoryCard, chanson
 ### 🎵 Créer une playlist à la volée depuis l'édition d'une chanson (story planifiée — 2026-06-26)
 - Depuis la fiche d'édition d'une chanson, pouvoir **créer une nouvelle playlist et y ajouter la chanson** sans quitter l'écran (taper un nom inexistant → « Créer la playlist … » → créée + chanson ajoutée). Même pattern UX que le « créer un sujet à la volée » du sélecteur d'entrée (8.2). À cadrer : emplacement dans `SongForm` (une section playlists ?), création + ajout en une action, lien `playlist_songs` (FK 5.7), feedback. [Songs.tsx/SongForm, MyPlaylistsPage, playlistcontroller]
 
-### 🐛 Navigation clavier cassée dans les comboboxes artiste/album/genre (bug — noté 2026-06-27)
-- Dans `SongForm`, taper p.ex. « fun » dans Genre puis **flèche bas** ne surligne aucune suggestion et **Entrée soumet le formulaire** (retour à la liste) au lieu de sélectionner « funk ». Très frustrant. La gestion clavier (ArrowDown/Up + highlight + Entrée=sélection + `preventDefault`) existe sur **certains** champs (~`SongForm.tsx:247`, `:466`) mais **pas** artiste/album/genre → Entrée retombe sur le submit. Fix = uniformiser le pattern combobox (index surligné + Entrée sélectionne + preventDefault) sur tous les champs à suggestions. [src/components/SongForm.tsx]
+### 🐛 Navigation clavier comboboxes — ✅ RÉSOLU (2026-06-28, branche `fix/songform-combobox-keyboard`, à merger)
+> Diagnostic affiné : les champs réellement cassés étaient **Genre, Languages et le Playlist picker** (aucun `onKeyDown` → flèches mortes + Entrée soumettait le form) ; artiste/album avaient déjà la nav clavier. Au-delà du bug initial, mise à niveau **des 6 comboboxes** sur un util partagé : nav clavier (flèches + Entrée sélectionne sans soumettre + Échap), scroll-into-view de l'option active, **état actif unifié souris/clavier** (un seul surlignage), **ARIA combobox éditable** (`aria-activedescendant`/`role`/`aria-selected`), options **hors tab-order** (`tabIndex=-1`) et **Tab ferme la liste net**. 286 tests front verts. [src/utils/comboboxKeyboard.ts, SongForm.tsx, Songs.tsx, MySessionsPage.tsx]
 
 ## Deferred from: code review of 7-12 + 7-13 (2026-06-28)
 
@@ -50,6 +50,7 @@ _Les 4 stories UI/confort (filtres Songlist, refacto SessionHistoryCard, chanson
 ## 💭 À brainstormer
 
 - **Auto-save de la fiche chanson** : sauvegarde auto au blur ou en debounce ~3 s, au lieu du Save manuel. Rendrait la garde « modifs non enregistrées » du Mark as Played inutile. **Résout aussi** la détection `isDirty` fragile (`Songs.tsx` : `JSON.stringify(form)` vs snapshot, qu'un effet de `SongForm` peut fausser). À cadrer : feedback visuel (« Saved »), erreurs de validation/doublon en cours de frappe, coût réseau, conflit avec le bouton Save explicite.
+- **A5 (rétro Epic 7) — signal UX du rate-limit légitime** : un user légitime rate-limité (login, resend…) reçoit un `429 detail-free` volontaire (choix anti-oracle 7.4) → l'UI ressemble à une erreur normale, c'est confus. À cadrer : peut-on donner un indice minimal (« trop de tentatives, réessaie plus tard ») **après authentification réussie** ou sur un canal qui ne crée pas d'oracle d'énumération, sans affaiblir l'anti-bruteforce ?
 
 ---
 
