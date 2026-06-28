@@ -18,8 +18,10 @@ const EXPECTED_INDEXES = [
 // absent, so the boot can log it and exit. Pure + injectable for testing.
 async function assertFunctionalIndexes(sequelize) {
   const names = EXPECTED_INDEXES.map(e => e.index);
+  // Scope to the app's own schema: pg_indexes.indexname is unique per schema, not
+  // globally, so a same-named index in another schema must not satisfy the check.
   const rows = await sequelize.query(
-    'SELECT indexname FROM pg_indexes WHERE indexname IN (:names)',
+    'SELECT indexname FROM pg_indexes WHERE schemaname = current_schema() AND indexname IN (:names)',
     { type: 'SELECT', replacements: { names } }
   );
   const present = new Set(rows.map(r => r.indexname));

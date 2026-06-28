@@ -6,7 +6,7 @@ arch_decision: "Migrations = source unique du schéma + garde fail-fast au boot 
 
 # Story 11.1: Parité unicité dev/CI — migrations source unique + garde fail-fast
 
-Status: review
+Status: done
 
 > ⚠️ **Dépendance de séquencement :** la garde référence `playlists_user_uid_name_ci`, créé par la **migration de la story 10.1** (Epic 10). Cette migration n'est **pas encore sur `main`** (branche `feat/epic-10-confort-playlists` non mergée à la création de cette story). **Démarrer le dev de 11.1 seulement après le merge d'Epic 10 sur `main`**, ou brancher `feat/epic-11-dette-technique` **depuis** la branche Epic 10 — sinon la garde échouerait sur une base issue de `main` (l'index playlists n'existe pas encore).
 
@@ -119,6 +119,21 @@ Issu de la rétro Epic 10 (dette « parité-sync » promue en story planifiée).
 - [Source: _bmad-output/implementation-artifacts/deferred-work.md] — entrée « Lot parité-sync » (provenance)
 - [Source: _bmad-output/project-context.md] — conventions backend, tests mockés, migrations idempotentes, garde-fous workflow
 
+## Review Findings
+
+_Code review adversariale 3 couches (Blind / Edge / Auditor) — 2026-06-28. Les 8 AC satisfaites. 2 patches, 1 report, 5 écartés._
+
+- [x] [Review][Patch→Fixed] **Med — `app.listen` n'était pas gardé par la garde (la promesse « échouer avant de servir » d'AC1 n'était pas tenue)** [backend/server.js:175] — l'IIFE de boot (sync+garde) est fire-and-forget, `app.listen` au top-level → le serveur écoutait pendant/avant la garde ; sur une base sans index, des écritures sans unicité pouvaient passer **avant** le `exit(1)`. Convergent Blind+Edge. (Structure pré-existante, mais la garde 11.1 ne livrait pas son intention.) **Corrigé** : `app.listen` déplacé **dans** l'IIFE, **après** `assertFunctionalIndexes` (le middleware est câblé en synchrone avant la reprise de l'IIFE) → on n'écoute qu'après schéma vérifié.
+- [x] [Review][Patch→Fixed] **Low — requête `pg_indexes` non qualifiée par schéma (false-pass possible si même nom d'index dans un autre schéma)** [backend/utils/assertSchema.js:22] — **Corrigé** : ajout `AND schemaname = current_schema()`. Re-validé sur la vraie base (garde toujours PASS sur base migrée).
+- [x] [Review][Defer] **CMD dev en shell-form → SIGTERM non transmis à nodemon (pas d'arrêt gracieux dev)** [backend/Dockerfile:14] — **pré-existant** (l'ancien `CMD npm run dev` était déjà shell-form ; 11.1 ne régresse pas) ; dev-only. — deferred, pré-existant dev-only.
+
+### Findings écartés (bruit / pré-existant / hors-scope, non persistés)
+- **`process.exit` peut tronquer le log winston** — pattern pré-existant (le `catch` faisait déjà `logger.error`+`exit`) ; Low. Écarté (pré-existant).
+- **Message dit « run `make migrate` » alors que le CMD dev fait `npx sequelize-cli`** — `make migrate` est la commande dev documentée. Écarté (cosmétique).
+- **`EXPECTED_INDEXES` vide → `IN ()` syntax error** — non atteint (2 entrées). Écarté (latent).
+- **Pas de garde auto contre le drift de nom d'index** — noms hardcodés, cross-checkés manuellement (règle pré-merge de la story) ; les 2 noms matchent les migrations 7.12/10.1. Écarté (acceptable).
+- **Checkbox Task 4 dit « Makefile » alors que le fix est dans le Dockerfile** — déviation déjà documentée dans le Dev Agent Record. Écarté (doc, assumé).
+
 ## Dev Agent Record
 
 ### Agent Model Used
@@ -144,7 +159,8 @@ La story prévoyait « `make start`/`up` dépendent de `migrate` ». **Écarté*
 ### File List
 - `backend/utils/assertSchema.js` (NEW — garde `assertFunctionalIndexes` + `EXPECTED_INDEXES`)
 - `backend/__tests__/assertSchema.test.js` (NEW — 3 tests)
-- `backend/server.js` (EDIT — require util + appel garde après sync + commentaire boot corrigé)
+- `backend/server.js` (EDIT — require util + garde après sync + commentaire boot corrigé ; review: `app.listen` déplacé dans l'IIFE après la garde)
+- `backend/utils/assertSchema.js` (review: requête `pg_indexes` qualifiée par `schemaname = current_schema()`)
 - `backend/models/topic.js` (EDIT — retrait du hook `afterSync` ; commentaire index → garde)
 - `backend/Dockerfile` (EDIT — CMD dev `db:migrate && npm run dev`, migrations avant l'app)
 - `_bmad-output/implementation-artifacts/sprint-status.yaml` (EDIT — statut 11-1 → review)
@@ -153,4 +169,5 @@ La story prévoyait « `make start`/`up` dépendent de `migrate` ». **Écarté*
 
 | Date       | Version | Description                                                                 |
 |------------|---------|-----------------------------------------------------------------------------|
+| 2026-06-28 | 0.2     | Code review 3 couches : 2 patches — (1) Med `app.listen` gardé derrière la garde (livre la promesse « échouer avant de servir » d'AC1) ; (2) Low requête `pg_indexes` qualifiée par `schemaname = current_schema()`. Re-validé sur la vraie base. 1 report (SIGTERM shell-form, pré-existant dev-only). Back tests verts. Statut → done. |
 | 2026-06-28 | 0.1     | Story 11.1 — migrations source unique + garde fail-fast au boot (`assertFunctionalIndexes`, branchée après `sync` dans `server.js`). **Retrait** du hook `afterSync` topic (SQL dupliquée 7.12) ; **aucun** hook playlists. CMD conteneur dev = `db:migrate && npm run dev` (ordonnancement prod-consistant, supprime le chicken-egg). Garde **validée sur la vraie base** (pass/fail-nommé/restore) + boot live OK. Back 244 ✓ (+3), lint clean. Net dette −. Statut → review. |

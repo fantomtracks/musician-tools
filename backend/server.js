@@ -38,6 +38,13 @@ const SESSION_SECRET = process.env.SESSION_SECRET;
     await sequelize.sync({ alter: false });
     await assertFunctionalIndexes(sequelize);
     logger.log('info', 'Database schema verified');
+    // Only start serving once the schema is verified — the guard's promise is to
+    // fail fast BEFORE serving a schema without per-user uniqueness. The routes/
+    // middleware below are wired synchronously during module load (before this
+    // async block resumes), so `app` is fully built by the time we listen.
+    app.listen(PORT, () => {
+      logger.log('info', `Listening on ${PORT}, NODE_ENV : ${process.env.NODE_ENV}`);
+    });
   } catch (error) {
     logger.error('Database schema check failed:', error);
     process.exit(1);
@@ -170,10 +177,6 @@ app.use(function(err, req, res, next) {
     status: err.status,
     message: err.message
   });
-});
-
-app.listen(PORT, () => {
-  logger.log('info', `Listening on ${PORT}, NODE_ENV : ${process.env.NODE_ENV}`);
 });
 
 module.exports = app;

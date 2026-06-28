@@ -52,6 +52,12 @@ _Les 4 stories UI/confort (filtres Songlist, refacto SessionHistoryCard, chanson
 - **10-2 — Pas de garde anti-double-soumission sur `handleCreatePlaylist`** : double Entrée/clic rapide sur « Create playlist » lance 2 `createPlaylist` concurrents ; le 2ᵉ retombe en 409 et sélectionne le 1ᵉ (inoffensif vu l'unicité serveur 10.1, mais un flicker possible). Durcir avec un flag in-flight si ça se voit. [`src/pages/Songs.tsx` handleCreatePlaylist]
 - **10-2 — Empty-state « No playlists found » trompeur** : taper le nom exact d'une playlist déjà sélectionnée cache l'option Create (correct) mais `filteredPlaylists` (exclut les sélectionnées) est vide → libellé « No playlists found » alors qu'elle existe et est cochée. Cosmétique. [`src/pages/Songs.tsx` picker empty-state]
 
+## Deferred from: code review of story-11.1 (2026-06-28)
+
+> Review 3 couches. 2 patches appliqués (garde gating `app.listen` ; requête `pg_indexes` qualifiée). 1 report :
+
+- **11-1 — CMD Docker dev en shell-form → SIGTERM non transmis à nodemon** : `CMD npx sequelize-cli db:migrate && npm run dev` tourne sous `/bin/sh -c` (PID 1 = sh, ne forwarde pas SIGTERM) → `docker stop` attend ~10 s puis SIGKILL, pas d'arrêt gracieux du conteneur dev. **Pré-existant** (l'ancien `CMD npm run dev` était déjà shell-form) ; **dev-only** (prod = exec-form `["node","server.js"]`). À durcir avec une exec-form + `exec` si ça gêne. [`backend/Dockerfile:14`]
+
 ## Deferred from: code review of story-10.1 (2026-06-28)
 
 > Review adversariale 3 couches (Blind / Edge / Auditor). Aucun bloquant, les 6 AC satisfaites. 2 patches appliqués dans la story ; 1 report :
