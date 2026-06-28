@@ -1,6 +1,6 @@
 # Deferred Work
 
-> **Rituel (acté rétro Epic 8, 2026-06-21)** : ce fichier passe en revue **avant le démarrage de chaque nouvelle epic**. Chaque item est tranché — _fix maintenant_ / _story planifiée_ / _gardé-avec-raison_ / _tué_. Il ne doit jamais redevenir un cimetière. Dernière passe : **2026-06-28** (post-rétro Epic 7).
+> **Rituel (acté rétro Epic 8, 2026-06-21)** : ce fichier passe en revue **avant le démarrage de chaque nouvelle epic**. Chaque item est tranché — _fix maintenant_ / _story planifiée_ / _gardé-avec-raison_ / _tué_. Il ne doit jamais redevenir un cimetière. Dernière passe : **2026-06-28** (post-Epic 11 — cluster afterSync/parité-sync soldé par 11.1).
 
 ---
 
@@ -20,6 +20,13 @@ _Vidé le 2026-06-21 : les 3 items (z-index Album/Languages, garde artiste `MyPl
 
 _Les 4 stories UI/confort (filtres Songlist, refacto SessionHistoryCard, chanson cliquable, nav mobile) ont été regroupées et **livrées dans l'Epic 9** (2026-06-21, branche `feat/epic-9-ui-polish`). Cf. journal « Soldé »._
 
+### ⬆️ Promues à la revue deferred-work du 2026-06-28 (ordre de priorité tranché par northwood)
+1. **[prio 1] Fix UX vérif email — lien rouvert sur un 2e appareil** : distinguer côté backend un token consommé-mais-valide d'un token invalide ; afficher « déjà vérifié, tu peux te connecter » au lieu de « invalid/expired ». [`src/pages/VerifyEmailPage.tsx:53-61`, `backend/controllers/usercontroller.js` verifyEmail] — provenance : review 7-13 (section plus bas).
+2. **[prio 2] Tests front des branches vérif** : couvrir `needsVerification` (Login) et le bouton Resend (Register), aujourd'hui non testés. [`src/pages/LoginPage.tsx`, `RegisterPage.tsx`] — provenance : review 7-13.
+3. **[prio 3] Auto-save fiche chanson** : passe d'abord par un **brainstorm** (cf. section « À brainstormer ») avant cadrage en story.
+
+_Note : prio 1 + prio 2 touchent la même zone (UX de vérification email) → groupables en une petite story / quick-dev. Prio 3 est un sujet produit à part (brainstorm)._
+
 ### 🔐 Lot sécu → à fusionner dans le brief Epic 7
 > ✅ **RÉSOLU — Epic 7 shippée (mergée local 2026-06-26).** Détail des résolutions dans le journal « Soldé » en bas. Vérifié dans le code le 2026-06-26.
 
@@ -34,9 +41,8 @@ _Les 4 stories UI/confort (filtres Songlist, refacto SessionHistoryCard, chanson
 - [x] **Garde UUID→404 généralisée** — `backend/utils/uuid.js` partagé ; gardes ajoutées sur song/instrument/playlist ; topic+practicesession basculés dessus. (item 4)
 - [x] **`getCsrfToken` dédup en vol** — promesse `inFlight` partagée pour les appels concurrents au cold-start. (item 5)
 
-### 🔒 Lot parité-sync (unicité dev/CI) — story planifiée (rétro Epic 10, 2026-06-28)
-- Ni les topics (7.12, index `topics_user_uid_name_ci_unaccent`) ni les playlists (10.1, index `playlists_user_uid_name_ci`) ne posent leur **index unique fonctionnel** sur une base montée par `sync({alter:false})` seul (dev local, CI). → en dev/CI, **pas d'unicité** : doublons de casse possibles, le 409 de `create`/`update` est du code mort, et les tests (mockés) ne le voient pas. **Prod protégée** (release-migrate joue les migrations).
-- À cadrer : approche commune et **propre** (le hook `afterSync` de 7.12 est lui-même une dette — duplique la SQL, exige `CREATE EXTENSION` au boot). Pistes : `make migrate` au boot dev/CI au lieu de hooks ; ou un hook partagé minimal. **Décision rétro Epic 10 : promu de « gardé » à « story planifiée ».** [`backend/models/topic.js:54-121`, `backend/models/playlist.js:21-29`]
+### 🔒 Lot parité-sync (unicité dev/CI) — ✅ RÉSOLU (Epic 11, story 11.1, 2026-06-28, branche `feat/epic-11-dette-technique` à merger)
+> Approche « migrations = source unique + garde fail-fast » : garde de boot `assertFunctionalIndexes` (`backend/utils/assertSchema.js`) branchée après `sync` dans `server.js` (échec clair si un index fonctionnel manque), **hook `afterSync` topic retiré** (≈68 lignes de SQL dupliquée), **aucun** hook playlists ajouté, CMD conteneur dev = `db:migrate && npm run dev` (ordonnancement prod). Garde validée sur la vraie base + listen gardé derrière la garde (review). **Net dette −.** Solde aussi les 2 items afterSync ci-dessous.
 
 ### 🎵 Créer une playlist à la volée depuis l'édition d'une chanson — ✅ LIVRÉ (Epic 10, story 10.2, 2026-06-28)
 > Branche `feat/epic-10-confort-playlists` (à merger). Option « Create playlist "…" » dans le picker de la fiche chanson (mirror 8.2), `PlaylistConflictError` + 409 backstop, combobox toujours rendu. Précédé de 10.1 (unicité nom playlist serveur, `lower(name)` + dédup RENAME). Review 3 couches : 1 HIGH (reseed-clobber) + patches corrigés. _Cadrage initial ci-dessous conservé pour provenance._
@@ -62,13 +68,13 @@ _Les 4 stories UI/confort (filtres Songlist, refacto SessionHistoryCard, chanson
 
 > Review adversariale 3 couches (Blind / Edge / Auditor). Aucun bloquant, les 6 AC satisfaites. 2 patches appliqués dans la story ; 1 report :
 
-- **10-1 — Pas de hook `afterSync` de parité sur Playlist** : une base montée par `sync({alter:false})` seul (dev local, CI) n'a **pas** l'index unique `playlists_user_uid_name_ci` → le 409 de `create`/`update` est du code mort en dev et les doublons de casse y passent (tests mockés → invisible). Prod protégée (release-migrate). `Topic` a un hook `afterSync` pour ça (`topic.js:54-121`), mais ce hook est lui-même une dette déjà reportée (7-12 ci-dessous). À traiter en **lot parité-sync** avec la dette afterSync topic si on durcit dev/CI. [`backend/models/playlist.js:21-29`]
+- ~~**10-1 — Pas de hook `afterSync` de parité sur Playlist**~~ — ✅ **RÉSOLU par Epic 11 (11.1)** : la garde fail-fast de boot couvre topics **et** playlists ; pas de hook ajouté. Cf. « Lot parité-sync » ci-dessus.
 
 ## Deferred from: code review of 7-12 + 7-13 (2026-06-28)
 
 > Issus de la review adversariale 3 couches. Aucun bloquant — tous les AC des deux stories sont satisfaits. Items reportés (les findings `decision`/`patch` restent dans les stories) :
 
-- **7-12 — Hook `afterSync` duplique la migration** : re-exécute `CREATE EXTENSION` + `f_unaccent` + dédoublonnage + index sur chaque DB construite par `sync({alter:false})`, exige le privilège `CREATE EXTENSION` au boot et ne drop pas l'index legacy `topics_user_uid_name` (dev/CI gardent les 2 index). Prod OK (chemin migration). Dette de maintenance : 2 copies de la SQL de dédup à garder en phase. [`backend/models/topic.js:54-121`]
+- ~~**7-12 — Hook `afterSync` duplique la migration**~~ — ✅ **RÉSOLU par Epic 11 (11.1)** : le hook `afterSync` a été **retiré** de `topic.js` (fin de la SQL dupliquée) ; remplacé par la garde fail-fast de boot. Cf. « Lot parité-sync » ci-dessus.
 - **7-12 — Migration hardcode `public.unaccent`** : `'public.unaccent'::regdictionary` casse si l'extension est installée dans un schéma `extensions` dédié (PG managé). Prod actuelle OK (citext 7.2 déjà dans `public`), mais hypothèse d'environnement non gardée. [`backend/migrations/20260625000000-topics-name-ci-unaccent.js:84`]
 - **7-12 — Tests collision casse/accent tautologiques** : mockent `Topic.create` → testent le mapping 23505→409, pas le folding réel (validé seulement par migration locale). Le projet mocke les modèles, donc un vrai test de folding demanderait une DB. [`backend/__tests__/topiccontroller.test.js:13-26`]
 - **7-13 — Token consommé sur 2e device → « invalid/expired » malgré succès** : après vérification sur l'appareil A, rouvrir le même lien sur le téléphone B (jamais loggé) affiche une erreur, le backend ne distinguant pas un token consommé-valide d'un token invalide. UX trompeuse. [`src/pages/VerifyEmailPage.tsx:53-61`]
@@ -79,7 +85,7 @@ _Les 4 stories UI/confort (filtres Songlist, refacto SessionHistoryCard, chanson
 
 ## 💭 À brainstormer
 
-- **Auto-save de la fiche chanson** : sauvegarde auto au blur ou en debounce ~3 s, au lieu du Save manuel. Rendrait la garde « modifs non enregistrées » du Mark as Played inutile. **Résout aussi** la détection `isDirty` fragile (`Songs.tsx` : `JSON.stringify(form)` vs snapshot, qu'un effet de `SongForm` peut fausser). À cadrer : feedback visuel (« Saved »), erreurs de validation/doublon en cours de frappe, coût réseau, conflit avec le bouton Save explicite.
+- **Auto-save de la fiche chanson** ⬆️ _(promu prio 3 — revue 2026-06-28 : à brainstormer puis cadrer en story)_ : sauvegarde auto au blur ou en debounce ~3 s, au lieu du Save manuel. Rendrait la garde « modifs non enregistrées » du Mark as Played inutile. **Résout aussi** la détection `isDirty` fragile (`Songs.tsx` : `JSON.stringify(form)` vs snapshot, qu'un effet de `SongForm` peut fausser). À cadrer : feedback visuel (« Saved »), erreurs de validation/doublon en cours de frappe, coût réseau, conflit avec le bouton Save explicite.
 - **A5 (rétro Epic 7) — signal UX du rate-limit légitime** : un user légitime rate-limité (login, resend…) reçoit un `429 detail-free` volontaire (choix anti-oracle 7.4) → l'UI ressemble à une erreur normale, c'est confus. À cadrer : peut-on donner un indice minimal (« trop de tentatives, réessaie plus tard ») **après authentification réussie** ou sur un canal qui ne crée pas d'oracle d'énumération, sans affaiblir l'anti-bruteforce ?
 
 ---
