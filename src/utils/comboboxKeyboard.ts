@@ -53,6 +53,11 @@ export function handleComboKeyDown<T>(
   } else if (e.key === 'Escape') {
     setOpen(false);
     setIndex(-1);
+  } else if (e.key === 'Tab') {
+    // Let focus move on to the next field, but close the list NOW so it doesn't
+    // linger during the blur-close timeout (which looks like Tab "enters" it).
+    setOpen(false);
+    setIndex(-1);
   }
 }
 

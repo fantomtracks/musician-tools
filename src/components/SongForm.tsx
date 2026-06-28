@@ -291,6 +291,9 @@ export function SongForm(props: SongFormProps) {
               } else if (e.key === 'Escape') {
                 setArtistSearchOpen(false);
                 setSelectedArtistIndex(-1);
+              } else if (e.key === 'Tab') {
+                setArtistSearchOpen(false); // close now so Tab doesn't linger over the list
+                setSelectedArtistIndex(-1);
               }
             }}
             onFocus={() => {
@@ -505,6 +508,9 @@ export function SongForm(props: SongFormProps) {
                       }
                     } else if (e.key === 'Escape') {
                       setAlbumSearchOpen(false);
+                      setSelectedAlbumIndex(-1);
+                    } else if (e.key === 'Tab') {
+                      setAlbumSearchOpen(false); // close now so Tab doesn't linger over the list
                       setSelectedAlbumIndex(-1);
                     }
                   }}

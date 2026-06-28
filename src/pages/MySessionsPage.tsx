@@ -147,6 +147,9 @@ function EntryRefPicker({
           } else if (e.key === 'Escape') {
             setOpen(false);
             setActive(-1);
+          } else if (e.key === 'Tab') {
+            setOpen(false); // close now so Tab moves on without the list lingering
+            setActive(-1);
           }
         }}
         className="input-base text-sm"

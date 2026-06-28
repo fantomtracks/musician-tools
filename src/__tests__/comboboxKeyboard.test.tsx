@@ -61,6 +61,15 @@ describe('handleComboKeyDown', () => {
     expect(setOpen).toHaveBeenCalledWith(false);
     expect(setIndex).toHaveBeenCalledWith(-1);
   });
+
+  test('Tab closes the list immediately but does NOT preventDefault (focus moves on)', () => {
+    const e = keyEvent('Tab');
+    handleComboKeyDown(e, options, 1, setIndex, setOpen, onSelect);
+    expect(e.preventDefault).not.toHaveBeenCalled();
+    expect(setOpen).toHaveBeenCalledWith(false);
+    expect(setIndex).toHaveBeenCalledWith(-1);
+    expect(onSelect).not.toHaveBeenCalled();
+  });
 });
 
 describe('comboboxOptionAria', () => {
