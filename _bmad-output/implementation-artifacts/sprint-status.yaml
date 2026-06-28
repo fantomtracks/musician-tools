@@ -35,7 +35,7 @@
 # - Dev moves story to 'review', then runs code-review (fresh context, different LLM recommended)
 
 generated: 2026-06-07
-last_updated: 2026-06-28  # Epic 11 ouvert ; story 11-1 (parité-sync : migrations source unique + fail-fast) → ready-for-dev
+last_updated: 2026-06-28  # 11-1 (parité-sync) → review (garde fail-fast implémentée + validée sur vraie base ; hook topic retiré)
 project: musician-tools
 project_key: NOKEY
 tracking_system: file-system
@@ -130,4 +130,4 @@ development_status:
 
   # Epic 11: Dette technique / santé du socle (issu rétro Epic 10)
   epic-11: in-progress
-  11-1-parite-sync-unicite-dev: ready-for-dev   # backend ; migrations source unique + garde fail-fast au boot ; RETIRE le hook afterSync topic (pas de hook playlists) ; net dette −
+  11-1-parite-sync-unicite-dev: review          # backend ; garde fail-fast au boot + CMD dev migrate-then-app ; hook afterSync topic retiré ; garde validée sur vraie base ; back 244✓

@@ -14,6 +14,7 @@ const env = process.env.NODE_ENV || 'production';
 const config = require('./config/config')[env];
 const PORT = process.env.PORT || 3001;
 const { sequelize } = require('./models');
+const { assertFunctionalIndexes } = require('./utils/assertSchema');
 
 // Fail-fast at boot: required secrets/config must be present. There is no
 // fallback — the session secret (7.1) and the email infra config (7.6:
@@ -26,14 +27,19 @@ try {
 }
 const SESSION_SECRET = process.env.SESSION_SECRET;
 
-// Run migrations on startup
+// Schema bootstrap. Migrations are the single source of truth for the schema
+// (run BEFORE the app: release_command in prod, the dev container CMD / `make
+// migrate` in dev). sync({alter:false}) is only a safety net that creates any
+// missing tables — it can NOT create the functional unique indexes (case/accent-
+// insensitive per-user uniqueness, stories 7.12 & 10.1). So after sync we assert
+// those indexes exist and FAIL FAST if the schema is out of date (story 11.1).
 (async () => {
   try {
-    logger.log('info', 'Running database migrations...');
     await sequelize.sync({ alter: false });
-    logger.log('info', 'Database migrations completed successfully');
+    await assertFunctionalIndexes(sequelize);
+    logger.log('info', 'Database schema verified');
   } catch (error) {
-    logger.error('Database migration failed:', error);
+    logger.error('Database schema check failed:', error);
     process.exit(1);
   }
 })();
