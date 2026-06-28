@@ -9,7 +9,7 @@ import { playlistService, type Playlist } from '../services/playlistService';
 import { ConfirmDialog } from '../components/ConfirmDialog';
 import { instrumentTechniquesMap, instrumentTuningsMap, instrumentTypeOptions } from '../constants/instrumentTypes';
 import { applySongFilters, NO_INSTRUMENT } from '../utils/songFilters';
-import { handleComboKeyDown, useScrollHighlightIntoView } from '../utils/comboboxKeyboard';
+import { handleComboKeyDown, useScrollHighlightIntoView, comboboxInputAria, comboboxOptionAria } from '../utils/comboboxKeyboard';
 import { findDuplicateSong } from '../utils/songDuplicate';
 import { formatLocalDate } from '../utils/heatmap';
 
@@ -1776,6 +1776,7 @@ function Songs() {
                           (playlist) => { handleTogglePlaylist(playlist.uid); setPlaylistSearchQuery(''); setPlaylistSearchOpen(false); setSelectedPlaylistIndex(-1); },
                         )}
                         className="mt-1 block w-full rounded-md border border-gray-300 dark:border-gray-600 p-2 focus:outline-none focus:ring-2 focus:ring-brand-500 dark:bg-gray-700 dark:text-gray-100"
+                        {...comboboxInputAria('song-playlists-list', playlistSearchOpen, selectedPlaylistIndex)}
                       />
                       {playlistSearchOpen && (
                         <>
@@ -1787,11 +1788,13 @@ function Songs() {
                             aria-label="Close playlist dropdown"
                             tabIndex={-1}
                           />
-                          <div ref={playlistListRef} className="absolute top-full left-0 right-0 z-50 mt-1 rounded-md border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 shadow-lg max-h-32 overflow-y-auto">
+                          <div ref={playlistListRef} id="song-playlists-list" role="listbox" className="absolute top-full left-0 right-0 z-50 mt-1 rounded-md border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 shadow-lg max-h-32 overflow-y-auto">
                             {filteredPlaylists.map((playlist, index) => (
                                 <button
                                   key={playlist.uid}
                                   type="button"
+                                  {...comboboxOptionAria('song-playlists-list', index, selectedPlaylistIndex)}
+                                  onMouseEnter={() => setSelectedPlaylistIndex(index)}
                                   onClick={() => {
                                     handleTogglePlaylist(playlist.uid);
                                     setPlaylistSearchQuery('');
@@ -1799,9 +1802,7 @@ function Songs() {
                                     setSelectedPlaylistIndex(-1);
                                   }}
                                   className={`w-full text-left px-3 py-2 text-gray-700 dark:text-gray-100 ${
-                                    index === selectedPlaylistIndex
-                                      ? 'bg-brand-100 dark:bg-brand-900/40'
-                                      : 'hover:bg-gray-100 dark:hover:bg-gray-600'
+                                    index === selectedPlaylistIndex ? 'bg-brand-100 dark:bg-brand-900/40' : ''
                                   }`}
                                 >
                                   {playlist.name}

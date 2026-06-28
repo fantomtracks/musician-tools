@@ -231,3 +231,25 @@ test('genre combobox: arrowing down scrolls the highlighted option into view', (
     delete (Element.prototype as unknown as { scrollIntoView?: unknown }).scrollIntoView;
   }
 });
+
+test('genre combobox: ARIA wiring + hovering an option makes it the single active descendant', () => {
+  renderWithCallbacks();
+  fireEvent.click(screen.getByText('Details'));
+  const input = screen.getByPlaceholderText('Search or select a genre');
+  // Editable-combobox ARIA: focus stays on the input, options are referenced.
+  expect(input).toHaveAttribute('role', 'combobox');
+  expect(input).toHaveAttribute('aria-controls', 'song-genres-list');
+
+  fireEvent.focus(input);
+  fireEvent.change(input, { target: { value: 'a' } }); // several matches
+  const before = screen.getAllByRole('option');
+  expect(before.length).toBeGreaterThan(1);
+
+  // Mouse and keyboard share ONE active state: hovering sets the active descendant.
+  fireEvent.mouseEnter(before[1]);
+  const options = screen.getAllByRole('option');
+  expect(options[1]).toHaveAttribute('aria-selected', 'true');
+  expect(input).toHaveAttribute('aria-activedescendant', options[1].id);
+  // exactly one option is active at a time
+  expect(options.filter(o => o.getAttribute('aria-selected') === 'true')).toHaveLength(1);
+});

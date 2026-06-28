@@ -5,7 +5,7 @@ import type { SongPlay } from '../services/songPlayService';
 import { instrumentTypeOptions, instrumentTechniquesMap } from '../constants/instrumentTypes';
 import SongFormInstruments from './SongFormInstruments';
 import { parseDurationToSeconds, formatSecondsToMmss } from '../utils/duration';
-import { handleComboKeyDown, useScrollHighlightIntoView } from '../utils/comboboxKeyboard';
+import { handleComboKeyDown, useScrollHighlightIntoView, comboboxInputAria, comboboxOptionAria } from '../utils/comboboxKeyboard';
 
 type Mode = 'add' | 'edit';
 
@@ -303,22 +303,23 @@ export function SongForm(props: SongFormProps) {
             onBlur={() => setTimeout(() => setArtistSearchOpen(false), 200)}
             disabled={loading}
             autoComplete="off"
+            {...comboboxInputAria('song-artist-list', artistSearchOpen, selectedArtistIndex)}
           />
           {artistSearchOpen && suggestedArtists.length > 0 && (
-            <div ref={artistListRef} className="absolute top-full left-0 right-0 mt-1 bg-white dark:bg-gray-700 border border-gray-300 dark:border-gray-600 rounded-md shadow-lg z-10 max-h-64 overflow-y-auto">
+            <div ref={artistListRef} id="song-artist-list" role="listbox" className="absolute top-full left-0 right-0 mt-1 bg-white dark:bg-gray-700 border border-gray-300 dark:border-gray-600 rounded-md shadow-lg z-10 max-h-64 overflow-y-auto">
               {suggestedArtists
-                .filter(artist => 
+                .filter(artist =>
                   !form.artist || artist.toLowerCase().includes(form.artist.toLowerCase())
                 )
                 .map((artist, index) => (
                 <button
                   key={artist}
                   type="button"
+                  {...comboboxOptionAria('song-artist-list', index, selectedArtistIndex)}
                   className={`w-full text-left px-3 py-2 text-sm text-gray-900 dark:text-gray-100 border-b border-gray-200 dark:border-gray-600 last:border-b-0 ${
-                    index === selectedArtistIndex 
-                      ? 'bg-brand-100 dark:bg-brand-900/40' 
-                      : 'hover:bg-gray-100 dark:hover:bg-gray-600'
+                    index === selectedArtistIndex ? 'bg-brand-100 dark:bg-brand-900/40' : ''
                   }`}
+                  onMouseEnter={() => setSelectedArtistIndex(index)}
                   onClick={() => {
                     onChange({
                       target: { name: 'artist', value: artist }
@@ -406,6 +407,7 @@ export function SongForm(props: SongFormProps) {
                   )}
                   className="mt-1 block w-full rounded-md border border-gray-300 dark:border-gray-600 p-2 focus:outline-none focus:ring-2 focus:ring-brand-500 dark:bg-gray-700 dark:text-gray-100"
                   disabled={loading}
+                  {...comboboxInputAria('song-genres-list', genreSearchOpen, selectedGenreIndex)}
                 />
                 {genreSearchOpen && (
                   <>
@@ -421,11 +423,13 @@ export function SongForm(props: SongFormProps) {
                       aria-label="Close genre dropdown"
                       tabIndex={-1}
                     />
-                    <div ref={genreListRef} className="absolute top-full left-0 right-0 z-50 mt-1 rounded-md border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 shadow-lg max-h-32 overflow-y-auto">
+                    <div ref={genreListRef} id="song-genres-list" role="listbox" className="absolute top-full left-0 right-0 z-50 mt-1 rounded-md border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 shadow-lg max-h-32 overflow-y-auto">
                       {filteredGenreOptions.map((genre, index) => (
                           <button
                             key={genre}
                             type="button"
+                            {...comboboxOptionAria('song-genres-list', index, selectedGenreIndex)}
+                            onMouseEnter={() => setSelectedGenreIndex(index)}
                             onClick={() => {
                               onToggleGenre(genre);
                               setGenreSearchQuery('');
@@ -433,9 +437,7 @@ export function SongForm(props: SongFormProps) {
                               setSelectedGenreIndex(-1);
                             }}
                             className={`w-full text-left px-3 py-2 text-gray-700 dark:text-gray-100 ${
-                              index === selectedGenreIndex
-                                ? 'bg-brand-100 dark:bg-brand-900/40'
-                                : 'hover:bg-gray-100 dark:hover:bg-gray-600'
+                              index === selectedGenreIndex ? 'bg-brand-100 dark:bg-brand-900/40' : ''
                             }`}
                             disabled={loading}
                           >
@@ -529,22 +531,23 @@ export function SongForm(props: SongFormProps) {
                   onBlur={() => setTimeout(() => setAlbumSearchOpen(false), 200)}
                   disabled={loading}
                   autoComplete="off"
+                  {...comboboxInputAria('song-album-list', albumSearchOpen, selectedAlbumIndex)}
                 />
                 {albumSearchOpen && suggestedAlbums.length > 0 && (
-                  <div ref={albumListRef} className="absolute top-full left-0 right-0 mt-1 bg-white dark:bg-gray-700 border border-gray-300 dark:border-gray-600 rounded-md shadow-lg z-50 max-h-64 overflow-y-auto">
+                  <div ref={albumListRef} id="song-album-list" role="listbox" className="absolute top-full left-0 right-0 mt-1 bg-white dark:bg-gray-700 border border-gray-300 dark:border-gray-600 rounded-md shadow-lg z-50 max-h-64 overflow-y-auto">
                     {suggestedAlbums
-                      .filter(album => 
+                      .filter(album =>
                         !form.album || album.toLowerCase().includes(form.album.toLowerCase())
                       )
                       .map((album, index) => (
                       <button
                         key={album}
                         type="button"
+                        {...comboboxOptionAria('song-album-list', index, selectedAlbumIndex)}
                         className={`w-full text-left px-3 py-2 text-sm text-gray-900 dark:text-gray-100 border-b border-gray-200 dark:border-gray-600 last:border-b-0 ${
-                          index === selectedAlbumIndex 
-                            ? 'bg-brand-100 dark:bg-brand-900/40' 
-                            : 'hover:bg-gray-100 dark:hover:bg-gray-600'
+                          index === selectedAlbumIndex ? 'bg-brand-100 dark:bg-brand-900/40' : ''
                         }`}
+                        onMouseEnter={() => setSelectedAlbumIndex(index)}
                         onClick={() => {
                           onChange({
                             target: { name: 'album', value: album }
@@ -576,6 +579,7 @@ export function SongForm(props: SongFormProps) {
                   )}
                   className="mt-1 block w-full rounded-md border border-gray-300 dark:border-gray-600 p-2 focus:outline-none focus:ring-2 focus:ring-brand-500 dark:bg-gray-700 dark:text-gray-100"
                   disabled={loading}
+                  {...comboboxInputAria('song-languages-list', languageSearchOpen, selectedLanguageIndex)}
                 />
                 {languageSearchOpen && (
                   <>
@@ -591,11 +595,13 @@ export function SongForm(props: SongFormProps) {
                       aria-label="Close language dropdown"
                       tabIndex={-1}
                     />
-                    <div ref={languageListRef} className="absolute top-full left-0 right-0 z-50 mt-1 rounded-md border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 shadow-lg max-h-32 overflow-y-auto">
+                    <div ref={languageListRef} id="song-languages-list" role="listbox" className="absolute top-full left-0 right-0 z-50 mt-1 rounded-md border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 shadow-lg max-h-32 overflow-y-auto">
                       {filteredLanguageOptions.map((language, index) => (
                           <button
                             key={language}
                             type="button"
+                            {...comboboxOptionAria('song-languages-list', index, selectedLanguageIndex)}
+                            onMouseEnter={() => setSelectedLanguageIndex(index)}
                             onClick={() => {
                               onToggleLanguage(language);
                               setLanguageSearchQuery('');
@@ -603,9 +609,7 @@ export function SongForm(props: SongFormProps) {
                               setSelectedLanguageIndex(-1);
                             }}
                             className={`w-full text-left px-3 py-2 text-gray-700 dark:text-gray-100 ${
-                              index === selectedLanguageIndex
-                                ? 'bg-brand-100 dark:bg-brand-900/40'
-                                : 'hover:bg-gray-100 dark:hover:bg-gray-600'
+                              index === selectedLanguageIndex ? 'bg-brand-100 dark:bg-brand-900/40' : ''
                             }`}
                             disabled={loading}
                           >

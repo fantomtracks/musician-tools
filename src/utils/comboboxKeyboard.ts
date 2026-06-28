@@ -1,6 +1,30 @@
 import type React from 'react';
 import { useEffect } from 'react';
 
+// ARIA wiring for an editable combobox (focus stays on the input; the active
+// option is referenced, not focused). `listId` is the listbox element's id;
+// options get `${listId}-opt-${index}`. Spread onto the <input>.
+export function comboboxInputAria(listId: string, isOpen: boolean, activeIndex: number) {
+  return {
+    role: 'combobox' as const,
+    'aria-expanded': isOpen,
+    'aria-controls': listId,
+    'aria-activedescendant': activeIndex >= 0 ? `${listId}-opt-${activeIndex}` : undefined,
+  };
+}
+
+// Spread onto each option element so the active descendant the input points at
+// actually exists and is marked selected. `activeIndex` drives the highlight;
+// pair with `onMouseEnter={() => setActiveIndex(index)}` so mouse and keyboard
+// share ONE active state (and one visual style).
+export function comboboxOptionAria(listId: string, index: number, activeIndex: number) {
+  return {
+    role: 'option' as const,
+    id: `${listId}-opt-${index}`,
+    'aria-selected': index === activeIndex,
+  };
+}
+
 // Shared keyboard navigation for the app's search comboboxes: arrows move the
 // highlight, Enter selects the highlighted option WITHOUT submitting a parent
 // <form> (preventDefault), Escape closes. `options` must be the SAME filtered

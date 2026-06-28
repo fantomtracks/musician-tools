@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
-import { useScrollAriaSelectedIntoView } from '../utils/comboboxKeyboard';
+import { useScrollAriaSelectedIntoView, comboboxInputAria, comboboxOptionAria } from '../utils/comboboxKeyboard';
 import { practiceSessionService, type CreatePracticeSessionDTO, type CreateSessionItemDTO, type UpdateSessionItemDTO, type UpdatePracticeSessionDTO, type PracticeSession } from '../services/practiceSessionService';
 import { SessionHistoryCard } from '../components/SessionHistoryCard';
 import { songService, type Song } from '../services/songService';
@@ -56,6 +56,7 @@ function EntryRefPicker({
   const [searchText, setSearchText] = useState('');
   const [active, setActive] = useState(-1);
   const listRef = useRef<HTMLDivElement>(null);
+  const listId = `entry-${index}-listbox`;
   // Keep the keyboard-highlighted option visible (grouped listbox → aria-selected).
   useScrollAriaSelectedIntoView(listRef, active, open);
 
@@ -123,8 +124,7 @@ function EntryRefPicker({
     <div className="relative w-full sm:flex-1 min-w-0">
       <input
         aria-label={`Entry ${index + 1}`}
-        role="combobox"
-        aria-expanded={open}
+        {...comboboxInputAria(listId, open, active)}
         autoComplete="off"
         placeholder="Search a song or topic..."
         value={display}
@@ -155,6 +155,7 @@ function EntryRefPicker({
       {open && groups.length > 0 && (
         <div
           ref={listRef}
+          id={listId}
           role="listbox"
           aria-label={`Entry ${index + 1} suggestions`}
           className="absolute z-20 top-full left-0 right-0 mt-1 max-h-64 overflow-y-auto rounded-md border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 shadow-lg"
@@ -168,12 +169,12 @@ function EntryRefPicker({
                 <button
                   key={option.value}
                   type="button"
-                  role="option"
-                  aria-selected={option.idx === active}
+                  {...comboboxOptionAria(listId, option.idx, active)}
+                  onMouseEnter={() => setActive(option.idx)}
                   // onMouseDown (not onClick): fire before the input's blur so the
                   // pick is not cancelled by the dropdown closing
                   onMouseDown={e => { e.preventDefault(); pick(option); }}
-                  className={`block w-full text-left px-3 py-2 text-sm text-gray-900 dark:text-gray-100 ${option.idx === active ? 'bg-brand-100 dark:bg-brand-900/40' : 'hover:bg-gray-100 dark:hover:bg-gray-600'}`}
+                  className={`block w-full text-left px-3 py-2 text-sm text-gray-900 dark:text-gray-100 ${option.idx === active ? 'bg-brand-100 dark:bg-brand-900/40' : ''}`}
                 >
                   {option.label}
                 </button>
