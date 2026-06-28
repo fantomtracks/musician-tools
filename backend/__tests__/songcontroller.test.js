@@ -33,7 +33,7 @@ const controller = require('../controllers/songcontroller');
 
 // A played song the user owns, with a server-side title for the FR4 label snapshot
 function ownedSong(overrides = {}) {
-  return { uid: 'song-1', userUid: 'user-1', title: 'Sweet Child', update: jest.fn(), ...overrides };
+  return { uid: '55555555-5555-4555-8555-555555555555', userUid: 'user-1', title: 'Sweet Child', update: jest.fn(), ...overrides };
 }
 
 const TODAY = (() => {
@@ -114,7 +114,7 @@ describe('songcontroller', () => {
     });
 
     const req = {
-      params: { uid: 'song-1' },
+      params: { uid: '55555555-5555-4555-8555-555555555555' },
       session: { user: 'user-1' },
       body: {
         timeSignature: '3/4',
@@ -138,7 +138,7 @@ describe('songcontroller', () => {
     Song.findOne.mockResolvedValue({ userUid: 'user-1', durationSeconds: 420, update });
 
     await controller.updateSong(
-      { params: { uid: 'song-1' }, session: { user: 'user-1' }, body: { durationSeconds: 720 } },
+      { params: { uid: '55555555-5555-4555-8555-555555555555' }, session: { user: 'user-1' }, body: { durationSeconds: 720 } },
       mockRes(),
       mockNext()
     );
@@ -148,7 +148,7 @@ describe('songcontroller', () => {
     const update2 = jest.fn();
     Song.findOne.mockResolvedValue({ userUid: 'user-1', durationSeconds: 420, update: update2 });
     await controller.updateSong(
-      { params: { uid: 'song-1' }, session: { user: 'user-1' }, body: { title: 'Renamed' } },
+      { params: { uid: '55555555-5555-4555-8555-555555555555' }, session: { user: 'user-1' }, body: { title: 'Renamed' } },
       mockRes(),
       mockNext()
     );
@@ -157,7 +157,7 @@ describe('songcontroller', () => {
 
   describe('markSongPlayed (4.1 — feeds the journal)', () => {
     function markReq(body) {
-      return { params: { uid: 'song-1' }, session: { user: 'user-1' }, body };
+      return { params: { uid: '55555555-5555-4555-8555-555555555555' }, session: { user: 'user-1' }, body };
     }
 
     test('AC1: with no session that day creates the day session and adds the song as a no-minutes entry', async () => {
@@ -177,7 +177,7 @@ describe('songcontroller', () => {
       expect(SessionItem.create).toHaveBeenCalledTimes(1);
       const itemArg = SessionItem.create.mock.calls[0][0];
       // FR4: label is the server-side snapshot of the song title; no minutes (FR21)
-      expect(itemArg).toMatchObject({ sessionUid: 'session-uid', songUid: 'song-1', label: 'Sweet Child', minutes: null });
+      expect(itemArg).toMatchObject({ sessionUid: 'session-uid', songUid: '55555555-5555-4555-8555-555555555555', label: 'Sweet Child', minutes: null });
 
       // 4.2: the play is LINKED to the created entry (cascade target)
       const playArg = SongPlay.create.mock.calls[0][0];
@@ -219,7 +219,7 @@ describe('songcontroller', () => {
     test('AC4: re-marking a song already in the day session adds no duplicate entry', async () => {
       Song.findOne.mockResolvedValue(ownedSong());
       PracticeSession.findOne.mockResolvedValue({ uid: 'existing-session', instrumentType: 'Guitar', durationMinutes: null, update: jest.fn() });
-      SessionItem.findOne.mockResolvedValue({ uid: 'already-there', songUid: 'song-1' });
+      SessionItem.findOne.mockResolvedValue({ uid: 'already-there', songUid: '55555555-5555-4555-8555-555555555555' });
 
       const res = mockRes();
       const next = mockNext();
@@ -284,7 +284,7 @@ describe('songcontroller', () => {
     test('6.1 AC4 (cumul): re-marking a song with a duration increments the existing entry minutes, no duplicate', async () => {
       Song.findOne.mockResolvedValue(ownedSong({ durationSeconds: 240 })); // 4:00 → 4 min
       PracticeSession.findOne.mockResolvedValue({ uid: 'existing-session', instrumentType: 'Guitar', durationMinutes: null, update: jest.fn() });
-      const existingItem = { uid: 'already-there', songUid: 'song-1', minutes: 10, update: jest.fn() };
+      const existingItem = { uid: 'already-there', songUid: '55555555-5555-4555-8555-555555555555', minutes: 10, update: jest.fn() };
       SessionItem.findOne.mockResolvedValue(existingItem);
 
       const res = mockRes();
@@ -301,7 +301,7 @@ describe('songcontroller', () => {
     test('6.1 AC4 (cumul from no minutes): an existing no-minutes entry accrues the duration from zero', async () => {
       Song.findOne.mockResolvedValue(ownedSong({ durationSeconds: 300 })); // 5:00 → 5 min
       PracticeSession.findOne.mockResolvedValue({ uid: 'existing-session', instrumentType: 'Guitar', durationMinutes: null, update: jest.fn() });
-      const existingItem = { uid: 'already-there', songUid: 'song-1', minutes: null, update: jest.fn() };
+      const existingItem = { uid: 'already-there', songUid: '55555555-5555-4555-8555-555555555555', minutes: null, update: jest.fn() };
       SessionItem.findOne.mockResolvedValue(existingItem);
 
       await controller.markSongPlayed(markReq({ instrumentType: 'Guitar', playedOn: TODAY }), mockRes(), mockNext());
@@ -312,7 +312,7 @@ describe('songcontroller', () => {
     test('6.1 AC4 (no duration): re-marking a song without a duration leaves the existing entry untouched', async () => {
       Song.findOne.mockResolvedValue(ownedSong()); // no durationSeconds
       PracticeSession.findOne.mockResolvedValue({ uid: 'existing-session', instrumentType: 'Guitar', durationMinutes: null, update: jest.fn() });
-      const existingItem = { uid: 'already-there', songUid: 'song-1', minutes: 8, update: jest.fn() };
+      const existingItem = { uid: 'already-there', songUid: '55555555-5555-4555-8555-555555555555', minutes: 8, update: jest.fn() };
       SessionItem.findOne.mockResolvedValue(existingItem);
 
       await controller.markSongPlayed(markReq({ instrumentType: 'Guitar', playedOn: TODAY }), mockRes(), mockNext());
@@ -367,7 +367,7 @@ describe('songcontroller', () => {
 
       expect(SongPlay.create).toHaveBeenCalledTimes(1);
       const playArg = SongPlay.create.mock.calls[0][0];
-      expect(playArg).toMatchObject({ songUid: 'song-1', instrumentUid: 'inst-1', instrumentType: 'Guitar' });
+      expect(playArg).toMatchObject({ songUid: '55555555-5555-4555-8555-555555555555', instrumentUid: 'inst-1', instrumentType: 'Guitar' });
     });
 
     test('without an instrument the play is recorded but no session is created (FR7 needs an instrument)', async () => {
@@ -429,7 +429,7 @@ describe('songcontroller', () => {
 
     test('rejects unauthenticated (401), unknown song (404) and another user\'s song (404, story 7.5)', async () => {
       const anon = mockNext();
-      await controller.markSongPlayed({ params: { uid: 'song-1' }, session: {}, body: { playedOn: TODAY } }, mockRes(), anon);
+      await controller.markSongPlayed({ params: { uid: '55555555-5555-4555-8555-555555555555' }, session: {}, body: { playedOn: TODAY } }, mockRes(), anon);
       expect(anon.mock.calls[0][0].status).toBe(401);
 
       Song.findOne.mockResolvedValue(null);
@@ -477,20 +477,20 @@ describe('songcontroller', () => {
     test('returns the song when owned', async () => {
       Song.findOne.mockResolvedValue(ownedSong());
       const res = mockRes();
-      await controller.getSong({ params: { uid: 'song-1' }, session: { user: 'user-1' } }, res, mockNext());
+      await controller.getSong({ params: { uid: '55555555-5555-4555-8555-555555555555' }, session: { user: 'user-1' } }, res, mockNext());
       expect(res.json).toHaveBeenCalled();
     });
 
     test('401 when unauthenticated', async () => {
       const next = mockNext();
-      await controller.getSong({ params: { uid: 'song-1' }, session: {} }, mockRes(), next);
+      await controller.getSong({ params: { uid: '55555555-5555-4555-8555-555555555555' }, session: {} }, mockRes(), next);
       expect(next.mock.calls[0][0].status).toBe(401);
     });
 
     test('another user\'s song → 404 (scoped out, no existence oracle)', async () => {
       Song.findOne.mockResolvedValue(null); // scoped where excludes it
       const next = mockNext();
-      await controller.getSong({ params: { uid: 'song-1' }, session: { user: 'user-1' } }, mockRes(), next);
+      await controller.getSong({ params: { uid: '55555555-5555-4555-8555-555555555555' }, session: { user: 'user-1' } }, mockRes(), next);
       expect(next.mock.calls[0][0].status).toBe(404);
     });
   });
@@ -501,7 +501,7 @@ describe('deleteSong (Story 5.6: cleans playlists)', () => {
   });
 
   function deleteReq() {
-    return { session: { user: 'user-1' }, params: { uid: 'song-1' } };
+    return { session: { user: 'user-1' }, params: { uid: '55555555-5555-4555-8555-555555555555' } };
   }
 
   test('destroys the song; playlist cleanup is handled by the FK cascade (Story 5.7, no manual strip)', async () => {
@@ -517,7 +517,7 @@ describe('deleteSong (Story 5.6: cleans playlists)', () => {
 
   test('401 when not authenticated', async () => {
     const next = mockNext();
-    await controller.deleteSong({ session: {}, params: { uid: 'song-1' } }, mockRes(), next);
+    await controller.deleteSong({ session: {}, params: { uid: '55555555-5555-4555-8555-555555555555' } }, mockRes(), next);
     expect(next.mock.calls[0][0].status).toBe(401);
   });
 
@@ -533,6 +533,21 @@ describe('deleteSong (Story 5.6: cleans playlists)', () => {
     Song.findOne.mockResolvedValue(null);
     const next = mockNext();
     await controller.deleteSong(deleteReq(), mockRes(), next);
+    expect(next.mock.calls[0][0].status).toBe(404);
+  });
+});
+
+describe('malformed uid guard (404, not a 500)', () => {
+  beforeEach(() => jest.clearAllMocks());
+  test.each([
+    ['getSong', (c, req) => c.getSong(req, mockRes(), req._next)],
+    ['updateSong', (c, req) => c.updateSong(req, mockRes(), req._next)],
+    ['deleteSong', (c, req) => c.deleteSong(req, mockRes(), req._next)],
+  ])('%s with a non-UUID uid → 404 without touching the DB', async (_label, call) => {
+    const next = mockNext();
+    const req = { session: { user: 'user-1' }, params: { uid: 'not-a-uuid' }, body: {}, _next: next };
+    await call(controller, req);
+    expect(Song.findOne).not.toHaveBeenCalled();
     expect(next.mock.calls[0][0].status).toBe(404);
   });
 });

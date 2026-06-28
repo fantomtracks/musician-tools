@@ -32,9 +32,9 @@ const mockNext = () => jest.fn();
 // A persisted playlist row the user owns
 function ownedPlaylist(overrides = {}) {
   return {
-    uid: 'p1',
+    uid: '11111111-1111-4111-8111-111111111111',
     userUid: 'user-1',
-    toJSON: () => ({ uid: 'p1', name: 'My set', ...overrides.json }),
+    toJSON: () => ({ uid: '11111111-1111-4111-8111-111111111111', name: 'My set', ...overrides.json }),
     update: jest.fn(),
     destroy: jest.fn(),
     ...overrides
@@ -55,15 +55,15 @@ describe('getAllPlaylists', () => {
     Playlist.findAll.mockResolvedValue([ownedPlaylist()]);
     // Returned in position order (the controller asks the DB to order by position)
     PlaylistSong.findAll.mockResolvedValue([
-      { playlistUid: 'p1', songUid: 's1', position: 0 },
-      { playlistUid: 'p1', songUid: 's2', position: 1 }
+      { playlistUid: '11111111-1111-4111-8111-111111111111', songUid: '22222222-2222-4222-8222-222222222222', position: 0 },
+      { playlistUid: '11111111-1111-4111-8111-111111111111', songUid: '33333333-3333-4333-8333-333333333333', position: 1 }
     ]);
 
     const res = mockRes();
     await controller.getAllPlaylists({ session: { user: 'user-1' } }, res, mockNext());
 
     expect(res.json).toHaveBeenCalledWith([
-      expect.objectContaining({ uid: 'p1', songUids: ['s1', 's2'] })
+      expect.objectContaining({ uid: '11111111-1111-4111-8111-111111111111', songUids: ['22222222-2222-4222-8222-222222222222', '33333333-3333-4333-8333-333333333333'] })
     ]);
   });
 
@@ -90,31 +90,31 @@ describe('createPlaylist', () => {
   test('keeps only the owner\'s existing songs, preserves order, returns derived songUids', async () => {
     Playlist.create.mockResolvedValue(ownedPlaylist());
     // 'sX' is not among the owned songs → dropped
-    Song.findAll.mockResolvedValue([{ uid: 's1' }, { uid: 's2' }]);
+    Song.findAll.mockResolvedValue([{ uid: '22222222-2222-4222-8222-222222222222' }, { uid: '33333333-3333-4333-8333-333333333333' }]);
 
     const res = mockRes();
-    await controller.createPlaylist(createReq({ name: 'My set', songUids: ['s1', 'sX', 's2'] }), res, mockNext());
+    await controller.createPlaylist(createReq({ name: 'My set', songUids: ['22222222-2222-4222-8222-222222222222', 'sX', '33333333-3333-4333-8333-333333333333'] }), res, mockNext());
 
-    expect(PlaylistSong.destroy).toHaveBeenCalledWith(expect.objectContaining({ where: { playlistUid: 'p1' } }));
+    expect(PlaylistSong.destroy).toHaveBeenCalledWith(expect.objectContaining({ where: { playlistUid: '11111111-1111-4111-8111-111111111111' } }));
     expect(PlaylistSong.bulkCreate).toHaveBeenCalledWith(
       [
-        { playlistUid: 'p1', songUid: 's1', position: 0 },
-        { playlistUid: 'p1', songUid: 's2', position: 1 }
+        { playlistUid: '11111111-1111-4111-8111-111111111111', songUid: '22222222-2222-4222-8222-222222222222', position: 0 },
+        { playlistUid: '11111111-1111-4111-8111-111111111111', songUid: '33333333-3333-4333-8333-333333333333', position: 1 }
       ],
       expect.objectContaining({ transaction: expect.anything() })
     );
     expect(res.status).toHaveBeenCalledWith(201);
-    expect(res.json).toHaveBeenCalledWith(expect.objectContaining({ uid: 'p1', songUids: ['s1', 's2'] }));
+    expect(res.json).toHaveBeenCalledWith(expect.objectContaining({ uid: '11111111-1111-4111-8111-111111111111', songUids: ['22222222-2222-4222-8222-222222222222', '33333333-3333-4333-8333-333333333333'] }));
   });
 
   test('deduplicates repeated song UIDs', async () => {
     Playlist.create.mockResolvedValue(ownedPlaylist());
-    Song.findAll.mockResolvedValue([{ uid: 's1' }, { uid: 's2' }]);
+    Song.findAll.mockResolvedValue([{ uid: '22222222-2222-4222-8222-222222222222' }, { uid: '33333333-3333-4333-8333-333333333333' }]);
 
     const res = mockRes();
-    await controller.createPlaylist(createReq({ name: 'Dupes', songUids: ['s1', 's1', 's2'] }), res, mockNext());
+    await controller.createPlaylist(createReq({ name: 'Dupes', songUids: ['22222222-2222-4222-8222-222222222222', '22222222-2222-4222-8222-222222222222', '33333333-3333-4333-8333-333333333333'] }), res, mockNext());
 
-    expect(res.json).toHaveBeenCalledWith(expect.objectContaining({ songUids: ['s1', 's2'] }));
+    expect(res.json).toHaveBeenCalledWith(expect.objectContaining({ songUids: ['22222222-2222-4222-8222-222222222222', '33333333-3333-4333-8333-333333333333'] }));
   });
 
   test('400 when name is missing', async () => {
@@ -135,17 +135,17 @@ describe('updatePlaylist', () => {
   test('omitting songUids keeps the existing songs (never clears them)', async () => {
     Playlist.findOne.mockResolvedValue(ownedPlaylist());
     PlaylistSong.findAll.mockResolvedValue([
-      { playlistUid: 'p1', songUid: 's1', position: 0 }
+      { playlistUid: '11111111-1111-4111-8111-111111111111', songUid: '22222222-2222-4222-8222-222222222222', position: 0 }
     ]);
 
     const res = mockRes();
     await controller.updatePlaylist(
-      { session: { user: 'user-1' }, params: { uid: 'p1' }, body: { name: 'Renamed' } }, res, mockNext()
+      { session: { user: 'user-1' }, params: { uid: '11111111-1111-4111-8111-111111111111' }, body: { name: 'Renamed' } }, res, mockNext()
     );
 
     // No re-sync: the join table is left untouched
     expect(PlaylistSong.destroy).not.toHaveBeenCalled();
-    expect(res.json).toHaveBeenCalledWith(expect.objectContaining({ songUids: ['s1'] }));
+    expect(res.json).toHaveBeenCalledWith(expect.objectContaining({ songUids: ['22222222-2222-4222-8222-222222222222'] }));
   });
 });
 
@@ -153,7 +153,7 @@ describe('getPlaylist / ownership', () => {
   test('404 when the playlist belongs to another user (scoped out, story 7.5)', async () => {
     Playlist.findOne.mockResolvedValue(null); // scoped where excludes a foreign playlist
     const next = mockNext();
-    await controller.getPlaylist({ session: { user: 'user-1' }, params: { uid: 'p1' } }, mockRes(), next);
+    await controller.getPlaylist({ session: { user: 'user-1' }, params: { uid: '11111111-1111-4111-8111-111111111111' } }, mockRes(), next);
     expect(next.mock.calls[0][0].status).toBe(404);
   });
 
@@ -169,17 +169,17 @@ describe('removeSongFromPlaylist', () => {
   test('removes the song from the join table, returns the remaining ordered songUids', async () => {
     Playlist.findOne.mockResolvedValue(ownedPlaylist());
     PlaylistSong.findAll.mockResolvedValue([
-      { playlistUid: 'p1', songUid: 's1', position: 0 },
-      { playlistUid: 'p1', songUid: 's2', position: 1 }
+      { playlistUid: '11111111-1111-4111-8111-111111111111', songUid: '22222222-2222-4222-8222-222222222222', position: 0 },
+      { playlistUid: '11111111-1111-4111-8111-111111111111', songUid: '33333333-3333-4333-8333-333333333333', position: 1 }
     ]);
-    Song.findAll.mockResolvedValue([{ uid: 's2' }]); // the one kept
+    Song.findAll.mockResolvedValue([{ uid: '33333333-3333-4333-8333-333333333333' }]); // the one kept
 
     const res = mockRes();
     await controller.removeSongFromPlaylist(
-      { session: { user: 'user-1' }, params: { uid: 'p1', songUid: 's1' } }, res, mockNext()
+      { session: { user: 'user-1' }, params: { uid: '11111111-1111-4111-8111-111111111111', songUid: '22222222-2222-4222-8222-222222222222' } }, res, mockNext()
     );
 
-    expect(res.json).toHaveBeenCalledWith(expect.objectContaining({ songUids: ['s2'] }));
+    expect(res.json).toHaveBeenCalledWith(expect.objectContaining({ songUids: ['33333333-3333-4333-8333-333333333333'] }));
   });
 });
 
@@ -187,15 +187,33 @@ describe('addSongToPlaylist', () => {
   test('appends an owned song to the join table', async () => {
     Playlist.findOne.mockResolvedValue(ownedPlaylist());
     PlaylistSong.findAll.mockResolvedValue([
-      { playlistUid: 'p1', songUid: 's1', position: 0 }
+      { playlistUid: '11111111-1111-4111-8111-111111111111', songUid: '22222222-2222-4222-8222-222222222222', position: 0 }
     ]);
-    Song.findAll.mockResolvedValue([{ uid: 's1' }, { uid: 's2' }]);
+    Song.findAll.mockResolvedValue([{ uid: '22222222-2222-4222-8222-222222222222' }, { uid: '33333333-3333-4333-8333-333333333333' }]);
 
     const res = mockRes();
     await controller.addSongToPlaylist(
-      { session: { user: 'user-1' }, params: { uid: 'p1', songUid: 's2' } }, res, mockNext()
+      { session: { user: 'user-1' }, params: { uid: '11111111-1111-4111-8111-111111111111', songUid: '33333333-3333-4333-8333-333333333333' } }, res, mockNext()
     );
 
-    expect(res.json).toHaveBeenCalledWith(expect.objectContaining({ songUids: ['s1', 's2'] }));
+    expect(res.json).toHaveBeenCalledWith(expect.objectContaining({ songUids: ['22222222-2222-4222-8222-222222222222', '33333333-3333-4333-8333-333333333333'] }));
+  });
+
+  test('a non-UUID songUid → 404 without touching the DB', async () => {
+    const next = mockNext();
+    await controller.addSongToPlaylist(
+      { session: { user: 'user-1' }, params: { uid: '11111111-1111-4111-8111-111111111111', songUid: 'not-a-uuid' } }, mockRes(), next
+    );
+    expect(Playlist.findOne).not.toHaveBeenCalled();
+    expect(next.mock.calls[0][0].status).toBe(404);
+  });
+});
+
+describe('malformed playlist uid guard (404, not a 500)', () => {
+  test('getPlaylist with a non-UUID uid → 404 without touching the DB', async () => {
+    const next = mockNext();
+    await controller.getPlaylist({ session: { user: 'user-1' }, params: { uid: 'not-a-uuid' } }, mockRes(), next);
+    expect(Playlist.findOne).not.toHaveBeenCalled();
+    expect(next.mock.calls[0][0].status).toBe(404);
   });
 });

@@ -4,6 +4,7 @@ const logger = require('../logger');
 const { fetchSongMetadata } = require('../services/songMetadataService');
 // Shared FR19 day-validation helpers (same definition as the session controller)
 const { DATE_PATTERN, MIN_DATE, isValidCalendarDate, maxAllowedDate } = require('../utils/sessionDates');
+const { isUuid } = require('../utils/uuid');
 
 // FR24: an optional song duration in whole seconds (the client sends seconds,
 // parsed from m:ss or decimal-minutes input). Nullable for backward
@@ -84,6 +85,9 @@ const getSong = async (req, res, next) => {
 
     // Scoped lookup (story 7.5): another user's uid and an unknown uid get the
     // same 404 — closes the IDOR and the existence oracle.
+    if (!isUuid(req.params.uid)) {
+      return next(createError(404, 'Song not found'));
+    }
     const song = await Song.findOne({ where: { uid: req.params.uid, userUid: userId } });
     if (!song) {
       return next(createError(404, 'Song not found'));
@@ -156,6 +160,9 @@ const updateSong = async (req, res, next) => {
     }
 
     // Scoped lookup (story 7.5): not-found and not-yours both 404 — no ownership 403.
+    if (!isUuid(req.params.uid)) {
+      return next(createError(404, 'Song not found'));
+    }
     const song = await Song.findOne({ where: { uid: req.params.uid, userUid: userId } });
     if (!song) {
       return next(createError(404, 'Song not found'));
@@ -209,6 +216,9 @@ const deleteSong = async (req, res, next) => {
     }
 
     // Scoped lookup (story 7.5): not-found and not-yours both 404 — no ownership 403.
+    if (!isUuid(req.params.uid)) {
+      return next(createError(404, 'Song not found'));
+    }
     const song = await Song.findOne({ where: { uid: req.params.uid, userUid: userId } });
     if (!song) {
       return next(createError(404, 'Song not found'));
@@ -254,6 +264,9 @@ const markSongPlayed = async (req, res, next) => {
     }
 
     // Scoped lookup (story 7.5): not-found and not-yours both 404 — no ownership 403.
+    if (!isUuid(req.params.uid)) {
+      return next(createError(404, 'Song not found'));
+    }
     const song = await Song.findOne({ where: { uid: req.params.uid, userUid: userId } });
     if (!song) {
       return next(createError(404, 'Song not found'));
@@ -380,6 +393,9 @@ const getSongPlays = async (req, res, next) => {
     }
 
     // Scoped lookup (story 7.5): not-found and not-yours both 404 — no ownership 403.
+    if (!isUuid(req.params.uid)) {
+      return next(createError(404, 'Song not found'));
+    }
     const song = await Song.findOne({ where: { uid: req.params.uid, userUid: userId } });
     if (!song) {
       return next(createError(404, 'Song not found'));

@@ -10,7 +10,7 @@ const MAX_NOTE_LENGTH = 5000;
 const MAX_ITEMS = 50;
 const MAX_ITEM_NOTE_LENGTH = 1000;
 // Reject malformed uids before they reach Postgres (invalid uuid input throws a DB error)
-const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+const { UUID_PATTERN } = require('../utils/uuid');
 
 // The calendar day of a historical play (FR22 retro-import). playedAt was
 // stamped with the SERVER clock, so the UTC day is the best available truth —

@@ -1,6 +1,7 @@
 const { Instrument } = require('../models');
 const createError = require('http-errors');
 const logger = require('../logger');
+const { isUuid } = require('../utils/uuid');
 
 // GET all instruments for logged-in user
 const getAllInstruments = async (req, res, next) => {
@@ -58,6 +59,9 @@ const updateInstrument = async (req, res, next) => {
     }
 
     // Scoped lookup (story 7.5): not-found and not-yours both 404 — no ownership 403.
+    if (!isUuid(req.params.uid)) {
+      return next(createError(404, 'Instrument not found'));
+    }
     const instrument = await Instrument.findOne({ where: { uid: req.params.uid, userUid: userId } });
     if (!instrument) {
       return next(createError(404, 'Instrument not found'));
@@ -87,6 +91,9 @@ const deleteInstrument = async (req, res, next) => {
     }
 
     // Scoped lookup (story 7.5): not-found and not-yours both 404 — no ownership 403.
+    if (!isUuid(req.params.uid)) {
+      return next(createError(404, 'Instrument not found'));
+    }
     const instrument = await Instrument.findOne({ where: { uid: req.params.uid, userUid: userId } });
     if (!instrument) {
       return next(createError(404, 'Instrument not found'));
