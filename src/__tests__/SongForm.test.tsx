@@ -41,8 +41,8 @@ function renderForm(overrides: Partial<CreateSongDTO> = {}, extraProps: Partial<
       onToggleTechnique={jest.fn()}
       onSubmit={onSubmit}
       onCancel={jest.fn()}
-      suggestedAlbums={(extraProps as any).suggestedAlbums || ['Revolver']}
-      suggestedArtists={(extraProps as any).suggestedArtists || ['The Beatles']}
+      suggestedAlbums={extraProps.suggestedAlbums || ['Revolver']}
+      suggestedArtists={extraProps.suggestedArtists || ['The Beatles']}
     />
   );
   return { onChange, onSetDurationSeconds };
@@ -213,4 +213,21 @@ test('language combobox: ArrowDown + Enter selects the highlighted language (par
   fireEvent.keyDown(input, { key: 'Enter' });
   expect(onToggleLanguage).toHaveBeenCalledWith('French');
   expect(onSubmit).not.toHaveBeenCalled();
+});
+
+test('genre combobox: arrowing down scrolls the highlighted option into view', () => {
+  // jsdom doesn't implement scrollIntoView; install a spy to assert the wiring.
+  const scrollSpy = jest.fn();
+  (Element.prototype as unknown as { scrollIntoView: unknown }).scrollIntoView = scrollSpy;
+  try {
+    renderWithCallbacks();
+    fireEvent.click(screen.getByText('Details'));
+    const input = screen.getByPlaceholderText('Search or select a genre');
+    fireEvent.focus(input);
+    fireEvent.change(input, { target: { value: 'a' } }); // matches several genres
+    fireEvent.keyDown(input, { key: 'ArrowDown' });
+    expect(scrollSpy).toHaveBeenCalledWith({ block: 'nearest' });
+  } finally {
+    delete (Element.prototype as unknown as { scrollIntoView?: unknown }).scrollIntoView;
+  }
 });

@@ -167,6 +167,9 @@ export function SongForm(props: SongFormProps) {
   const [languageSearchOpen, setLanguageSearchOpen] = useState(false);
   const [languageSearchQuery, setLanguageSearchQuery] = useState('');
   const [selectedLanguageIndex, setSelectedLanguageIndex] = useState(-1);
+  // Keep the keyboard-highlighted option scrolled into view in the dropdowns.
+  const genreListRef = useRef<HTMLDivElement>(null);
+  const languageListRef = useRef<HTMLDivElement>(null);
   const [albumSearchOpen, setAlbumSearchOpen] = useState(false);
   const [selectedAlbumIndex, setSelectedAlbumIndex] = useState(-1);
   const [artistSearchOpen, setArtistSearchOpen] = useState(false);
@@ -192,6 +195,18 @@ export function SongForm(props: SongFormProps) {
       onSetTechniques(nextTechniques);
     }
   }, [currentInstruments, currentTechniques, onSetTechniques]);
+
+  useEffect(() => {
+    if (genreSearchOpen && selectedGenreIndex >= 0) {
+      genreListRef.current?.children[selectedGenreIndex]?.scrollIntoView?.({ block: 'nearest' });
+    }
+  }, [selectedGenreIndex, genreSearchOpen]);
+
+  useEffect(() => {
+    if (languageSearchOpen && selectedLanguageIndex >= 0) {
+      languageListRef.current?.children[selectedLanguageIndex]?.scrollIntoView?.({ block: 'nearest' });
+    }
+  }, [selectedLanguageIndex, languageSearchOpen]);
 
   // Lifted so the keyboard handler and the rendered dropdown index the SAME list.
   const filteredGenreOptions = genreOptions.filter(
@@ -438,7 +453,7 @@ export function SongForm(props: SongFormProps) {
                       aria-label="Close genre dropdown"
                       tabIndex={-1}
                     />
-                    <div className="absolute top-full left-0 right-0 z-50 mt-1 rounded-md border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 shadow-lg max-h-32 overflow-y-auto">
+                    <div ref={genreListRef} className="absolute top-full left-0 right-0 z-50 mt-1 rounded-md border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 shadow-lg max-h-32 overflow-y-auto">
                       {filteredGenreOptions.map((genre, index) => (
                           <button
                             key={genre}
@@ -608,7 +623,7 @@ export function SongForm(props: SongFormProps) {
                       aria-label="Close language dropdown"
                       tabIndex={-1}
                     />
-                    <div className="absolute top-full left-0 right-0 z-50 mt-1 rounded-md border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 shadow-lg max-h-32 overflow-y-auto">
+                    <div ref={languageListRef} className="absolute top-full left-0 right-0 z-50 mt-1 rounded-md border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 shadow-lg max-h-32 overflow-y-auto">
                       {filteredLanguageOptions.map((language, index) => (
                           <button
                             key={language}
