@@ -35,7 +35,7 @@
 # - Dev moves story to 'review', then runs code-review (fresh context, different LLM recommended)
 
 generated: 2026-06-07
-last_updated: 2026-06-28  # 10-1 done ; 10-2 (create playlist à la volée) → review (implémentée, front 296✓)
+last_updated: 2026-06-28  # 10-1 done ; 10-2 done (review 3 couches, HIGH reseed-clobber corrigé) ; Epic 10 complet
 project: musician-tools
 project_key: NOKEY
 tracking_system: file-system
@@ -123,6 +123,6 @@ development_status:
 
   # Epic 10: Confort / playlists (post-rétro Epic 7 — issu deferred-work 2026-06-28)
   # Découpage façon 7.12→8.2 : 10-1 unicité serveur (prérequis) → 10-2 create on the fly (front)
-  epic-10: in-progress
+  epic-10: done
   10-1-unicite-nom-playlist-serveur: done            # backend ; migration (user_uid, lower(name)) + RENAME dedup + 409 ; review 3 couches OK (2 patches : trim + suffixe uid robuste) ; back 241✓ front 290✓
-  10-2-creer-playlist-a-la-volee: review             # front ; PlaylistConflictError + option Create dans le picker ; front 296✓ (+6)
+  10-2-creer-playlist-a-la-volee: done               # front ; option Create + PlaylistConflictError ; review 3 couches (1 HIGH reseed-clobber corrigé) ; front 297✓

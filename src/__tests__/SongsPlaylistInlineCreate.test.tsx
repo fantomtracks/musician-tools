@@ -1,6 +1,11 @@
-import { render, screen, fireEvent, waitFor } from '@testing-library/react';
+import { render, screen, fireEvent, waitFor, act } from '@testing-library/react';
 import { MemoryRouter } from 'react-router-dom';
 import Songs from '../pages/Songs';
+
+// Let pending promises + effects settle (the editing-data effect re-seeds the
+// playlist selection behind an async getPlays — we must observe the SETTLED DOM,
+// not the transient frame before the seed runs).
+const settle = () => act(async () => { await new Promise(r => setTimeout(r, 0)); });
 
 // Story 10.2: create a playlist on the fly from the song edit form.
 // One song so clicking its row opens edit mode (where the playlist picker lives).
@@ -125,7 +130,10 @@ describe('Songs — create a playlist on the fly (story 10.2)', () => {
     );
   });
 
-  test('AC8: a 409 selects the existing playlist instead of erroring', async () => {
+  test('AC8: a 409 selects the existing playlist, and it STAYS selected (no reseed clobber)', async () => {
+    // A non-empty catalog (that does NOT contain the typed name) so the seed effect
+    // locks; the 409 returns an existing playlist that does NOT contain the song.
+    mockedPlaylistService.getAllPlaylists.mockResolvedValue([{ uid: 'pl-other', name: 'Other', songUids: [] }]);
     mockedPlaylistService.createPlaylist.mockRejectedValue(
       new PlaylistConflictError({ uid: 'pl-existing', name: 'Jazz', songUids: [] }),
     );
@@ -133,9 +141,33 @@ describe('Songs — create a playlist on the fly (story 10.2)', () => {
 
     fireEvent.click(await screen.findByText('Create playlist "Jazz"'));
 
-    // The existing playlist becomes a selected chip; no error toast
-    await waitFor(() => expect(screen.getByTitle('Jazz')).toBeInTheDocument());
+    // The existing playlist becomes a selected chip — and survives the seed effect
+    // that re-fires when `playlists` is updated (the bug this guards against).
+    expect(await screen.findByTitle('Jazz')).toBeInTheDocument();
+    await settle();
+    expect(screen.getByTitle('Jazz')).toBeInTheDocument(); // still there after the reseed
     expect(screen.queryByText('Could not create playlist')).not.toBeInTheDocument();
+  });
+
+  test('AC10: creating on the fly keeps a pending toggle of an existing playlist', async () => {
+    // 'Keep' exists but does not contain the song; the user toggles it ON (unsaved),
+    // then creates a new playlist on the fly — 'Keep' must remain selected.
+    mockedPlaylistService.getAllPlaylists.mockResolvedValue([{ uid: 'pl-keep', name: 'Keep', songUids: [] }]);
+    mockedPlaylistService.createPlaylist.mockResolvedValue({ uid: 'pl-new', name: 'New set', songUids: ['song-a'] });
+
+    const input = await openPickerAndType('');
+    fireEvent.click(await screen.findByRole('option', { name: 'Keep' })); // toggle it ON
+    await waitFor(() => expect(screen.getByTitle('Keep')).toBeInTheDocument());
+
+    fireEvent.focus(input);
+    fireEvent.change(input, { target: { value: 'New set' } });
+    fireEvent.click(await screen.findByText('Create playlist "New set"'));
+
+    // Both survive the seed effect that re-fires on the new `playlists` value.
+    expect(await screen.findByTitle('New set')).toBeInTheDocument();
+    await settle();
+    expect(screen.getByTitle('New set')).toBeInTheDocument();
+    expect(screen.getByTitle('Keep')).toBeInTheDocument(); // pending toggle not clobbered
   });
 
   test('AC9: a non-conflict failure shows a toast and does not add a chip', async () => {

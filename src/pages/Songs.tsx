@@ -230,9 +230,14 @@ function Songs() {
   const [playlistSearchQuery, setPlaylistSearchQuery] = useState('');
   const [selectedPlaylistIndex, setSelectedPlaylistIndex] = useState(-1);
   const playlistListRef = useRef<HTMLDivElement>(null);
+  // Tracks which editingUid we've already seeded the playlist selection for, so a
+  // later `playlists` change (e.g. creating a playlist on the fly) does NOT reset
+  // the user's unsaved toggles. See the editing-data effect.
+  const seededPlaylistsForEditRef = useRef<string | null>(null);
   // Same filtered list the dropdown renders, so the keyboard highlight matches.
+  // Trim the query so a trailing space can't desync this from the create-detection.
   const filteredPlaylists = playlists.filter(
-    p => !selectedPlaylistUids.has(p.uid) && p.name.toLowerCase().includes(playlistSearchQuery.toLowerCase()),
+    p => !selectedPlaylistUids.has(p.uid) && p.name.toLowerCase().includes(playlistSearchQuery.trim().toLowerCase()),
   );
   // Story 10.2: offer "Create playlist" when the typed name matches NO existing
   // playlist (case-insensitive, same folding as the server's lower(name) index).
@@ -688,6 +693,7 @@ function Songs() {
     if (!editingUid) {
       setEditingSongPlays([]);
       setSelectedPlaylistUids(new Set());
+      seededPlaylistsForEditRef.current = null;
       return;
     }
 
@@ -696,18 +702,25 @@ function Songs() {
         // Load plays for the song being edited
         const plays = await songPlayService.getPlays(editingUid);
         setEditingSongPlays(plays);
-
-        // Find playlists that contain this song
-        const songPlaylists = playlists.filter(pl => 
-          pl.songUids?.includes(editingUid)
-        );
-        setSelectedPlaylistUids(new Set(songPlaylists.map(pl => pl.uid)));
       } catch (err) {
         console.error('Error loading editing data:', err);
       }
     };
 
     loadEditingData();
+
+    // Seed the playlist selection from persisted membership ONCE per edit session.
+    // Re-seeding on every `playlists` change would clobber unsaved toggles and the
+    // just-created / 409-selected playlist (story 10.2 set `playlists` mid-edit).
+    // Lock only once playlists are actually loaded, so the initial-load race still
+    // seeds correctly.
+    if (seededPlaylistsForEditRef.current !== editingUid) {
+      const songPlaylists = playlists.filter(pl => pl.songUids?.includes(editingUid));
+      setSelectedPlaylistUids(new Set(songPlaylists.map(pl => pl.uid)));
+      if (playlists.length > 0) {
+        seededPlaylistsForEditRef.current = editingUid;
+      }
+    }
   }, [editingUid, playlists]);
 
 

@@ -6,7 +6,7 @@ arch_decision: "Création à la volée côté front, consommant le 409 serveur p
 
 # Story 10.2: Créer une playlist à la volée depuis l'édition d'une chanson
 
-Status: review
+Status: done
 
 <!-- Finalisée le 2026-06-28 après merge de 10.1 (dans la branche feat/epic-10-confort-playlists, commit 76bb548). Le 409 livré renvoie bien `{ message: 'Playlist already exists', playlist: <playlist avec songUids dérivés> }` ; 10.1 trim le nom à l'écriture → la garde client `.toLowerCase()` est en parité exacte avec l'index serveur `lower(name)`. Aucun ajustement de cadrage requis. -->
 <!-- Note: Validation is optional. Run validate-create-story for quality check before dev-story. -->
@@ -181,7 +181,7 @@ claude-opus-4-8[1m] (dev-story workflow)
 
 - `src/services/playlistService.ts` (EDIT — `PlaylistConflictError` + parse 409 dans `createPlaylist`)
 - `src/pages/Songs.tsx` (EDIT — détection exact-match + option Create + `handleCreatePlaylist`/`selectPlaylistIntoSong` + combobox toujours rendu)
-- `src/__tests__/SongsPlaylistInlineCreate.test.tsx` (NEW — 6 tests AC1–AC11)
+- `src/__tests__/SongsPlaylistInlineCreate.test.tsx` (NEW — 7 tests AC1–AC11, incl. AC8 durable + AC10 anti-clobber)
 - `CHANGELOG.md` (EDIT — entrée `[Unreleased]` Added)
 - `_bmad-output/implementation-artifacts/sprint-status.yaml` (EDIT — statut 10-2 → review)
 
@@ -189,4 +189,21 @@ claude-opus-4-8[1m] (dev-story workflow)
 
 | Date       | Version | Description                                                                 |
 |------------|---------|-----------------------------------------------------------------------------|
+| 2026-06-28 | 0.2     | Code review 3 couches : 1 bug **HIGH** corrigé (l'effet de seed clobait `selectedPlaylistUids` au create à la volée → cassait AC8 + régressait AC10 ; fix = seed verrouillé par session via ref) + 1 Med (filtre trimmé). Tests AC8 durcis (settled) + AC10 anti-clobber ajoutés (échouent sur l'ancien code). Front 297 ✓, tsc 0, lint clean. Statut → done. |
 | 2026-06-28 | 0.1     | Story 10.2 — création de playlist à la volée depuis la fiche chanson. `PlaylistConflictError` + parse 409 (service) ; détection exact-match client + option « Create playlist "…" » + `handleCreatePlaylist` (crée avec la chanson, 409→sélectionne l'existante, erreur→toast) dans `Songs.tsx` ; combobox toujours rendu (création même sans playlist). Mirror 8.2. Front 296 ✓ (+6), tsc 0, lint clean. Statut → review. |
+
+## Review Findings
+
+_Code review adversariale 3 couches (Blind / Edge / Auditor) — 2026-06-28. **1 bug HIGH réel** (reproduit empiriquement par Edge + Auditor). 2 patches, 2 reports, 5 écartés._
+
+- [x] [Review][Patch→Fixed] **HIGH — l'effet de seed ré-écrasait `selectedPlaylistUids` à chaque changement de `playlists` → cassait AC8 + régressait AC10** [src/pages/Songs.tsx:686-714] — l'effet recalculait `selectedPlaylistUids` depuis la membership persistée à chaque `setPlaylists`, donc `selectPlaylistIntoSong` (create à la volée) **clobbait** la sélection. **Corrigé** : seed **une seule fois par session d'édition** via `seededPlaylistsForEditRef` (verrou posé une fois `playlists` chargé → la course de chargement initial reste gérée, le clobber s'arrête). **Tests renforcés/ajoutés** : AC8 assert l'état **settled** (liste initiale non vide → verrou actif) ; AC10 survie d'un toggle existant. **Les deux échouent sur l'ancien code, passent sur le fix** (vérifié par stash). AC6 (no double-add on-Save) reste garanti par construction (diff `hasSong`/`shouldHaveSong`).
+- [x] [Review][Patch→Fixed] **Med — filtre `filteredPlaylists` non trimmé alors que la détection Create l'est** [src/pages/Songs.tsx:234-238] — **Corrigé** : `filteredPlaylists` filtre désormais sur `playlistSearchQuery.trim().toLowerCase()` → plus de désync sur un espace final.
+- [x] [Review][Defer] **Pas de garde anti-double-soumission sur `handleCreatePlaylist`** [src/pages/Songs.tsx] — double Entrée/clic rapide sur Create lance 2 `createPlaylist` concurrents ; le 2ᵉ retombe en 409 et sélectionne le 1ᵉ (inoffensif vu l'unicité serveur 10.1). — deferred, rare, auto-rattrapé par le 409.
+- [x] [Review][Defer] **Empty-state « No playlists found » trompeur si le nom tapé matche une playlist déjà sélectionnée** [src/pages/Songs.tsx] — `hasExactPlaylist` (toutes) cache Create, mais `filteredPlaylists` (exclut les sélectionnées) est vide → libellé « No playlists found » alors qu'elle existe et est déjà cochée. Cosmétique. — deferred, cosmétique.
+
+### Findings écartés (bruit / déjà géré, non persistés)
+- **`'__createPlaylist' in option` sur `undefined` (crash potentiel)** — Edge a vérifié : `handleComboKeyDown` borne (`index < options.length` sur Entrée, `comboboxKeyboard.ts:52`) et `onChange` reset l'index à -1 à chaque frappe → inatteignable. Écarté.
+- **Double-persistance de la membership au Save** — Edge a vérifié le diff on-Save (`hasSong && shouldHaveSong` → no-op). Écarté (géré).
+- **409 sans `playlist` dans le body → toast générique** — 10.1 renvoie **toujours** la playlist (`findExistingByName`) ; dégradation acceptable sinon. Écarté.
+- **`setTimeout` du toast non `clearTimeout`** — pattern page-wide pré-existant (5 occurrences), non introduit par 10.2. Écarté (pré-existant).
+- **Chemin d'échec laisse l'index/dropdown stale** — l'index se réinitialise à la frappe suivante (auto-guéri). Écarté.

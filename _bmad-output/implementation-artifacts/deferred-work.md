@@ -40,6 +40,13 @@ _Les 4 stories UI/confort (filtres Songlist, refacto SessionHistoryCard, chanson
 ### 🐛 Navigation clavier comboboxes — ✅ RÉSOLU (2026-06-28, branche `fix/songform-combobox-keyboard`, à merger)
 > Diagnostic affiné : les champs réellement cassés étaient **Genre, Languages et le Playlist picker** (aucun `onKeyDown` → flèches mortes + Entrée soumettait le form) ; artiste/album avaient déjà la nav clavier. Au-delà du bug initial, mise à niveau **des 6 comboboxes** sur un util partagé : nav clavier (flèches + Entrée sélectionne sans soumettre + Échap), scroll-into-view de l'option active, **état actif unifié souris/clavier** (un seul surlignage), **ARIA combobox éditable** (`aria-activedescendant`/`role`/`aria-selected`), options **hors tab-order** (`tabIndex=-1`) et **Tab ferme la liste net**. 286 tests front verts. [src/utils/comboboxKeyboard.ts, SongForm.tsx, Songs.tsx, MySessionsPage.tsx]
 
+## Deferred from: code review of story-10.2 (2026-06-28)
+
+> Review adversariale 3 couches. 1 bug HIGH corrigé (reseed clobber), 1 Med corrigé (filtre non trimmé). 2 reports :
+
+- **10-2 — Pas de garde anti-double-soumission sur `handleCreatePlaylist`** : double Entrée/clic rapide sur « Create playlist » lance 2 `createPlaylist` concurrents ; le 2ᵉ retombe en 409 et sélectionne le 1ᵉ (inoffensif vu l'unicité serveur 10.1, mais un flicker possible). Durcir avec un flag in-flight si ça se voit. [`src/pages/Songs.tsx` handleCreatePlaylist]
+- **10-2 — Empty-state « No playlists found » trompeur** : taper le nom exact d'une playlist déjà sélectionnée cache l'option Create (correct) mais `filteredPlaylists` (exclut les sélectionnées) est vide → libellé « No playlists found » alors qu'elle existe et est cochée. Cosmétique. [`src/pages/Songs.tsx` picker empty-state]
+
 ## Deferred from: code review of story-10.1 (2026-06-28)
 
 > Review adversariale 3 couches (Blind / Edge / Auditor). Aucun bloquant, les 6 AC satisfaites. 2 patches appliqués dans la story ; 1 report :
