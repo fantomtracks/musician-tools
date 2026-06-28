@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
+import { useScrollAriaSelectedIntoView } from '../utils/comboboxKeyboard';
 import { practiceSessionService, type CreatePracticeSessionDTO, type CreateSessionItemDTO, type UpdateSessionItemDTO, type UpdatePracticeSessionDTO, type PracticeSession } from '../services/practiceSessionService';
 import { SessionHistoryCard } from '../components/SessionHistoryCard';
 import { songService, type Song } from '../services/songService';
@@ -54,6 +55,9 @@ function EntryRefPicker({
   const [searching, setSearching] = useState(false);
   const [searchText, setSearchText] = useState('');
   const [active, setActive] = useState(-1);
+  const listRef = useRef<HTMLDivElement>(null);
+  // Keep the keyboard-highlighted option visible (grouped listbox → aria-selected).
+  useScrollAriaSelectedIntoView(listRef, active, open);
 
   // The label of the current selection. A deleted ref (orphan) falls back to its
   // FR4 snapshot; an empty ref with no snapshot shows nothing (placeholder).
@@ -150,6 +154,7 @@ function EntryRefPicker({
       />
       {open && groups.length > 0 && (
         <div
+          ref={listRef}
           role="listbox"
           aria-label={`Entry ${index + 1} suggestions`}
           className="absolute z-20 top-full left-0 right-0 mt-1 max-h-64 overflow-y-auto rounded-md border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 shadow-lg"

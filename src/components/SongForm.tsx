@@ -5,6 +5,7 @@ import type { SongPlay } from '../services/songPlayService';
 import { instrumentTypeOptions, instrumentTechniquesMap } from '../constants/instrumentTypes';
 import SongFormInstruments from './SongFormInstruments';
 import { parseDurationToSeconds, formatSecondsToMmss } from '../utils/duration';
+import { handleComboKeyDown, useScrollHighlightIntoView } from '../utils/comboboxKeyboard';
 
 type Mode = 'add' | 'edit';
 
@@ -47,34 +48,6 @@ type SongFormProps = {
 const keyOptions = ['C','C#','Db','D','Eb','E','F','F#','Gb','G','Ab','A','Bb','B'];
 const timeSignatureOptions = ['2/4', '3/4', '4/4', '5/4', '6/8', '7/8', '9/8', '12/8', '5/8', '7/4', '3/8', 'Other'];
 const modeOptions = ['Major', 'Minor', 'Dorian', 'Phrygian', 'Lydian', 'Mixolydian', 'Aeolian', 'Locrian', 'Other'];
-
-// Shared keyboard navigation for the multi-select search comboboxes (Genres,
-// Languages): arrows move the highlight, Enter selects the highlighted option
-// WITHOUT submitting the form, Escape closes. Mirrors the single-select
-// artist/album inputs, whose Enter never reached the form's submit.
-function handleComboKeyDown<T>(
-  e: React.KeyboardEvent<HTMLInputElement>,
-  options: T[],
-  index: number,
-  setIndex: React.Dispatch<React.SetStateAction<number>>,
-  setOpen: React.Dispatch<React.SetStateAction<boolean>>,
-  onSelect: (option: T) => void,
-): void {
-  if (e.key === 'ArrowDown') {
-    e.preventDefault();
-    setOpen(true);
-    setIndex(prev => (prev < options.length - 1 ? prev + 1 : prev));
-  } else if (e.key === 'ArrowUp') {
-    e.preventDefault();
-    setIndex(prev => (prev > 0 ? prev - 1 : -1));
-  } else if (e.key === 'Enter') {
-    e.preventDefault(); // never let Enter submit the form while picking
-    if (index >= 0 && index < options.length) onSelect(options[index]);
-  } else if (e.key === 'Escape') {
-    setOpen(false);
-    setIndex(-1);
-  }
-}
 const genreOptions = [
   'Acoustic',
   'Alternative',
@@ -170,6 +143,8 @@ export function SongForm(props: SongFormProps) {
   // Keep the keyboard-highlighted option scrolled into view in the dropdowns.
   const genreListRef = useRef<HTMLDivElement>(null);
   const languageListRef = useRef<HTMLDivElement>(null);
+  const artistListRef = useRef<HTMLDivElement>(null);
+  const albumListRef = useRef<HTMLDivElement>(null);
   const [albumSearchOpen, setAlbumSearchOpen] = useState(false);
   const [selectedAlbumIndex, setSelectedAlbumIndex] = useState(-1);
   const [artistSearchOpen, setArtistSearchOpen] = useState(false);
@@ -196,17 +171,10 @@ export function SongForm(props: SongFormProps) {
     }
   }, [currentInstruments, currentTechniques, onSetTechniques]);
 
-  useEffect(() => {
-    if (genreSearchOpen && selectedGenreIndex >= 0) {
-      genreListRef.current?.children[selectedGenreIndex]?.scrollIntoView?.({ block: 'nearest' });
-    }
-  }, [selectedGenreIndex, genreSearchOpen]);
-
-  useEffect(() => {
-    if (languageSearchOpen && selectedLanguageIndex >= 0) {
-      languageListRef.current?.children[selectedLanguageIndex]?.scrollIntoView?.({ block: 'nearest' });
-    }
-  }, [selectedLanguageIndex, languageSearchOpen]);
+  useScrollHighlightIntoView(genreListRef, selectedGenreIndex, genreSearchOpen);
+  useScrollHighlightIntoView(languageListRef, selectedLanguageIndex, languageSearchOpen);
+  useScrollHighlightIntoView(artistListRef, selectedArtistIndex, artistSearchOpen);
+  useScrollHighlightIntoView(albumListRef, selectedAlbumIndex, albumSearchOpen);
 
   // Lifted so the keyboard handler and the rendered dropdown index the SAME list.
   const filteredGenreOptions = genreOptions.filter(
@@ -337,7 +305,7 @@ export function SongForm(props: SongFormProps) {
             autoComplete="off"
           />
           {artistSearchOpen && suggestedArtists.length > 0 && (
-            <div className="absolute top-full left-0 right-0 mt-1 bg-white dark:bg-gray-700 border border-gray-300 dark:border-gray-600 rounded-md shadow-lg z-10 max-h-64 overflow-y-auto">
+            <div ref={artistListRef} className="absolute top-full left-0 right-0 mt-1 bg-white dark:bg-gray-700 border border-gray-300 dark:border-gray-600 rounded-md shadow-lg z-10 max-h-64 overflow-y-auto">
               {suggestedArtists
                 .filter(artist => 
                   !form.artist || artist.toLowerCase().includes(form.artist.toLowerCase())
@@ -563,7 +531,7 @@ export function SongForm(props: SongFormProps) {
                   autoComplete="off"
                 />
                 {albumSearchOpen && suggestedAlbums.length > 0 && (
-                  <div className="absolute top-full left-0 right-0 mt-1 bg-white dark:bg-gray-700 border border-gray-300 dark:border-gray-600 rounded-md shadow-lg z-50 max-h-64 overflow-y-auto">
+                  <div ref={albumListRef} className="absolute top-full left-0 right-0 mt-1 bg-white dark:bg-gray-700 border border-gray-300 dark:border-gray-600 rounded-md shadow-lg z-50 max-h-64 overflow-y-auto">
                     {suggestedAlbums
                       .filter(album => 
                         !form.album || album.toLowerCase().includes(form.album.toLowerCase())

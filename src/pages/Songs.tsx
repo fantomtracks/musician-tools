@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { Link, useLocation, useNavigate } from 'react-router-dom';
 import { SongForm } from '../components/SongForm';
 import SongsList from '../components/SongsList';
@@ -9,6 +9,7 @@ import { playlistService, type Playlist } from '../services/playlistService';
 import { ConfirmDialog } from '../components/ConfirmDialog';
 import { instrumentTechniquesMap, instrumentTuningsMap, instrumentTypeOptions } from '../constants/instrumentTypes';
 import { applySongFilters, NO_INSTRUMENT } from '../utils/songFilters';
+import { handleComboKeyDown, useScrollHighlightIntoView } from '../utils/comboboxKeyboard';
 import { findDuplicateSong } from '../utils/songDuplicate';
 import { formatLocalDate } from '../utils/heatmap';
 
@@ -227,6 +228,13 @@ function Songs() {
   const [selectedPlaylistUids, setSelectedPlaylistUids] = useState<Set<string>>(new Set());
   const [playlistSearchOpen, setPlaylistSearchOpen] = useState(false);
   const [playlistSearchQuery, setPlaylistSearchQuery] = useState('');
+  const [selectedPlaylistIndex, setSelectedPlaylistIndex] = useState(-1);
+  const playlistListRef = useRef<HTMLDivElement>(null);
+  // Same filtered list the dropdown renders, so the keyboard highlight matches.
+  const filteredPlaylists = playlists.filter(
+    p => !selectedPlaylistUids.has(p.uid) && p.name.toLowerCase().includes(playlistSearchQuery.toLowerCase()),
+  );
+  useScrollHighlightIntoView(playlistListRef, selectedPlaylistIndex, playlistSearchOpen);
   const [suggestedAlbums, setSuggestedAlbums] = useState<string[]>([]);
   const [suggestedArtists, setSuggestedArtists] = useState<string[]>([]);
   const [languageFilterOptions, setLanguageFilterOptions] = useState<string[]>([]);
@@ -1761,8 +1769,12 @@ function Songs() {
                         type="text"
                         placeholder="Search or select a playlist"
                         value={playlistSearchQuery}
-                        onChange={(e) => setPlaylistSearchQuery(e.target.value)}
+                        onChange={(e) => { setPlaylistSearchQuery(e.target.value); setSelectedPlaylistIndex(-1); }}
                         onFocus={() => setPlaylistSearchOpen(true)}
+                        onKeyDown={(e) => handleComboKeyDown(
+                          e, filteredPlaylists, selectedPlaylistIndex, setSelectedPlaylistIndex, setPlaylistSearchOpen,
+                          (playlist) => { handleTogglePlaylist(playlist.uid); setPlaylistSearchQuery(''); setPlaylistSearchOpen(false); setSelectedPlaylistIndex(-1); },
+                        )}
                         className="mt-1 block w-full rounded-md border border-gray-300 dark:border-gray-600 p-2 focus:outline-none focus:ring-2 focus:ring-brand-500 dark:bg-gray-700 dark:text-gray-100"
                       />
                       {playlistSearchOpen && (
@@ -1775,10 +1787,8 @@ function Songs() {
                             aria-label="Close playlist dropdown"
                             tabIndex={-1}
                           />
-                          <div className="absolute top-full left-0 right-0 z-50 mt-1 rounded-md border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 shadow-lg max-h-32 overflow-y-auto">
-                            {playlists
-                              .filter(p => !selectedPlaylistUids.has(p.uid) && p.name.toLowerCase().includes(playlistSearchQuery.toLowerCase()))
-                              .map(playlist => (
+                          <div ref={playlistListRef} className="absolute top-full left-0 right-0 z-50 mt-1 rounded-md border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 shadow-lg max-h-32 overflow-y-auto">
+                            {filteredPlaylists.map((playlist, index) => (
                                 <button
                                   key={playlist.uid}
                                   type="button"
@@ -1786,13 +1796,18 @@ function Songs() {
                                     handleTogglePlaylist(playlist.uid);
                                     setPlaylistSearchQuery('');
                                     setPlaylistSearchOpen(false);
+                                    setSelectedPlaylistIndex(-1);
                                   }}
-                                  className="w-full text-left px-3 py-2 hover:bg-gray-100 dark:hover:bg-gray-600 text-gray-700 dark:text-gray-100"
+                                  className={`w-full text-left px-3 py-2 text-gray-700 dark:text-gray-100 ${
+                                    index === selectedPlaylistIndex
+                                      ? 'bg-brand-100 dark:bg-brand-900/40'
+                                      : 'hover:bg-gray-100 dark:hover:bg-gray-600'
+                                  }`}
                                 >
                                   {playlist.name}
                                 </button>
                               ))}
-                            {playlists.filter(p => !selectedPlaylistUids.has(p.uid) && p.name.toLowerCase().includes(playlistSearchQuery.toLowerCase())).length === 0 && (
+                            {filteredPlaylists.length === 0 && (
                               <div className="px-3 py-2 text-sm text-gray-500 dark:text-gray-400">No playlists found</div>
                             )}
                           </div>
