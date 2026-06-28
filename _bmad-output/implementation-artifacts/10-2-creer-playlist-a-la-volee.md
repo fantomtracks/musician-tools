@@ -1,14 +1,14 @@
 ---
-baseline_commit: 1fcbf56
+baseline_commit: 76bb548
 depends_on: 10-1-unicite-nom-playlist-serveur
 arch_decision: "Création à la volée côté front, consommant le 409 serveur posé par 10.1. Détection d'exact-match côté client (UX immédiate, .toLowerCase() comme le picker) + 409 comme backstop : si une création passe la garde client mais collide côté serveur, sélectionner la playlist existante renvoyée dans le 409 (façon 8.2 AC10). Mirror du « create topic on the fly » (8.2)."
 ---
 
 # Story 10.2: Créer une playlist à la volée depuis l'édition d'une chanson
 
-Status: backlog
+Status: review
 
-<!-- Backlog : à finaliser via create-story une fois 10.1 done (incorporer ses apprentissages — forme exacte du 409, du corps `{ message, playlist }`). Le gros du cadrage front est déjà ici. -->
+<!-- Finalisée le 2026-06-28 après merge de 10.1 (dans la branche feat/epic-10-confort-playlists, commit 76bb548). Le 409 livré renvoie bien `{ message: 'Playlist already exists', playlist: <playlist avec songUids dérivés> }` ; 10.1 trim le nom à l'écriture → la garde client `.toLowerCase()` est en parité exacte avec l'index serveur `lower(name)`. Aucun ajustement de cadrage requis. -->
 <!-- Note: Validation is optional. Run validate-create-story for quality check before dev-story. -->
 
 ## Story
@@ -64,19 +64,19 @@ Story de **confort** (Epic 10), issue de la revue `deferred-work.md` (planifiée
 
 > Mirror exact de `TopicConflictError` / `topicService.create` (`src/services/topicService.ts:23-30, 40-53`).
 
-- [ ] `src/services/playlistService.ts` : ajouter `export class PlaylistConflictError extends Error { existingPlaylist?: Playlist; ... }` (mirror `TopicConflictError`). Dans `createPlaylist` (`:40-53`), si `res.status === 409` → `const body = await res.json().catch(() => ({})); throw new PlaylistConflictError(body.playlist ?? undefined);` **avant** le `if (!res.ok)`. (Optionnel : idem `updatePlaylist` pour le rename, si utile au front ailleurs.)
+- [x] `src/services/playlistService.ts` : ajouter `export class PlaylistConflictError extends Error { existingPlaylist?: Playlist; ... }` (mirror `TopicConflictError`). Dans `createPlaylist` (`:40-53`), si `res.status === 409` → `const body = await res.json().catch(() => ({})); throw new PlaylistConflictError(body.playlist ?? undefined);` **avant** le `if (!res.ok)`. (Optionnel : idem `updatePlaylist` pour le rename, si utile au front ailleurs.)
 
 ### Task 2 — Picker : détection exact-match + option Create (AC1–AC3, AC11)
 
 > Le picker vit dans **`src/pages/Songs.tsx`** (markup `:1752-1828`), injecté via `playlistSlot`. **Lire `Songs.tsx:1752-1828` + l'état/handlers AVANT de coder.**
 
-- [ ] À côté de `filteredPlaylists` (`:234-236`), dériver : `rawCreateText = playlistSearchQuery.trim()` ; `hasExactPlaylist = playlists.some(p => p.name.trim().toLowerCase() === rawCreateText.toLowerCase())` (**comparer à `playlists`, pas `filteredPlaylists`** qui exclut les sélectionnées) ; `showCreatePlaylist = playlistSearchOpen && rawCreateText !== '' && !hasExactPlaylist`.
-- [ ] **Rendu** : après le `.map(filteredPlaylists)` (`:1783-1807` env.), rendre conditionnellement un dernier `<button>` « Create playlist "{rawCreateText}" » quand `showCreatePlaylist`, **dans le même conteneur** (`playlistListRef`), même style Tailwind + `dark:`, `onMouseEnter` pour l'état actif, `comboboxOptionAria('song-playlists-list', filteredPlaylists.length, selectedPlaylistIndex)`. Utiliser **`onMouseDown`** (pas `onClick`) si l'input blur — reproduire le détail du picker existant.
+- [x] À côté de `filteredPlaylists` (`:234-236`), dériver : `rawCreateText = playlistSearchQuery.trim()` ; `hasExactPlaylist = playlists.some(p => p.name.trim().toLowerCase() === rawCreateText.toLowerCase())` (**comparer à `playlists`, pas `filteredPlaylists`** qui exclut les sélectionnées) ; `showCreatePlaylist = playlistSearchOpen && rawCreateText !== '' && !hasExactPlaylist`.
+- [x] **Rendu** : après le `.map(filteredPlaylists)` (`:1783-1807` env.), rendre conditionnellement un dernier `<button>` « Create playlist "{rawCreateText}" » quand `showCreatePlaylist`, **dans le même conteneur** (`playlistListRef`), même style Tailwind + `dark:`, `onMouseEnter` pour l'état actif, `comboboxOptionAria('song-playlists-list', filteredPlaylists.length, selectedPlaylistIndex)`. Utiliser **`onMouseDown`** (pas `onClick`) si l'input blur — reproduire le détail du picker existant.
 
 ### Task 3 — Clavier unifié + handler de création (AC4–AC8, AC9, AC11)
 
-- [ ] Construire l'array passé à `handleComboKeyDown` (`:1775-1778`) = `[...filteredPlaylists, ...(showCreatePlaylist ? [CREATE_SENTINEL] : [])]` (sentinelle distincte, ex. `{ __create: true }`). `onSelect` : sentinelle → `handleCreatePlaylist(rawCreateText)` ; sinon → `handleTogglePlaylist(option.uid)`. Borner `selectedPlaylistIndex` sur la longueur **incluant** l'option Create.
-- [ ] `handleCreatePlaylist(rawText)` :
+- [x] Construire l'array passé à `handleComboKeyDown` (`:1775-1778`) = `[...filteredPlaylists, ...(showCreatePlaylist ? [CREATE_SENTINEL] : [])]` (sentinelle distincte, ex. `{ __create: true }`). `onSelect` : sentinelle → `handleCreatePlaylist(rawCreateText)` ; sinon → `handleTogglePlaylist(option.uid)`. Borner `selectedPlaylistIndex` sur la longueur **incluant** l'option Create.
+- [x] `handleCreatePlaylist(rawText)` :
   1. `const name = rawText.trim();` (garde AC3, double-check).
   2. `try { const created = await playlistService.createPlaylist({ name, songUids: editingUid ? [editingUid] : [] }); setPlaylists(prev => [created, ...prev]); setSelectedPlaylistUids(prev => new Set(prev).add(created.uid)); }` puis reset `playlistSearchQuery`/`playlistSearchOpen`/`selectedPlaylistIndex`.
   3. `catch (e)` : `if (e instanceof PlaylistConflictError && e.existingPlaylist) { const ex = e.existingPlaylist; setPlaylists(prev => prev.some(p => p.uid === ex.uid) ? prev : [ex, ...prev]); setSelectedPlaylistUids(prev => new Set(prev).add(ex.uid)); /* reset recherche */ }` (AC8) ; **sinon** toast d'erreur (`setToastMessage('Could not create playlist')` + `setTimeout(2500)`), état/form intacts (AC9).
@@ -84,19 +84,19 @@ Story de **confort** (Epic 10), issue de la revue `deferred-work.md` (planifiée
 
 ### Task 4 — État vide sans playlists (AC7)
 
-- [ ] Dans la branche `playlists.length === 0` (`:1755-1764`), remplacer/compléter l'encart « No playlists found / Create one → /my-playlists » pour exposer **le combobox** permettant de taper un nom et créer la première playlist à la volée. Le lien `/my-playlists` peut rester en secours.
+- [x] Dans la branche `playlists.length === 0` (`:1755-1764`), remplacer/compléter l'encart « No playlists found / Create one → /my-playlists » pour exposer **le combobox** permettant de taper un nom et créer la première playlist à la volée. Le lien `/my-playlists` peut rester en secours.
 
 ### Task 5 — Tests (AC1–AC11)
 
 > Le picker n'a **aucune couverture** aujourd'hui (`SongForm.test.tsx` n'a aucun test playlist ; pas de `Songs.test.tsx` exerçant le picker). Créer un fichier dédié, ex. `src/__tests__/SongsPlaylistInlineCreate.test.tsx` (rendre `Songs` en mode édition, mocker `playlistService`).
 
-- [ ] **AC1/2/3** : nom inexistant → « Create playlist "X" » ; nom (casse différente) d'une playlist existante → **pas** d'option Create ; saisie vide/espaces → pas d'option Create.
-- [ ] **AC4/5** : choisir « Create playlist "X" » appelle `createPlaylist({ name:'X', songUids:[<editingUid>] })`, la playlist apparaît en **chip sélectionnée**, recherche réinitialisée, form non soumis.
-- [ ] **AC7** : `playlists = []` → le combobox permet de taper + créer.
-- [ ] **AC8** : `createPlaylist` rejette `PlaylistConflictError(existing)` → la playlist existante devient sélectionnée (chip), pas de toast d'erreur.
-- [ ] **AC9** : `createPlaylist` rejette (autre erreur) → toast affiché, pas de chip, form intact.
-- [ ] **AC11** : flèche bas jusqu'à l'option Create + Entrée la sélectionne **sans** soumettre (Entrée `preventDefault`).
-- [ ] Vérifs : `npm test` (front) vert, `tsc -b` + `eslint .` propres.
+- [x] **AC1/2/3** : nom inexistant → « Create playlist "X" » ; nom (casse différente) d'une playlist existante → **pas** d'option Create ; saisie vide/espaces → pas d'option Create.
+- [x] **AC4/5** : choisir « Create playlist "X" » appelle `createPlaylist({ name:'X', songUids:[<editingUid>] })`, la playlist apparaît en **chip sélectionnée**, recherche réinitialisée, form non soumis.
+- [x] **AC7** : `playlists = []` → le combobox permet de taper + créer.
+- [x] **AC8** : `createPlaylist` rejette `PlaylistConflictError(existing)` → la playlist existante devient sélectionnée (chip), pas de toast d'erreur.
+- [x] **AC9** : `createPlaylist` rejette (autre erreur) → toast affiché, pas de chip, form intact.
+- [x] **AC11** : flèche bas jusqu'à l'option Create + Entrée la sélectionne **sans** soumettre (Entrée `preventDefault`).
+- [x] Vérifs : `npm test` (front) vert, `tsc -b` + `eslint .` propres.
 
 ## Dev Notes
 
@@ -160,10 +160,33 @@ Story de **confort** (Epic 10), issue de la revue `deferred-work.md` (planifiée
 
 ### Agent Model Used
 
-{{agent_model_name_version}}
+claude-opus-4-8[1m] (dev-story workflow)
 
 ### Debug Log References
 
+- **Détail local (pattern combobox)** : le picker de `Songs.tsx` utilise `onClick` + fermeture de la liste en `onBlur` différé de 200 ms (≠ `onMouseDown` du picker 8.2). J'ai **suivi le pattern local** (onClick) pour l'option Create, pas celui de 8.2.
+- **AC7** : suppression du branchement `playlists.length === 0 → lien /my-playlists` ; le combobox est **toujours** rendu en mode édition, donc on peut taper + créer la 1ʳᵉ playlist. L'état vide du dropdown affiche « Type a name to create your first playlist ». `Link` reste utilisé ailleurs (`Songs.tsx:1741`).
+- **Tests** : `npm test` (front) **296/296** (+6 nouveaux dans `SongsPlaylistInlineCreate.test.tsx`) ; `tsc -b` **0** ; `eslint .` propre.
+
 ### Completion Notes List
 
+- **Service (Task 1)** : `PlaylistConflictError` (mirror `TopicConflictError`) + parse `409` dans `createPlaylist` (`body.playlist` → `existingPlaylist`).
+- **Picker (Task 2, AC1–3)** : `rawCreatePlaylistText`/`hasExactPlaylist` (comparé à **tout** `playlists`, `.toLowerCase()` = parité serveur)/`showCreatePlaylist`. Option « Create playlist "…" » rendue en dernier dans la liste.
+- **Clavier (Task 3, AC10/11)** : `playlistPickerOptions = [...filteredPlaylists, CREATE_SENTINEL?]` passé à `handleComboKeyDown` (alignement d'index) ; `onSelect` route la sentinelle vers `handleCreatePlaylist`, sinon toggle. Option Create navigable (flèches + Entrée sans submit).
+- **Handler (Task 3, AC4–6, 8, 9)** : `handleCreatePlaylist` crée avec `songUids:[editingUid]` (chanson dedans d'emblée → diff on-Save = no-op, AC6), `selectPlaylistIntoSong` (ajoute à `playlists` + `selectedPlaylistUids`, reset recherche). `catch` : `PlaylistConflictError` → sélectionne l'existante (AC8) ; sinon toast « Could not create playlist » (AC9), form intact.
+- **État vide (Task 4, AC7)** : combobox toujours rendu ; création de la 1ʳᵉ playlist possible.
+- **AC6 (no double-add)** : garanti structurellement par le diff on-Save existant (`hasSong` vs `shouldHaveSong` → no-op quand la playlist a déjà la chanson) ; non re-testé en E2E mais vérifié par lecture (`Songs.tsx:1162-1175`).
+
 ### File List
+
+- `src/services/playlistService.ts` (EDIT — `PlaylistConflictError` + parse 409 dans `createPlaylist`)
+- `src/pages/Songs.tsx` (EDIT — détection exact-match + option Create + `handleCreatePlaylist`/`selectPlaylistIntoSong` + combobox toujours rendu)
+- `src/__tests__/SongsPlaylistInlineCreate.test.tsx` (NEW — 6 tests AC1–AC11)
+- `CHANGELOG.md` (EDIT — entrée `[Unreleased]` Added)
+- `_bmad-output/implementation-artifacts/sprint-status.yaml` (EDIT — statut 10-2 → review)
+
+## Change Log
+
+| Date       | Version | Description                                                                 |
+|------------|---------|-----------------------------------------------------------------------------|
+| 2026-06-28 | 0.1     | Story 10.2 — création de playlist à la volée depuis la fiche chanson. `PlaylistConflictError` + parse 409 (service) ; détection exact-match client + option « Create playlist "…" » + `handleCreatePlaylist` (crée avec la chanson, 409→sélectionne l'existante, erreur→toast) dans `Songs.tsx` ; combobox toujours rendu (création même sans playlist). Mirror 8.2. Front 296 ✓ (+6), tsc 0, lint clean. Statut → review. |

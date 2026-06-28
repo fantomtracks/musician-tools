@@ -11,6 +11,18 @@ export type Playlist = {
 export type CreatePlaylistDTO = Omit<Playlist, 'uid' | 'createdAt' | 'updatedAt'>;
 export type UpdatePlaylistDTO = Partial<CreatePlaylistDTO>;
 
+// Thrown on a 409 from create/update (story 10.1's case-insensitive name unique
+// index). Carries the canonical existing playlist so callers select it
+// deterministically instead of creating a duplicate.
+export class PlaylistConflictError extends Error {
+  existingPlaylist?: Playlist;
+  constructor(existingPlaylist?: Playlist) {
+    super('Playlist already exists');
+    this.name = 'PlaylistConflictError';
+    this.existingPlaylist = existingPlaylist;
+  }
+}
+
 const API_BASE = '/api';
 
 export const playlistService = {
@@ -46,6 +58,10 @@ export const playlistService = {
       body: JSON.stringify(playlist),
       credentials: 'include'
     });
+    if (response.status === 409) {
+      const body = await response.json().catch(() => ({} as { playlist?: Playlist }));
+      throw new PlaylistConflictError(body.playlist ?? undefined);
+    }
     if (!response.ok) {
       throw new Error('Failed to create playlist');
     }

@@ -5,7 +5,7 @@ import SongsList from '../components/SongsList';
 import { songService, type CreateSongDTO, type Song } from '../services/songService';
 import { instrumentService, type Instrument } from '../services/instrumentService';
 import { songPlayService, type SongPlay } from '../services/songPlayService';
-import { playlistService, type Playlist } from '../services/playlistService';
+import { playlistService, PlaylistConflictError, type Playlist } from '../services/playlistService';
 import { ConfirmDialog } from '../components/ConfirmDialog';
 import { instrumentTechniquesMap, instrumentTuningsMap, instrumentTypeOptions } from '../constants/instrumentTypes';
 import { applySongFilters, NO_INSTRUMENT } from '../utils/songFilters';
@@ -234,6 +234,21 @@ function Songs() {
   const filteredPlaylists = playlists.filter(
     p => !selectedPlaylistUids.has(p.uid) && p.name.toLowerCase().includes(playlistSearchQuery.toLowerCase()),
   );
+  // Story 10.2: offer "Create playlist" when the typed name matches NO existing
+  // playlist (case-insensitive, same folding as the server's lower(name) index).
+  // Compare against ALL playlists, not filteredPlaylists (which hides selected ones).
+  const rawCreatePlaylistText = playlistSearchQuery.trim();
+  const hasExactPlaylist = playlists.some(
+    p => p.name.trim().toLowerCase() === rawCreatePlaylistText.toLowerCase(),
+  );
+  const showCreatePlaylist = playlistSearchOpen && rawCreatePlaylistText !== '' && !hasExactPlaylist;
+  // The keyboard list MUST equal the rendered list (index alignment): existing
+  // options first, then the Create option last when shown.
+  const CREATE_PLAYLIST_OPTION = { __createPlaylist: true } as const;
+  type PlaylistPickerOption = Playlist | typeof CREATE_PLAYLIST_OPTION;
+  const playlistPickerOptions: PlaylistPickerOption[] = showCreatePlaylist
+    ? [...filteredPlaylists, CREATE_PLAYLIST_OPTION]
+    : filteredPlaylists;
   useScrollHighlightIntoView(playlistListRef, selectedPlaylistIndex, playlistSearchOpen);
   const [suggestedAlbums, setSuggestedAlbums] = useState<string[]>([]);
   const [suggestedArtists, setSuggestedArtists] = useState<string[]>([]);
@@ -706,6 +721,43 @@ function Songs() {
       next.add(playlistUid);
     }
     setSelectedPlaylistUids(next);
+  };
+
+  // Select a playlist (existing or just-created) into the edited song and reset
+  // the picker's search — shared by the create flow and its 409 fallback.
+  const selectPlaylistIntoSong = (playlist: Playlist) => {
+    setPlaylists(prev => (prev.some(p => p.uid === playlist.uid) ? prev : [playlist, ...prev]));
+    setSelectedPlaylistUids(prev => {
+      const next = new Set(prev);
+      next.add(playlist.uid);
+      return next;
+    });
+    setPlaylistSearchQuery('');
+    setPlaylistSearchOpen(false);
+    setSelectedPlaylistIndex(-1);
+  };
+
+  // Story 10.2: create a new playlist on the fly (with the edited song already in
+  // it) without leaving the form. The on-Save diff then sees it already has the
+  // song → no double-add. A 409 (stale catalog raced server-side) selects the
+  // existing playlist instead of erroring.
+  const handleCreatePlaylist = async (rawText: string) => {
+    const name = rawText.trim();
+    if (!name) return;
+    try {
+      const created = await playlistService.createPlaylist({
+        name,
+        songUids: editingUid ? [editingUid] : [],
+      });
+      selectPlaylistIntoSong(created);
+    } catch (err) {
+      if (err instanceof PlaylistConflictError && err.existingPlaylist) {
+        selectPlaylistIntoSong(err.existingPlaylist);
+        return;
+      }
+      setToastMessage('Could not create playlist');
+      setTimeout(() => setToastMessage(null), 2500);
+    }
   };
 
   // True when the edited song's form differs from what was last loaded/saved.
@@ -1752,29 +1804,29 @@ function Songs() {
             playlistSlot={editingUid ? (
               <div className="mt-8 space-y-3">
                 <h2 className="text-sm font-semibold tracking-wide text-gray-700 dark:text-gray-100">Add to playlists</h2>
-                {playlists.length === 0 ? (
-                  <p className="text-sm text-gray-500 dark:text-gray-400">
-                    No playlists found.{' '}
-                    <Link
-                      to="/my-playlists"
-                      className="text-brand-600 dark:text-brand-400 hover:text-brand-700 dark:hover:text-brand-300"
-                    >
-                      Create one
-                    </Link>
-                  </p>
-                ) : (
-                  <div>
+                {/* Story 10.2: the combobox always renders (even with no playlists yet)
+                    so a new playlist can be created on the fly by typing a name. */}
+                <div>
                     <div className="relative z-30">
                       <input
                         type="text"
-                        placeholder="Search or select a playlist"
+                        placeholder="Search, select or create a playlist"
                         value={playlistSearchQuery}
                         onChange={(e) => { setPlaylistSearchQuery(e.target.value); setSelectedPlaylistIndex(-1); }}
                         onFocus={() => setPlaylistSearchOpen(true)}
                         onBlur={() => setTimeout(() => setPlaylistSearchOpen(false), 200)}
                         onKeyDown={(e) => handleComboKeyDown(
-                          e, filteredPlaylists, selectedPlaylistIndex, setSelectedPlaylistIndex, setPlaylistSearchOpen,
-                          (playlist) => { handleTogglePlaylist(playlist.uid); setPlaylistSearchQuery(''); setPlaylistSearchOpen(false); setSelectedPlaylistIndex(-1); },
+                          e, playlistPickerOptions, selectedPlaylistIndex, setSelectedPlaylistIndex, setPlaylistSearchOpen,
+                          (option) => {
+                            if ('__createPlaylist' in option) {
+                              handleCreatePlaylist(rawCreatePlaylistText);
+                            } else {
+                              handleTogglePlaylist(option.uid);
+                              setPlaylistSearchQuery('');
+                              setPlaylistSearchOpen(false);
+                              setSelectedPlaylistIndex(-1);
+                            }
+                          },
                         )}
                         className="mt-1 block w-full rounded-md border border-gray-300 dark:border-gray-600 p-2 focus:outline-none focus:ring-2 focus:ring-brand-500 dark:bg-gray-700 dark:text-gray-100"
                         {...comboboxInputAria('song-playlists-list', playlistSearchOpen, selectedPlaylistIndex)}
@@ -1800,8 +1852,24 @@ function Songs() {
                                   {playlist.name}
                                 </button>
                               ))}
-                            {filteredPlaylists.length === 0 && (
-                              <div className="px-3 py-2 text-sm text-gray-500 dark:text-gray-400">No playlists found</div>
+                            {showCreatePlaylist && (
+                              <button
+                                key="__create-playlist"
+                                type="button"
+                                {...comboboxOptionAria('song-playlists-list', filteredPlaylists.length, selectedPlaylistIndex)}
+                                onMouseEnter={() => setSelectedPlaylistIndex(filteredPlaylists.length)}
+                                onClick={() => handleCreatePlaylist(rawCreatePlaylistText)}
+                                className={`w-full text-left px-3 py-2 text-brand-600 dark:text-brand-400 ${
+                                  filteredPlaylists.length === selectedPlaylistIndex ? 'bg-brand-100 dark:bg-brand-900/40' : ''
+                                }`}
+                              >
+                                Create playlist "{rawCreatePlaylistText}"
+                              </button>
+                            )}
+                            {filteredPlaylists.length === 0 && !showCreatePlaylist && (
+                              <div className="px-3 py-2 text-sm text-gray-500 dark:text-gray-400">
+                                {playlists.length === 0 ? 'Type a name to create your first playlist' : 'No playlists found'}
+                              </div>
                             )}
                           </div>
                       )}
@@ -1823,7 +1891,6 @@ function Songs() {
                       </div>
                     )}
                   </div>
-                )}
               </div>
             ) : undefined}
           />

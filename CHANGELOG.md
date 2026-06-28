@@ -6,6 +6,9 @@ project adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+### Added
+- **Create a playlist without leaving a song** — from a song's edit screen, type a new name in "Add to playlists" and pick **Create playlist "…"** to make it and drop the song in, in one go. Works even when you have no playlists yet.
+
 ### Changed
 - **Playlist names ignore case** — "Rock" and "rock" now count as the same playlist, so you won't end up with accidental duplicates. (Any pre-existing duplicates are kept and quietly renamed so they stay distinct.)
 
