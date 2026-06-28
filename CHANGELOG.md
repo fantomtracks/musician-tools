@@ -6,6 +6,8 @@ project adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+## [1.7.0] — 2026-06-28
+
 ### Added
 - **Create a playlist without leaving a song** — from a song's edit screen, type a new name in "Add to playlists" and pick **Create playlist "…"** to make it and drop the song in, in one go. Works even when you have no playlists yet.
 
