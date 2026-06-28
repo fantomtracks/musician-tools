@@ -20,13 +20,13 @@ _Les 4 stories UI/confort (filtres Songlist, refacto SessionHistoryCard, chanson
 ### 🔐 Durcissement session — ✅ MERGÉ EN PROD (v1.6.0, merge `0d758eb`)
 > Issu de la review 7.3, élargi par 7.13. Implémenté : `sessionService.regenerateSession()` (promisifie `req.session.regenerate`) appelé dans `loginUser` ET `verifyEmail` avant de poser `loggedIn`/`user` → l'ID de session pré-auth + son token CSRF sont jetés. Côté front, `AuthContext` vide le cache CSRF (`clearCsrfToken`) au succès login + verify (`applyAuthenticatedUser`) → 1ʳᵉ mutation avec un token frais, pas de 403. Tests : usercontroller 25 ✓ (regenerate asserté), front 267 ✓, smoke-test login live OK. [usercontroller.js, sessionService.js, contexts/AuthContext.tsx]
 
-### 🧹 Lot ménage dette technique (story planifiée — groupée 2026-06-26)
-> Petits items inoffensifs (tout testé), à faire délibérément en un lot, pas en marge.
-- **Helper `issueAndSend(uid, email, type)` + `validateNewPassword(pw, confirm)`** — le couple `issueToken+send` est désormais **5×** (createUser / resendVerificationPublic(7.13) / forgotPassword / requestEmailChange / register-verify) et la validation mdp ≥10+confirmation 2×. [usercontroller.js, accountcontroller.js]
-- **Index non-unique `users_name` redondant** (couvert par `users_name_discriminator_unique`) → migration de drop. [migrations Users]
-- **CHECK SQL `discriminator ~ '^[0-9]{4}$'`** — l'invariant 4 chiffres ne vit que dans le code. [models/user.js]
-- **Garde format UUID incohérente** — song/instrument/playlist : `uid` non-UUID → 500 au lieu de 404 (cosmétique). Généraliser `UUID_PATTERN`→404. [song/instrument/playlist controllers]
-- **`getCsrfToken` sans dédup en vol** — thundering herd au cold-start (inoffensif). [src/services/csrf.ts]
+### 🧹 Lot ménage dette technique — ✅ RÉSOLU (2026-06-28, branche `chore/menage-dette-technique`, à merger)
+> Les 5 items traités en un lot, un commit chacun. Back 238 verts, lint clean ; migrations validées en local (up→down→up).
+- [x] **Helper `issueAndSend(type, {uid,email,payload})` + `validateNewPassword(pw, confirm)`** — couple issueToken+send centralisé (4×) dans `services/authFlows.js` ; validation mdp dédupliquée dans `utils/passwordPolicy.js`. Comportement/messages identiques. (item 1)
+- [x] **Index `users_name` redondant droppé** — migration `20260628000000` idempotente (même pattern que le drop playlist_songs). (item 2)
+- [x] **CHECK `users_discriminator_format`** — migration `20260628000100`, ajouté `NOT VALID` (enforce les nouveaux writes sans risque sur les rows legacy ; NULL autorisé). (item 3)
+- [x] **Garde UUID→404 généralisée** — `backend/utils/uuid.js` partagé ; gardes ajoutées sur song/instrument/playlist ; topic+practicesession basculés dessus. (item 4)
+- [x] **`getCsrfToken` dédup en vol** — promesse `inFlight` partagée pour les appels concurrents au cold-start. (item 5)
 
 ### 🎵 Créer une playlist à la volée depuis l'édition d'une chanson (story planifiée — 2026-06-26)
 - Depuis la fiche d'édition d'une chanson, pouvoir **créer une nouvelle playlist et y ajouter la chanson** sans quitter l'écran (taper un nom inexistant → « Créer la playlist … » → créée + chanson ajoutée). Même pattern UX que le « créer un sujet à la volée » du sélecteur d'entrée (8.2). À cadrer : emplacement dans `SongForm` (une section playlists ?), création + ajout en une action, lien `playlist_songs` (FK 5.7), feedback. [Songs.tsx/SongForm, MyPlaylistsPage, playlistcontroller]

@@ -14,7 +14,7 @@ function foldedNameMatch(name) {
 }
 
 // Reject malformed uids before they reach Postgres (invalid uuid input throws a DB error → 500)
-const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+const { UUID_PATTERN } = require('../utils/uuid');
 
 // GET all topics for logged-in user
 const getAllTopics = async (req, res, next) => {

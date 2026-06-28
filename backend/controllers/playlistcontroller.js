@@ -1,6 +1,7 @@
 const { Playlist, PlaylistSong, Song, sequelize } = require('../models');
 const createError = require('http-errors');
 const logger = require('../logger');
+const { isUuid } = require('../utils/uuid');
 
 // Story 5.7: songs live in the PlaylistSongs join table (real FK), not the
 // legacy Playlist.song_uids JSON column. The API contract is unchanged — every
@@ -82,6 +83,9 @@ const getPlaylist = async (req, res, next) => {
     }
 
     // Scoped lookup (story 7.5): not-found and not-yours both 404 — no ownership 403.
+    if (!isUuid(req.params.uid)) {
+      return next(createError(404, 'Playlist not found'));
+    }
     const playlist = await Playlist.findOne({ where: { uid: req.params.uid, userUid: userId } });
     if (!playlist) {
       return next(createError(404, 'Playlist not found'));
@@ -135,6 +139,9 @@ const updatePlaylist = async (req, res, next) => {
     }
 
     // Scoped lookup (story 7.5): not-found and not-yours both 404 — no ownership 403.
+    if (!isUuid(req.params.uid)) {
+      return next(createError(404, 'Playlist not found'));
+    }
     const playlist = await Playlist.findOne({ where: { uid: req.params.uid, userUid: userId } });
     if (!playlist) {
       return next(createError(404, 'Playlist not found'));
@@ -172,6 +179,9 @@ const deletePlaylist = async (req, res, next) => {
     }
 
     // Scoped lookup (story 7.5): not-found and not-yours both 404 — no ownership 403.
+    if (!isUuid(req.params.uid)) {
+      return next(createError(404, 'Playlist not found'));
+    }
     const playlist = await Playlist.findOne({ where: { uid: req.params.uid, userUid: userId } });
     if (!playlist) {
       return next(createError(404, 'Playlist not found'));
@@ -194,6 +204,12 @@ const addSongToPlaylist = async (req, res, next) => {
     }
 
     const { uid: playlistUid, songUid } = req.params;
+    if (!isUuid(playlistUid)) {
+      return next(createError(404, 'Playlist not found'));
+    }
+    if (!isUuid(songUid)) {
+      return next(createError(404, 'Song not found'));
+    }
 
     // Scoped lookup (story 7.5): not-found and not-yours both 404 — no ownership 403.
     const playlist = await Playlist.findOne({ where: { uid: playlistUid, userUid: userId } });
@@ -224,6 +240,12 @@ const removeSongFromPlaylist = async (req, res, next) => {
     }
 
     const { uid: playlistUid, songUid } = req.params;
+    if (!isUuid(playlistUid)) {
+      return next(createError(404, 'Playlist not found'));
+    }
+    if (!isUuid(songUid)) {
+      return next(createError(404, 'Song not found'));
+    }
 
     // Scoped lookup (story 7.5): not-found and not-yours both 404 — no ownership 403.
     const playlist = await Playlist.findOne({ where: { uid: playlistUid, userUid: userId } });

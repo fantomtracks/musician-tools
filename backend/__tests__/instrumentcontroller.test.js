@@ -42,9 +42,9 @@ describe('instrumentcontroller (story 7.5)', () => {
   describe('updateInstrument — scoped ownership (no 403 oracle)', () => {
     test('updates an owned instrument', async () => {
       const update = jest.fn();
-      Instrument.findOne.mockResolvedValue({ uid: 'i1', userUid: 'user-1', update });
+      Instrument.findOne.mockResolvedValue({ uid: '11111111-1111-4111-8111-111111111111', userUid: 'user-1', update });
       const res = mockRes();
-      await controller.updateInstrument({ session: { user: 'user-1' }, params: { uid: 'i1' }, body: { name: 'New' } }, res, mockNext());
+      await controller.updateInstrument({ session: { user: 'user-1' }, params: { uid: '11111111-1111-4111-8111-111111111111' }, body: { name: 'New' } }, res, mockNext());
       expect(update).toHaveBeenCalled();
       expect(res.json).toHaveBeenCalled();
     });
@@ -52,7 +52,7 @@ describe('instrumentcontroller (story 7.5)', () => {
     test('a foreign/unknown instrument → 404 (scoped out)', async () => {
       Instrument.findOne.mockResolvedValue(null);
       const next = mockNext();
-      await controller.updateInstrument({ session: { user: 'user-1' }, params: { uid: 'i1' }, body: { name: 'New' } }, mockRes(), next);
+      await controller.updateInstrument({ session: { user: 'user-1' }, params: { uid: '11111111-1111-4111-8111-111111111111' }, body: { name: 'New' } }, mockRes(), next);
       expect(next.mock.calls[0][0].status).toBe(404);
     });
   });
@@ -60,9 +60,9 @@ describe('instrumentcontroller (story 7.5)', () => {
   describe('deleteInstrument — scoped ownership (no 403 oracle)', () => {
     test('deletes an owned instrument', async () => {
       const destroy = jest.fn();
-      Instrument.findOne.mockResolvedValue({ uid: 'i1', userUid: 'user-1', destroy });
+      Instrument.findOne.mockResolvedValue({ uid: '11111111-1111-4111-8111-111111111111', userUid: 'user-1', destroy });
       const res = mockRes();
-      await controller.deleteInstrument({ session: { user: 'user-1' }, params: { uid: 'i1' } }, res, mockNext());
+      await controller.deleteInstrument({ session: { user: 'user-1' }, params: { uid: '11111111-1111-4111-8111-111111111111' } }, res, mockNext());
       expect(destroy).toHaveBeenCalled();
       expect(res.json).toHaveBeenCalledWith({ message: 'Instrument deleted successfully' });
     });
@@ -70,7 +70,23 @@ describe('instrumentcontroller (story 7.5)', () => {
     test('a foreign/unknown instrument → 404 (scoped out)', async () => {
       Instrument.findOne.mockResolvedValue(null);
       const next = mockNext();
-      await controller.deleteInstrument({ session: { user: 'user-1' }, params: { uid: 'i1' } }, mockRes(), next);
+      await controller.deleteInstrument({ session: { user: 'user-1' }, params: { uid: '11111111-1111-4111-8111-111111111111' } }, mockRes(), next);
+      expect(next.mock.calls[0][0].status).toBe(404);
+    });
+  });
+
+  describe('malformed uid guard (404, not a 500)', () => {
+    test('updateInstrument with a non-UUID uid → 404 without touching the DB', async () => {
+      const next = mockNext();
+      await controller.updateInstrument({ session: { user: 'user-1' }, params: { uid: 'not-a-uuid' }, body: { name: 'X' } }, mockRes(), next);
+      expect(Instrument.findOne).not.toHaveBeenCalled();
+      expect(next.mock.calls[0][0].status).toBe(404);
+    });
+
+    test('deleteInstrument with a non-UUID uid → 404 without touching the DB', async () => {
+      const next = mockNext();
+      await controller.deleteInstrument({ session: { user: 'user-1' }, params: { uid: 'not-a-uuid' } }, mockRes(), next);
+      expect(Instrument.findOne).not.toHaveBeenCalled();
       expect(next.mock.calls[0][0].status).toBe(404);
     });
   });
