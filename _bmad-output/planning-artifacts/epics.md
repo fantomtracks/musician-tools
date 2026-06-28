@@ -1061,3 +1061,32 @@ So that ranger une chanson dans une nouvelle playlist reste un seul geste, sans 
 **Then** la playlist existante (renvoyée dans le 409) est sélectionnée à la place — pas d'erreur bloquante, pas de doublon (façon 8.2 AC10)
 
 **And** création possible même sans aucune playlist (combobox dispo) ; nav clavier (Entrée sélectionne sans soumettre) ; échec réseau → toast non bloquant ; périmètre **mode édition** ; pas de régression du picker existant.
+
+## Epic 11: Dette technique / santé du socle
+
+_Ajouté 2026-06-28 — issu de la rétro Epic 10 (dette parité-sync promue en story planifiée). Epic « dette technique » : réduire la dette du socle plutôt qu'ajouter de la feature. Accueillera d'autres items dette au besoin._
+
+**Objectif :** faire des **migrations la source unique** du schéma et rendre tout écart **bruyant** (fail-fast), au lieu de machinerie d'auto-réparation qui duplique la SQL.
+
+### Story 11.1: Parité unicité dev/CI — migrations source unique + garde fail-fast (retrait du hook afterSync topic)
+
+As a mainteneur,
+I want que les index uniques fonctionnels (topics 7.12, playlists 10.1) viennent **uniquement des migrations** et qu'un boot sur un schéma incomplet **échoue clairement**,
+So that je n'aie ni divergence dev/CI silencieuse, ni SQL de migration dupliquée dans des hooks `afterSync` à maintenir.
+
+**Décision (rétro Epic 10) :** approche **« migrations = source unique + fail-fast »**, **pas** de hook `afterSync` côté playlists ; on **retire** celui des topics. Net : dette réduite.
+
+**Acceptance Criteria:**
+
+**Given** le boot backend (`server.js`, après `sequelize.sync({alter:false})`)
+**When** un index unique fonctionnel attendu manque (`topics_user_uid_name_ci_unaccent`, `playlists_user_uid_name_ci`)
+**Then** le boot **échoue clairement** (log explicite « run `make migrate` » + `process.exit(1)`), au lieu de servir un schéma sans unicité
+
+**Given** le hook `afterSync` de `backend/models/topic.js` (qui duplique la migration 7.12)
+**When** cette story est livrée
+**Then** il est **retiré** (la garde fail-fast remplace son rôle de filet) ; l'index non-unique `topics_name` et le contrat du modèle restent intacts ; **aucun** hook équivalent n'est ajouté côté playlists
+
+**Given** un dev qui lance `make start` / `make up` sur une base fraîche
+**Then** les migrations sont jouées (cibles dépendant de `migrate`) → les index existent → la garde ne se déclenche jamais en flux normal
+
+**And** commentaire trompeur de `server.js` (« Run migrations on startup » alors qu'il ne fait que `sync`) corrigé ; garde extraite en util **testée** (présent → no-op ; manquant → échec) ; suite back verte ; **prod non impactée** (release-migrate a déjà créé les index → garde passe) ; pas de dépendance npm.

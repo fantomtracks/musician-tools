@@ -35,7 +35,7 @@
 # - Dev moves story to 'review', then runs code-review (fresh context, different LLM recommended)
 
 generated: 2026-06-07
-last_updated: 2026-06-28  # Epic 10 complet + rétro done ; dette parité-sync promue en story planifiée ; reste à merger à la main
+last_updated: 2026-06-28  # Epic 11 ouvert ; story 11-1 (parité-sync : migrations source unique + fail-fast) → ready-for-dev
 project: musician-tools
 project_key: NOKEY
 tracking_system: file-system
@@ -127,3 +127,7 @@ development_status:
   10-1-unicite-nom-playlist-serveur: done            # backend ; migration (user_uid, lower(name)) + RENAME dedup + 409 ; review 3 couches OK (2 patches : trim + suffixe uid robuste) ; back 241✓ front 290✓
   10-2-creer-playlist-a-la-volee: done               # front ; option Create + PlaylistConflictError ; review 3 couches (1 HIGH reseed-clobber corrigé) ; front 297✓
   epic-10-retrospective: done    # 2026-06-28 — epic-10-retro-2026-06-28.md ; leçons : auditer les effets réveillés par un nouveau flux + voir rougir les tests de régression ; dette parité-sync promue en story planifiée
+
+  # Epic 11: Dette technique / santé du socle (issu rétro Epic 10)
+  epic-11: in-progress
+  11-1-parite-sync-unicite-dev: ready-for-dev   # backend ; migrations source unique + garde fail-fast au boot ; RETIRE le hook afterSync topic (pas de hook playlists) ; net dette −
