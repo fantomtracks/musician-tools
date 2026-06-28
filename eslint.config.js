@@ -19,5 +19,20 @@ export default tseslint.config([
       ecmaVersion: 2020,
       globals: globals.browser,
     },
+    rules: {
+      // Honour the `_`-prefix convention for intentionally-unused bindings
+      // (e.g. `const { uid: _uid, ...rest } = obj` to omit a field).
+      '@typescript-eslint/no-unused-vars': ['error', {
+        argsIgnorePattern: '^_',
+        varsIgnorePattern: '^_',
+        caughtErrorsIgnorePattern: '^_',
+      }],
+    },
+  },
+  {
+    // The Vite build config is intentionally @ts-nocheck (its proxy/plugin types
+    // are noisy and not worth gating on) — allow the directive here only.
+    files: ['vite.config.ts'],
+    rules: { '@typescript-eslint/ban-ts-comment': 'off' },
   },
 ])
