@@ -4,8 +4,10 @@ const logger = require('../logger');
 const { FREE_PRACTICE_NAME } = require('../constants/topics');
 const authEmails = require('../services/authEmails');
 const authTokenService = require('../services/authTokenService');
+const authFlows = require('../services/authFlows');
 const sessionService = require('../services/sessionService');
 const { CHECK_YOUR_INBOX } = require('../constants/messages');
+const { MIN_PASSWORD_LENGTH, validateNewPassword } = require('../utils/passwordPolicy');
 
 const createUser = async (req, res, next) => {
   // req.body is undefined when the request body is not JSON (story 7.5) — treat
@@ -18,8 +20,8 @@ const createUser = async (req, res, next) => {
   // This validates the password the user just typed — it reveals nothing about
   // whether an email exists. (Login is NOT length-gated: it would lock out beta
   // accounts created before this rule — decision confirmed 2026-06-25.)
-  if (typeof body.password !== 'string' || body.password.length < 10) {
-    return next(createError(400, 'Password must be at least 10 characters'));
+  if (typeof body.password !== 'string' || body.password.length < MIN_PASSWORD_LENGTH) {
+    return next(createError(400, `Password must be at least ${MIN_PASSWORD_LENGTH} characters`));
   }
 
   try {
@@ -98,15 +100,10 @@ const createUser = async (req, res, next) => {
       logger.error('Failed to seed Free practice topic', { uid: newUser.uid, error: seedErr.message });
     }
 
-    // Story 7.9 soft gate: send a verify-email token (24h). Best-effort — the
-    // user is logged in directly with emailVerified=false regardless; a delivery
-    // failure must never fail registration (they can resend from the banner).
-    try {
-      const verifyToken = await authTokenService.issueToken(newUser.uid, 'verify_email');
-      await authEmails.sendVerifyEmail(newUser.email, verifyToken);
-    } catch (verifyErr) {
-      logger.error('Failed to send verification email', { uid: newUser.uid, error: verifyErr.message });
-    }
+    // Story 7.9 soft gate: send a verify-email token (24h). Best-effort — a
+    // delivery failure must never fail registration (they can resend from the
+    // banner). issueAndSend logs + swallows.
+    await authFlows.issueAndSend('verify_email', { uid: newUser.uid, email: newUser.email });
 
     // Story 7.13 (hard email gate): registration no longer auto-logs-in. The
     // account exists but stays unverified; the user must confirm via the email
@@ -274,12 +271,7 @@ const resendVerificationPublic = async (req, res) => {
     if (typeof email === 'string' && email.trim()) {
       const user = await User.scope(null).findOne({ where: { email: email.trim() } });
       if (user && !user.emailVerified) {
-        try {
-          const token = await authTokenService.issueToken(user.uid, 'verify_email');
-          await authEmails.sendVerifyEmail(user.email, token);
-        } catch (mailErr) {
-          logger.error('Failed to resend verification email', { error: mailErr.message });
-        }
+        await authFlows.issueAndSend('verify_email', { uid: user.uid, email: user.email });
       }
     }
   } catch (err) {
@@ -300,12 +292,7 @@ const forgotPassword = async (req, res, next) => {
     if (trimmed) {
       const user = await User.findOne({ where: { email: trimmed } }); // citext, case-insensitive
       if (user) {
-        try {
-          const token = await authTokenService.issueToken(user.uid, 'password_reset');
-          await authEmails.sendPasswordResetEmail(user.email, token);
-        } catch (mailErr) {
-          logger.error('Failed to send password reset email', { uid: user.uid, error: mailErr.message });
-        }
+        await authFlows.issueAndSend('password_reset', { uid: user.uid, email: user.email });
       }
     }
     // Identical reply whether or not the account exists.
@@ -325,11 +312,9 @@ const resetPassword = async (req, res, next) => {
     if (!token) {
       return next(createError(400, 'Invalid or expired reset link'));
     }
-    if (typeof newPassword !== 'string' || newPassword.length < 10) {
-      return next(createError(400, 'New password must be at least 10 characters'));
-    }
-    if (newPassword !== confirmPassword) {
-      return next(createError(400, 'New password and confirmation do not match'));
+    const pwError = validateNewPassword(newPassword, confirmPassword);
+    if (pwError) {
+      return next(createError(400, pwError));
     }
 
     const result = await authTokenService.verifyToken(token, 'password_reset');

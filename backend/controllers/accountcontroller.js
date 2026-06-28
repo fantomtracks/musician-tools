@@ -2,8 +2,8 @@ const { User } = require('../models');
 const createError = require('http-errors');
 const logger = require('../logger');
 const sessionService = require('../services/sessionService');
-const authTokenService = require('../services/authTokenService');
-const authEmails = require('../services/authEmails');
+const authFlows = require('../services/authFlows');
+const { validateNewPassword } = require('../utils/passwordPolicy');
 const { CHECK_YOUR_INBOX } = require('../constants/messages');
 
 // All account routes act on req.session.user — the caller's OWN record. Loading
@@ -112,11 +112,9 @@ const changePassword = async (req, res, next) => {
     if (!currentPassword || !newPassword) {
       return next(createError(400, 'Current and new password are required'));
     }
-    if (typeof newPassword !== 'string' || newPassword.length < 10) {
-      return next(createError(400, 'New password must be at least 10 characters'));
-    }
-    if (newPassword !== confirmPassword) {
-      return next(createError(400, 'New password and confirmation do not match'));
+    const pwError = validateNewPassword(newPassword, confirmPassword);
+    if (pwError) {
+      return next(createError(400, pwError));
     }
 
     // scope(null) so the hash is loaded for validPassword.
@@ -189,12 +187,7 @@ const requestEmailChange = async (req, res, next) => {
     // the same generic message whether or not it was.
     const taken = await User.findOne({ where: { email: trimmed } }); // citext
     if (!taken) {
-      try {
-        const token = await authTokenService.issueToken(user.uid, 'change_email', { pendingEmail: trimmed });
-        await authEmails.sendChangeEmail(trimmed, token);
-      } catch (mailErr) {
-        logger.error('Failed to send change-email confirmation', { uid: userId, error: mailErr.message });
-      }
+      await authFlows.issueAndSend('change_email', { uid: user.uid, email: trimmed, payload: { pendingEmail: trimmed } });
     }
 
     res.json({ message: CHECK_YOUR_INBOX });
