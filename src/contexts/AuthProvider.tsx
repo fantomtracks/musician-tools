@@ -1,25 +1,9 @@
-import { createContext, useContext, useEffect, useState } from 'react';
+import { useEffect, useState, type ReactNode } from 'react';
 import { authService, type User, type RegisterResult } from '../services/authService';
 import { clearCsrfToken } from '../services/csrf';
+import { AuthContext, type AuthContextType } from './AuthContext';
 
-interface AuthContextType {
-  user: User | null;
-  loading: boolean;
-  // Returns { needsVerification: true } when the credentials are correct but the
-  // email isn't verified yet (story 7.13) — the caller shows a resend prompt.
-  login: (login: string, password: string) => Promise<{ needsVerification: boolean }>;
-  register: (name: string, email: string, password: string) => Promise<RegisterResult>;
-  logout: () => Promise<void>;
-  patchUser: (partial: Partial<User>) => void;
-  // Hydrate auth state from a user the server just logged in out-of-band (story
-  // 7.13: the verify-email link auto-logs-in and returns the user).
-  applyAuthenticatedUser: (user: User) => void;
-  isAuthenticated: boolean;
-}
-
-const AuthContext = createContext<AuthContextType | undefined>(undefined);
-
-export function AuthProvider({ children }: { children: React.ReactNode }) {
+export function AuthProvider({ children }: { children: ReactNode }) {
   const [user, setUser] = useState<User | null>(null);
   const [loading, setLoading] = useState(true);
 
@@ -76,12 +60,8 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   };
 
   const logout = async () => {
-    try {
-      await authService.logout();
-      setUser(null);
-    } catch (error) {
-      throw error;
-    }
+    await authService.logout();
+    setUser(null);
   };
 
   const value: AuthContextType = {
@@ -96,12 +76,4 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   };
 
   return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>;
-}
-
-export function useAuth() {
-  const context = useContext(AuthContext);
-  if (context === undefined) {
-    throw new Error('useAuth must be used within AuthProvider');
-  }
-  return context;
 }

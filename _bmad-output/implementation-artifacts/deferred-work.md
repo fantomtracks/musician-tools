@@ -4,7 +4,13 @@
 
 ---
 
-## 🔧 À traiter maintenant (fix immédiat)
+### 🧹 ESLint propre + pre-commit durci — ✅ RÉSOLU (2026-06-28, branche `chore/eslint-cleanup`, à merger)
+> 3 erreurs ESLint pré-existantes (survie : le pre-commit ne lançait que les tests, pas ESLint).
+- [x] `AuthContext.tsx` `no-useless-catch` → logout sans try/catch inutile.
+- [x] `AuthContext.tsx` `react-refresh/only-export-components` → fichier scindé : `AuthContext.ts` (contexte + `useAuth` + types, pas de composant) / `AuthProvider.tsx` (le composant seul). Les 14 imports de `useAuth` inchangés (même chemin → `.ts`) ; seul `main.tsx` pointe vers `AuthProvider`.
+- [x] `MyPlaylistsPage.tsx` `_uid` non utilisé → config ESLint honore la convention `_`-préfixe (`varsIgnorePattern: '^_'`).
+- [x] `vite.config.ts` `@ts-nocheck` (4ᵉ, surfacée par `eslint .` au pre-commit) → override ESLint ciblé sur ce seul fichier (le `@ts-nocheck` du config Vite est volontaire) ; la règle reste stricte ailleurs.
+- [x] **Pre-commit durci** : `set -e` + `npm run lint` (front) et `npm run lint` (back) ajoutés avant les tests → toute erreur ESLint/test bloque désormais le commit (corrige aussi le chaînage manquant de l'ancien hook). Front 290 verts, ESLint front+back clean.
 
 _Vidé le 2026-06-21 : les 3 items (z-index Album/Languages, garde artiste `MyPlaylistsPage`, drop index redondant) traités dans la branche `fix/pre-epic7-quick-wins`. Cf. journal « Soldé » en bas._
 
