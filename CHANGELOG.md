@@ -4,12 +4,22 @@ All notable changes to this project are documented here.
 Format loosely follows [Keep a Changelog](https://keepachangelog.com/); this
 project adheres to [Semantic Versioning](https://semver.org/).
 
+<!-- Release format: each `## [x.y.z]` section is used VERBATIM as the GitHub
+     release body (auto-release.yml). For a big feature, write a bold lead bullet
+     + indented sub-bullets so the release reads well; keep small fixes as
+     one-liners. -->
+
+
 ## [Unreleased]
 
 ## [1.8.0] — 2026-06-29
 
 ### Changed
-- **Editing a song now auto-saves** — tweak a song while you play it and your changes save themselves; no more Save button, and you stay on the song instead of being kicked back to the list. A "← Back to songlist" button sits at the top, and a small status shows Saving… / Saved ✓ · time.
+- **Editing a song now auto-saves** — tweak a song while you play it and your changes save themselves. No more Save button, and you stay on the song instead of being bounced back to the list.
+  - Auto-save as you type (debounced) — there's no Save button anymore
+  - "← Back to songlist" pinned at the top of the form
+  - Live status: `Saving…` → `Saved ✓ · 14:32`, so you always know it landed
+  - A duplicate title is flagged without blocking the rest of the form from saving
 
 ## [1.7.1] — 2026-06-29
 
