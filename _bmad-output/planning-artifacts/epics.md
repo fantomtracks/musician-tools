@@ -165,7 +165,7 @@ Je joue comme avant — « Mark as Played » — et mon journal se remplit tout 
 **FRs covered:** FR21, FR23
 
 ### Epic 5: Robustesse / confort (post-PRD, issu des rétros)
-Petites stories de robustesse et de confort nées des rétros et du terrain (pas dans le PRD initial). Stories : 5.1 re-login 401 (done), 5.2 saisie de session repensée / combobox (done, v1.3.1), 5.3 Songlist & navigation au propre (done), 5.4 filtres Songlist cohérents (done), 5.5 libellé chanson « Artiste - Titre » cohérent partout (done), 5.6 suppression de chanson → nettoyer les playlists / UID orphelin (done, bug), 5.7 playlists ↔ chansons : vrai lien en base / clé étrangère (ready, dette décidée à la rétro). Détail dans `implementation-artifacts/`.
+Petites stories de robustesse et de confort nées des rétros et du terrain (pas dans le PRD initial). Stories : 5.1 re-login 401 (done), 5.2 saisie de session repensée / combobox (done, v1.3.1), 5.3 Songlist & navigation au propre (done), 5.4 filtres Songlist cohérents (done), 5.5 libellé chanson « Artiste - Titre » cohérent partout (done), 5.6 suppression de chanson → nettoyer les playlists / UID orphelin (done, bug), 5.7 playlists ↔ chansons : vrai lien en base / clé étrangère (done, v1.3.x), 5.8 Songlist détection de doublon / visibilité (done, v1.3.6, rétroactif). Détail dans `implementation-artifacts/`.
 
 ### Epic 6: Capture enrichie — durée de répertoire
 Je renseigne une durée sur mes chansons et le « Mark as Played » remplit automatiquement le temps de ma session.
@@ -182,6 +182,18 @@ La session devient un simple regroupement (jour + instrument) ; la durée totale
 ### Epic 9: Robustesse / confort UI (post-rétro)
 Petites stories de confort/robustesse UI nées du terrain et de la revue `deferred-work.md`, soldées **avant l'Epic 7** : nav mobile, clarté des filtres Songlist, dé-duplication de l'affichage de session, navigation chanson depuis l'historique.
 **Couvre :** NFR3 (responsive) + dette de maintenabilité (deferred-work 2026-06-21)
+
+### Epic 10: Confort / playlists (post-rétro Epic 7, issu deferred-work)
+Créer une playlist à la volée depuis la fiche chanson, adossé à l'unicité serveur du nom de playlist. Stories : 10.1 unicité nom playlist serveur (done), 10.2 créer une playlist à la volée (done). _Détail § Epic 10 ci-dessous._
+
+### Epic 11: Dette technique / santé du socle (issu rétro Epic 10)
+Parité dev/CI sur l'unicité : garde fail-fast au boot + ordonnancement migrate-then-app, hook `afterSync` retiré. Story : 11.1 parité-sync unicité dev (done). _Détail § Epic 11 ci-dessous._
+
+### Epic 12: Confort vérification email (issu deferred-work, items 7-13 promus)
+Distinguer un lien de vérif consommé-mais-valide d'un lien invalide (clic redondant sur un 2e appareil) + combler les tests front des branches de vérif. Story : 12.1 verif-email UX (done). _Détail § Epic 12 ci-dessous._
+
+### Epic 13: Confort édition — « atelier vivant » (issu brainstorm auto-save 2026-06-29)
+Auto-save de la fiche chanson (debounce + flush, `lastPlayed` exclu), statut « Saving/Saved », barre Back sticky. Story : 13.1 auto-save fiche chanson (done). _Détail § Epic 13 ci-dessous._
 
 **Dépendances :** E1 → E2 → (E3 ∥ E4). Les epics 3 et 4 sont indépendants l'un de l'autre. E6 dépend d'E4 (pont Mark as Played). E5 est transverse ; E9 (confort UI, post-rétro) est autonome et se solde avant E7 ; E7 (compte + sécurité, hors-PRD) est autonome — ne dépend d'aucun épic PRD et n'en bloque aucun. Les NFR1-NFR6 transverses s'appliquent aux critères d'acceptation des stories concernées.
 

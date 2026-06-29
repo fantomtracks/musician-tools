@@ -4,7 +4,7 @@
 
 ---
 
-### 🧹 ESLint propre + pre-commit durci — ✅ RÉSOLU (2026-06-28, branche `chore/eslint-cleanup`, à merger)
+### 🧹 ESLint propre + pre-commit durci — ✅ RÉSOLU (2026-06-28, mergé en prod v1.8.0, ex-branche `chore/eslint-cleanup`)
 > 3 erreurs ESLint pré-existantes (survie : le pre-commit ne lançait que les tests, pas ESLint).
 - [x] `AuthContext.tsx` `no-useless-catch` → logout sans try/catch inutile.
 - [x] `AuthContext.tsx` `react-refresh/only-export-components` → fichier scindé : `AuthContext.ts` (contexte + `useAuth` + types, pas de composant) / `AuthProvider.tsx` (le composant seul). Les 14 imports de `useAuth` inchangés (même chemin → `.ts`) ; seul `main.tsx` pointe vers `AuthProvider`.
@@ -20,12 +20,17 @@ _Vidé le 2026-06-21 : les 3 items (z-index Album/Languages, garde artiste `MyPl
 
 _Les 4 stories UI/confort (filtres Songlist, refacto SessionHistoryCard, chanson cliquable, nav mobile) ont été regroupées et **livrées dans l'Epic 9** (2026-06-21, branche `feat/epic-9-ui-polish`). Cf. journal « Soldé »._
 
-### ⬆️ Promues à la revue deferred-work du 2026-06-28 (ordre de priorité tranché par northwood)
-1. **[prio 1] Fix UX vérif email — lien rouvert sur un 2e appareil** : distinguer côté backend un token consommé-mais-valide d'un token invalide ; afficher « déjà vérifié, tu peux te connecter » au lieu de « invalid/expired ». [`src/pages/VerifyEmailPage.tsx:53-61`, `backend/controllers/usercontroller.js` verifyEmail] — provenance : review 7-13 (section plus bas).
-2. **[prio 2] Tests front des branches vérif** : couvrir `needsVerification` (Login) et le bouton Resend (Register), aujourd'hui non testés. [`src/pages/LoginPage.tsx`, `RegisterPage.tsx`] — provenance : review 7-13.
-3. **[prio 3] Auto-save fiche chanson** : passe d'abord par un **brainstorm** (cf. section « À brainstormer ») avant cadrage en story.
+### ⬆️ Promues à la revue deferred-work du 2026-06-28 — ✅ LES 3 SOLDÉES (vérifié 2026-06-29)
+1. ~~**[prio 1] Fix UX vérif email — lien rouvert sur un 2e appareil**~~ — ✅ **RÉSOLU (Epic 12, story 12-1, `done`)** : `verifyEmail` renvoie `200 { alreadyVerified:true }` SANS ouvrir de session pour un token consommé-valide (vs 400 générique) ; front affiche « déjà vérifié, connecte-toi ». Sécu validée (pas d'oracle, single-use préservé). [`backend/controllers/usercontroller.js` verifyEmail, `src/pages/VerifyEmailPage.tsx`]
+2. ~~**[prio 2] Tests front des branches vérif**~~ — ✅ **RÉSOLU (groupé dans 12-1)** : `LoginPage.test.tsx` couvre `needsVerification` (verify prompt + Resend) et `RegisterPage.test.tsx` couvre le Resend de l'écran pending (« story 12.1 test gap »). [`src/__tests__/LoginPage.test.tsx`, `RegisterPage.test.tsx`]
+3. ~~**[prio 3] Auto-save fiche chanson**~~ — ✅ **RÉSOLU (Epic 13, story 13-1, `done`)** : brainstorm tenu le 2026-06-29 (`_bmad-output/brainstorming/`) → story auto-save (debounce + flush, `lastPlayed` exclu) + sticky Back + statut « Saving/Saved ». Review 3 couches (1 HIGH `lastPlayed` + 5 Med corrigés). Reports résiduels listés plus bas (section review 13-1). [`src/pages/Songs.tsx`, `src/components/SongForm.tsx`]
 
-_Note : prio 1 + prio 2 touchent la même zone (UX de vérification email) → groupables en une petite story / quick-dev. Prio 3 est un sujet produit à part (brainstorm)._
+### 🎨 UX/UI mobile + assets — à cadrer en stories BMAD (notes 2026-06-29)
+> Items relevés en session le 2026-06-29. **Aucun code livré** : une première passe a été tentée puis **revertée** (on partait en yolo sans cadrage) → à reprendre proprement via le process BMAD (stories). Les diagnostics ci-dessous restent valides, les pistes de fix sont indicatives.
+
+- **Changer le favicon** : le favicon par défaut est encore en place, à remplacer par une icône propre au produit.
+- **Header non connecté qui déborde sur mobile** : sur iPhone 13 (390px) les boutons _Sign in_ / _Create account_ sont posés directement dans la barre du header (pas de hamburger en non-connecté) → ils débordent à côté du titre + toggle dark. Piste explorée : **retirer ces boutons du header** en non-connecté et porter les CTA _Create account_ / _Sign in_ **dans la HomePage** (avec un padding pour ne pas coller au footer). ⚠️ Impacte `Header.test.tsx` (test « unauthenticated … sign-in actions remain » à inverser). [`src/App.tsx` HomePage, `src/components/Header.tsx`]
+- **Songlist (page Songs) responsive mobile** : pouvoir **scroller verticalement à l'intérieur du tableau des chansons** (au lieu d'allonger toute la page), et empêcher les autres blocs (recherche, filtres, sidebar) de **déborder** en largeur. Pistes explorées : `min-w-0` sur la colonne contenu (gotcha flexbox), conteneur tableau en `overflow-auto` + `max-h-[~70vh]`, en-tête de tableau `sticky`. À cadrer : hauteur cible (vh fixe vs lock plein écran avec seul le tableau scrollable), comportement sidebar filtres empilée sur mobile. [`src/components/SongsList.tsx`, `SongsSidebar.tsx`]
 
 ### 🔐 Lot sécu → à fusionner dans le brief Epic 7
 > ✅ **RÉSOLU — Epic 7 shippée (mergée local 2026-06-26).** Détail des résolutions dans le journal « Soldé » en bas. Vérifié dans le code le 2026-06-26.
@@ -33,7 +38,7 @@ _Note : prio 1 + prio 2 touchent la même zone (UX de vérification email) → g
 ### 🔐 Durcissement session — ✅ MERGÉ EN PROD (v1.6.0, merge `0d758eb`)
 > Issu de la review 7.3, élargi par 7.13. Implémenté : `sessionService.regenerateSession()` (promisifie `req.session.regenerate`) appelé dans `loginUser` ET `verifyEmail` avant de poser `loggedIn`/`user` → l'ID de session pré-auth + son token CSRF sont jetés. Côté front, `AuthContext` vide le cache CSRF (`clearCsrfToken`) au succès login + verify (`applyAuthenticatedUser`) → 1ʳᵉ mutation avec un token frais, pas de 403. Tests : usercontroller 25 ✓ (regenerate asserté), front 267 ✓, smoke-test login live OK. [usercontroller.js, sessionService.js, contexts/AuthContext.tsx]
 
-### 🧹 Lot ménage dette technique — ✅ RÉSOLU (2026-06-28, branche `chore/menage-dette-technique`, à merger)
+### 🧹 Lot ménage dette technique — ✅ RÉSOLU (2026-06-28, mergé en prod v1.8.0, ex-branche `chore/menage-dette-technique`)
 > Les 5 items traités en un lot, un commit chacun. Back 238 verts, lint clean ; migrations validées en local (up→down→up).
 - [x] **Helper `issueAndSend(type, {uid,email,payload})` + `validateNewPassword(pw, confirm)`** — couple issueToken+send centralisé (4×) dans `services/authFlows.js` ; validation mdp dédupliquée dans `utils/passwordPolicy.js`. Comportement/messages identiques. (item 1)
 - [x] **Index `users_name` redondant droppé** — migration `20260628000000` idempotente (même pattern que le drop playlist_songs). (item 2)
@@ -41,14 +46,14 @@ _Note : prio 1 + prio 2 touchent la même zone (UX de vérification email) → g
 - [x] **Garde UUID→404 généralisée** — `backend/utils/uuid.js` partagé ; gardes ajoutées sur song/instrument/playlist ; topic+practicesession basculés dessus. (item 4)
 - [x] **`getCsrfToken` dédup en vol** — promesse `inFlight` partagée pour les appels concurrents au cold-start. (item 5)
 
-### 🔒 Lot parité-sync (unicité dev/CI) — ✅ RÉSOLU (Epic 11, story 11.1, 2026-06-28, branche `feat/epic-11-dette-technique` à merger)
+### 🔒 Lot parité-sync (unicité dev/CI) — ✅ RÉSOLU (Epic 11, story 11.1, 2026-06-28, mergé en prod v1.8.0, ex-branche `feat/epic-11-dette-technique`)
 > Approche « migrations = source unique + garde fail-fast » : garde de boot `assertFunctionalIndexes` (`backend/utils/assertSchema.js`) branchée après `sync` dans `server.js` (échec clair si un index fonctionnel manque), **hook `afterSync` topic retiré** (≈68 lignes de SQL dupliquée), **aucun** hook playlists ajouté, CMD conteneur dev = `db:migrate && npm run dev` (ordonnancement prod). Garde validée sur la vraie base + listen gardé derrière la garde (review). **Net dette −.** Solde aussi les 2 items afterSync ci-dessous.
 
 ### 🎵 Créer une playlist à la volée depuis l'édition d'une chanson — ✅ LIVRÉ (Epic 10, story 10.2, 2026-06-28)
-> Branche `feat/epic-10-confort-playlists` (à merger). Option « Create playlist "…" » dans le picker de la fiche chanson (mirror 8.2), `PlaylistConflictError` + 409 backstop, combobox toujours rendu. Précédé de 10.1 (unicité nom playlist serveur, `lower(name)` + dédup RENAME). Review 3 couches : 1 HIGH (reseed-clobber) + patches corrigés. _Cadrage initial ci-dessous conservé pour provenance._
+> Mergé en prod v1.8.0 (ex-branche `feat/epic-10-confort-playlists`). Option « Create playlist "…" » dans le picker de la fiche chanson (mirror 8.2), `PlaylistConflictError` + 409 backstop, combobox toujours rendu. Précédé de 10.1 (unicité nom playlist serveur, `lower(name)` + dédup RENAME). Review 3 couches : 1 HIGH (reseed-clobber) + patches corrigés. _Cadrage initial ci-dessous conservé pour provenance._
 - Depuis la fiche d'édition d'une chanson, pouvoir **créer une nouvelle playlist et y ajouter la chanson** sans quitter l'écran (taper un nom inexistant → « Créer la playlist … » → créée + chanson ajoutée). Même pattern UX que le « créer un sujet à la volée » du sélecteur d'entrée (8.2). À cadrer : emplacement dans `SongForm` (une section playlists ?), création + ajout en une action, lien `playlist_songs` (FK 5.7), feedback. [Songs.tsx/SongForm, MyPlaylistsPage, playlistcontroller]
 
-### 🐛 Navigation clavier comboboxes — ✅ RÉSOLU (2026-06-28, branche `fix/songform-combobox-keyboard`, à merger)
+### 🐛 Navigation clavier comboboxes — ✅ RÉSOLU (2026-06-28, mergé en prod v1.8.0, ex-branche `fix/songform-combobox-keyboard`)
 > Diagnostic affiné : les champs réellement cassés étaient **Genre, Languages et le Playlist picker** (aucun `onKeyDown` → flèches mortes + Entrée soumettait le form) ; artiste/album avaient déjà la nav clavier. Au-delà du bug initial, mise à niveau **des 6 comboboxes** sur un util partagé : nav clavier (flèches + Entrée sélectionne sans soumettre + Échap), scroll-into-view de l'option active, **état actif unifié souris/clavier** (un seul surlignage), **ARIA combobox éditable** (`aria-activedescendant`/`role`/`aria-selected`), options **hors tab-order** (`tabIndex=-1`) et **Tab ferme la liste net**. 286 tests front verts. [src/utils/comboboxKeyboard.ts, SongForm.tsx, Songs.tsx, MySessionsPage.tsx]
 
 ## Deferred from: code review of story-10.2 (2026-06-28)
@@ -91,15 +96,16 @@ _Note : prio 1 + prio 2 touchent la même zone (UX de vérification email) → g
 - ~~**7-12 — Hook `afterSync` duplique la migration**~~ — ✅ **RÉSOLU par Epic 11 (11.1)** : le hook `afterSync` a été **retiré** de `topic.js` (fin de la SQL dupliquée) ; remplacé par la garde fail-fast de boot. Cf. « Lot parité-sync » ci-dessus.
 - **7-12 — Migration hardcode `public.unaccent`** : `'public.unaccent'::regdictionary` casse si l'extension est installée dans un schéma `extensions` dédié (PG managé). Prod actuelle OK (citext 7.2 déjà dans `public`), mais hypothèse d'environnement non gardée. [`backend/migrations/20260625000000-topics-name-ci-unaccent.js:84`]
 - **7-12 — Tests collision casse/accent tautologiques** : mockent `Topic.create` → testent le mapping 23505→409, pas le folding réel (validé seulement par migration locale). Le projet mocke les modèles, donc un vrai test de folding demanderait une DB. [`backend/__tests__/topiccontroller.test.js:13-26`]
-- **7-13 — Token consommé sur 2e device → « invalid/expired » malgré succès** : après vérification sur l'appareil A, rouvrir le même lien sur le téléphone B (jamais loggé) affiche une erreur, le backend ne distinguant pas un token consommé-valide d'un token invalide. UX trompeuse. [`src/pages/VerifyEmailPage.tsx:53-61`]
+- ~~**7-13 — Token consommé sur 2e device → « invalid/expired » malgré succès**~~ — ✅ **RÉSOLU par Epic 12 (12-1)** (= prio 1 ci-dessus). Le backend distingue désormais consommé-valide (`alreadyVerified`) d'invalide.
 - **7-13 — Oracle de timing sur `resendVerificationPublic`** : l'envoi email n'est awaité (avant `res.json`) que sur la branche existant-non-vérifié → la latence distingue « compte non vérifié » de « inconnu/vérifié » malgré le body uniforme. Même résidu accepté que `forgotPassword`. [`backend/controllers/usercontroller.js:260-279`]
-- **7-13 — UI vérif Login/Register sans test front** : seul `VerifyEmailPage` a une couverture automatisée ; les branches `needsVerification` (Login) et le bouton Resend (Register) ne sont pas testées. Dans le plan de test déclaré de la story. [`src/pages/LoginPage.tsx` / `RegisterPage.tsx`]
+- ~~**7-13 — UI vérif Login/Register sans test front**~~ — ✅ **RÉSOLU par Epic 12 (12-1)** (= prio 2 ci-dessus). `LoginPage.test.tsx` + `RegisterPage.test.tsx` couvrent `needsVerification` et Resend.
 
 ---
 
 ## 💭 À brainstormer
 
-- **Auto-save de la fiche chanson** ⬆️ _(promu prio 3 — revue 2026-06-28 : à brainstormer puis cadrer en story)_ : sauvegarde auto au blur ou en debounce ~3 s, au lieu du Save manuel. Rendrait la garde « modifs non enregistrées » du Mark as Played inutile. **Résout aussi** la détection `isDirty` fragile (`Songs.tsx` : `JSON.stringify(form)` vs snapshot, qu'un effet de `SongForm` peut fausser). À cadrer : feedback visuel (« Saved »), erreurs de validation/doublon en cours de frappe, coût réseau, conflit avec le bouton Save explicite.
+- ~~**Auto-save de la fiche chanson**~~ — ✅ **RÉSOLU (Epic 13, story 13-1, `done`)** : brainstorm tenu le 2026-06-29 puis story livrée (debounce + flush au blur, `lastPlayed` exclu, statut « Saving/Saved », sticky Back). Review 3 couches (1 HIGH + 5 Med corrigés). Reports résiduels → section review 13-1 ci-dessous.
+- **Vraie landing page non-connecté** (note 2026-06-29) : aujourd'hui la HomePage déconnectée = logo + pitch d'une ligne. À cadrer : une vraie page qui **explique le projet et donne envie de s'inscrire** — sections valeur/features (suivi songs, tempos, tonalités, heatmap de pratique, playlists), visuels/captures, social proof éventuel, CTA répétés. Sujet produit + design avant code. Englobe le placement des CTA _Create account_ / _Sign in_ (cf. item « Header non connecté qui déborde sur mobile »). [`src/App.tsx` HomePage → probablement une vraie page `LandingPage.tsx`]
 - **A5 (rétro Epic 7) — signal UX du rate-limit légitime** : un user légitime rate-limité (login, resend…) reçoit un `429 detail-free` volontaire (choix anti-oracle 7.4) → l'UI ressemble à une erreur normale, c'est confus. À cadrer : peut-on donner un indice minimal (« trop de tentatives, réessaie plus tard ») **après authentification réussie** ou sur un canal qui ne crée pas d'oracle d'énumération, sans affaiblir l'anti-bruteforce ?
 
 ---

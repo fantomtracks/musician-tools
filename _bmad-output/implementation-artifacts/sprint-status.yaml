@@ -102,9 +102,9 @@ development_status:
   7-9-verification-email-inscription-soft-gate: done            # crée requireVerified (consommé par 7-11)
   7-10-reset-mot-de-passe-par-email: done
   7-11-change-email-verify-before-switch: done                  # dépend de requireVerified (7-9)
-  7-12-unicite-topic-insensible-casse: done                     # citext topics ; code review 2026-06-28 OK — fix 409 renvoie le topic existant (branche fix/post-review-7-12-7-13, à merger)
-  7-13-hard-email-verification-gate: done                       # course-correct 2026-06-26 ; code review 2026-06-28 OK — gate app-wide via session.emailVerified (authsess) + null-guard verifyEmail + authService body-read once (branche fix/post-review-7-12-7-13, à merger)
-  epic-7-retrospective: done    # 2026-06-28 — epic-7-retro-2026-06-28.md ; leçons cadrage/dette appliquées ; à merger : fix/post-review-7-12-7-13
+  7-12-unicite-topic-insensible-casse: done                     # citext topics ; code review 2026-06-28 OK — fix 409 renvoie le topic existant (mergé en prod v1.8.0, ex-branche fix/post-review-7-12-7-13)
+  7-13-hard-email-verification-gate: done                       # course-correct 2026-06-26 ; code review 2026-06-28 OK — gate app-wide via session.emailVerified (authsess) + null-guard verifyEmail + authService body-read once (mergé en prod v1.8.0, ex-branche fix/post-review-7-12-7-13)
+  epic-7-retrospective: done    # 2026-06-28 — epic-7-retro-2026-06-28.md ; leçons cadrage/dette appliquées ; mergé en prod v1.8.0 (ex-branche fix/post-review-7-12-7-13)
 
   # Epic 8: Refonte temps de session — « tout est entrée » (Correct Course 2026-06-18 ; PRD amendé FR13/FR15/FR24 + FR25/FR26)
   epic-8: done
