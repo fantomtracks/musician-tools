@@ -5,7 +5,7 @@ arch_decision: "Auto-save de la fiche chanson (atelier vivant) : persistance dé
 
 # Story 13.1: Auto-save de la fiche chanson (« atelier vivant »)
 
-Status: ready-for-dev
+Status: review
 
 <!-- Note: Validation is optional. Run validate-create-story for quality check before dev-story. -->
 
@@ -69,12 +69,12 @@ Décisions actées au brainstorm : auto-save (debounce + flush blur + flush au d
 
 > **Gros morceau front, surtout `src/pages/Songs.tsx`. LIRE les zones citées avant de coder.** Un saveur découplé **existe déjà** : `saveSongEdits` (`:784-803`) — il persiste + met à jour la liste + re-baseline, **sans** toucher `page/form/editingUid`. C'est le socle de l'auto-save (mais il **n'inclut pas** le diff de playlists — cf. Task 5).
 
-- [ ] **Task 1 — Hook d'auto-save (AC1, AC2)** : créer un mécanisme (effet + ref de timer) qui, en mode édition, déclenche `saveSongEdits` (ou un dérivé) **en debounce ~1–1.5 s** sur changement de `form`, **+ au blur** (le champ duration commit déjà au blur, `SongForm.tsx:124-136`), **+ flush impératif** sur démontage / navigation (AC2). Annuler le timer en attente quand un save part. Pas de save en mode création.
-- [ ] **Task 2 — Découpler save/navigation + retirer Save (AC3, AC4)** : dans `handleSubmit` (`:1194-1272`), le **branche édition** ne doit plus `setEditingUid(null)`/`setForm(initialSong)`/`setPage('list')` (ce flux disparaît avec le bouton Save). Retirer le bouton **« Save »** de `SongForm` en mode édition (`SongForm.tsx:842-848`) ; garder « Add » en création. Centraliser la normalisation du payload (dupliquée `:1197-1205` et `:790-798`).
-- [ ] **Task 3 — Sticky Back + indicateur de statut (AC5, AC6, AC7)** : rendre le « ← Back to songlist » **sticky en haut** (upgrade de `:1757-1770`) avec flush (AC2). Ajouter un **indicateur de statut** (`Saving…/Saved ✓/⚠️ Not saved`) — nouvel état (ex. `saveStatus: 'idle'|'saving'|'saved'|'error'`), rendu discret (pas le toast bottom-right ni l'error banner ; un badge ambiant près du titre / du Back). Sur échec `updateSong` → `error` + retry (auto au prochain changement).
-- [ ] **Task 4 — Doublon non bloquant (AC8, décision 🅰️)** : relâcher les gardes `liveDuplicate` qui **bloquent le save** (`saveSongEdits:786-789`, `handleSubmit:1213-1217`) → en auto-save, **exclure `title`/`artist` du payload** tant que `liveDuplicate`, sauver le reste, garder le **✗ discret** sur le titre (le warning `SongForm.tsx:353-371` existe déjà via la prop `duplicate`). Confirmer 🅰️ avant de coder.
-- [ ] **Task 5 — isDirty + Mark-as-Played + playlists (AC9, AC10, AC12)** : (a) résoudre `isDirty` (`:777-780`) — supprimer ou dériver de « save pending/in-flight » ; (b) retirer la garde Mark-as-Played : `handleMarkAsPlayedNow` marque directement (plus de `pendingMarkInstrument`/`ConfirmDialog` « Unsaved changes » `:1613-1621`/`confirmSaveAndMark`) ; (c) **trancher les playlists** : le diff membership (`:1224-1240`) ne vit que dans `handleSubmit` — décider de l'**auto-persister** (l'inclure dans le saveur découplé, ou persister au toggle comme la création inline `:757-774`) pour rester cohérent sans bouton Save. Attention aux **PUT concurrents** (`performMarkAsPlayed:820` `{lastPlayed}` vs auto-save whole-form) — sérialiser / accepter last-write (beta).
-- [ ] **Task 6 — Tests (AC1–AC13)** :
+- [x] **Task 1 — Hook d'auto-save (AC1, AC2)** : créer un mécanisme (effet + ref de timer) qui, en mode édition, déclenche `saveSongEdits` (ou un dérivé) **en debounce ~1–1.5 s** sur changement de `form`, **+ au blur** (le champ duration commit déjà au blur, `SongForm.tsx:124-136`), **+ flush impératif** sur démontage / navigation (AC2). Annuler le timer en attente quand un save part. Pas de save en mode création.
+- [x] **Task 2 — Découpler save/navigation + retirer Save (AC3, AC4)** : dans `handleSubmit` (`:1194-1272`), le **branche édition** ne doit plus `setEditingUid(null)`/`setForm(initialSong)`/`setPage('list')` (ce flux disparaît avec le bouton Save). Retirer le bouton **« Save »** de `SongForm` en mode édition (`SongForm.tsx:842-848`) ; garder « Add » en création. Centraliser la normalisation du payload (dupliquée `:1197-1205` et `:790-798`).
+- [x] **Task 3 — Sticky Back + indicateur de statut (AC5, AC6, AC7)** : rendre le « ← Back to songlist » **sticky en haut** (upgrade de `:1757-1770`) avec flush (AC2). Ajouter un **indicateur de statut** (`Saving…/Saved ✓/⚠️ Not saved`) — nouvel état (ex. `saveStatus: 'idle'|'saving'|'saved'|'error'`), rendu discret (pas le toast bottom-right ni l'error banner ; un badge ambiant près du titre / du Back). Sur échec `updateSong` → `error` + retry (auto au prochain changement).
+- [x] **Task 4 — Doublon non bloquant (AC8, décision 🅰️)** : relâcher les gardes `liveDuplicate` qui **bloquent le save** (`saveSongEdits:786-789`, `handleSubmit:1213-1217`) → en auto-save, **exclure `title`/`artist` du payload** tant que `liveDuplicate`, sauver le reste, garder le **✗ discret** sur le titre (le warning `SongForm.tsx:353-371` existe déjà via la prop `duplicate`). Confirmer 🅰️ avant de coder.
+- [x] **Task 5 — isDirty + Mark-as-Played + playlists (AC9, AC10, AC12)** : (a) résoudre `isDirty` (`:777-780`) — supprimer ou dériver de « save pending/in-flight » ; (b) retirer la garde Mark-as-Played : `handleMarkAsPlayedNow` marque directement (plus de `pendingMarkInstrument`/`ConfirmDialog` « Unsaved changes » `:1613-1621`/`confirmSaveAndMark`) ; (c) **trancher les playlists** : le diff membership (`:1224-1240`) ne vit que dans `handleSubmit` — décider de l'**auto-persister** (l'inclure dans le saveur découplé, ou persister au toggle comme la création inline `:757-774`) pour rester cohérent sans bouton Save. Attention aux **PUT concurrents** (`performMarkAsPlayed:820` `{lastPlayed}` vs auto-save whole-form) — sérialiser / accepter last-write (beta).
+- [x] **Task 6 — Tests (AC1–AC13)** :
   - Mettre à jour `src/__tests__/SongsMarkAsPlayedDirty.test.tsx` : le cas « unsaved → dialog Save & mark » disparaît (auto-save) → « Mark as played » marque directement ; vérifier que l'auto-save a persisté la durée.
   - Nouveau test auto-save : éditer un champ → `updateSong` appelé après debounce/blur, **sans** quitter la page (reste en mode form) ; flush au « Back » ; statut `Saved`. Échec `updateSong` → statut `Not saved`. Doublon → titre gelé + ✗, autres champs sauvés.
   - Vérifs : `npm test` (front) + `cd backend && npm test` verts ; `tsc -b` + `eslint .` clean.
@@ -128,10 +128,35 @@ Décisions actées au brainstorm : auto-save (debounce + flush blur + flush au d
 
 ### Agent Model Used
 
-{{agent_model_name_version}}
+claude-opus-4-8[1m] (dev-story workflow)
+
+### Décisions confirmées (northwood, 2026-06-29)
+- **Doublon = 🅰️** : geler `title`/`artist` (exclus du payload) tant que `liveDuplicate`, auto-sauver le reste.
+- **Playlists = auto-persistées au toggle** (mode édition), comme la création inline 10.2.
 
 ### Debug Log References
+- **Front** `npm test` **307/307** (+4 `SongsAutoSave.test.tsx` ; `SongsMarkAsPlayedDirty` réécrit pour l'auto-save) ; `tsc -b` 0 ; `eslint .` clean. Backend **non touché** (décision 🅰️ = 100% client).
+- Tests auto-save validés **contre le vrai composant** : debounce (~1.2 s) → `updateSong` + reste sur la fiche + « Saved » ; « Back » flushe le save en attente puis retourne à la liste ; titre dupliqué → payload **sans** `title`/`artist` ; échec `updateSong` → statut « Not saved ».
 
 ### Completion Notes List
+- **Auto-save (AC1/2/4)** : `autoSaveSong` (dérivé de l'ancien `saveSongEdits`) + effet débouncé (~1.2 s) sur changement de `form` en mode édition (skip si `form === editBaselineJson`), `autoSaveRef` pour appeler la dernière version sans re-souscrire, `flushAutoSave` (Back/Cancel/Enter). Le trio « save-then-leave » de `handleSubmit` (édition) retiré → on **reste sur la chanson**.
+- **Plus de Save / sticky Back / statut (AC3/5/6/7)** : bouton Save retiré en mode édition (`SongForm` — Add gardé en création) ; header **sticky** avec **« ← Back to songlist »** (flush via `backToList`) + indicateur ambiant `Saving…/Saved ✓/⚠️ Not saved — retry` (état `saveStatus` séparé, **pas** le `loading` global désactivant). `handleSubmit` édition = Enter → flush, pas de redirection.
+- **Doublon 🅰️ (AC8)** : `autoSaveSong` supprime `title`/`artist` du payload tant que `liveDuplicate` ; le warning UI (`SongForm` prop `duplicate`) reste. Gardes bloquantes de save retirées en édition.
+- **Dette (AC9/10)** : `isDirty` memo supprimé (`editBaselineJson` conservé comme baseline form-to-form, **stable**) ; garde Mark-as-Played retirée (`pendingMarkInstrument`/`confirmSaveAndMark`/`ConfirmDialog` « Unsaved changes » supprimés) → `handleMarkAsPlayedNow` flushe puis marque direct.
+- **Playlists (AC12)** : `handleTogglePlaylist` persiste au toggle en édition (`addSongToPlaylist`/`removeSongFromPlaylist`) ; le diff on-Save de `handleSubmit` (édition) supprimé. Création inchangée.
+- **Non-régression (AC11/13)** : mode création (Add) intact ; 307 front verts, tsc/lint clean.
+- ⚠️ **Smoke test manuel requis avant merge** (cœur du flux d'édition) : taper un champ → Saved, Back, doublon, Mark-as-played, playlists.
 
 ### File List
+- `src/pages/Songs.tsx` (EDIT — auto-save: `autoSaveSong`/effet débouncé/`flushAutoSave`/`backToList`/`saveStatus` ; `handleSubmit` édition→flush ; `handleTogglePlaylist` persist au toggle ; `handleMarkAsPlayedNow` direct ; header sticky + statut ; retrait isDirty/ConfirmDialog ; import `UpdateSongDTO`)
+- `src/components/SongForm.tsx` (EDIT — retrait Save/Cancel en mode édition, Add gardé en création)
+- `src/__tests__/SongsMarkAsPlayedDirty.test.tsx` (EDIT — réécrit pour l'auto-save, plus de dialog)
+- `src/__tests__/SongsAutoSave.test.tsx` (NEW — 4 tests : debounce, Back-flush, doublon gelé, statut Not-saved)
+- `CHANGELOG.md` (EDIT — entrée `[Unreleased]`)
+- `_bmad-output/implementation-artifacts/sprint-status.yaml` (EDIT — statut 13-1 → review)
+
+## Change Log
+
+| Date       | Version | Description                                                                 |
+|------------|---------|-----------------------------------------------------------------------------|
+| 2026-06-29 | 0.1     | Story 13.1 — auto-save fiche chanson (« atelier vivant »). Auto-save débouncé + flush blur/départ, suppression du bouton Save (édition), reste sur la chanson, sticky « Back to songlist » + indicateur `Saving/Saved/Not-saved`, doublon gèle title/artist (🅰️), playlists auto-persistées au toggle. Résout `isDirty` fragile + retire la garde Mark-as-Played. Backend non touché. Front 307 ✓ (+4), tsc/lint clean. ⚠️ smoke test manuel avant merge. Statut → review. |

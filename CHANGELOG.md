@@ -6,6 +6,9 @@ project adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+### Changed
+- **Editing a song now auto-saves** — tweak a song while you play it and your changes save themselves; no more Save button, and you stay on the song instead of being kicked back to the list. A "← Back to songlist" button sits at the top, and a small status shows Saving… / Saved ✓ / ⚠️ Not saved.
+
 ## [1.7.1] — 2026-06-29
 
 ### Fixed

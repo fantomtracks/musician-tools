@@ -50,35 +50,30 @@ async function openEditAndTypeDuration() {
   fireEvent.blur(duration); // commit to the form → unsaved change
 }
 
-describe('Songs — Mark as Played with unsaved changes', () => {
+describe('Songs — Mark as Played under auto-save (story 13.1)', () => {
   beforeEach(() => {
     localStorage.clear();
     jest.clearAllMocks();
   });
 
-  test('clicking Mark as played with an unsaved duration asks to save, then saves and marks', async () => {
+  test('Mark as played after an edit auto-saves first (no dialog), then marks', async () => {
     renderSongs();
     await openEditAndTypeDuration();
-
-    // sanity: the duration committed and is canonicalised
     expect((screen.getByLabelText('Duration (m:ss)') as HTMLInputElement).value).toBe('5:00');
 
     fireEvent.click(screen.getByRole('button', { name: 'Mark as played' }));
 
-    // The guard surfaces a confirmation instead of marking silently
-    const confirmBtn = await screen.findByRole('button', { name: 'Save & mark as played' });
-    expect(songPlayService.markPlayed).not.toHaveBeenCalled();
+    // No "unsaved changes" dialog anymore — the form is flushed automatically.
+    expect(screen.queryByRole('button', { name: 'Save & mark as played' })).not.toBeInTheDocument();
 
-    fireEvent.click(confirmBtn);
-
-    // The song is saved WITH the freshly typed duration (300s)...
+    // The freshly typed duration is persisted by the flush...
     await waitFor(() =>
       expect(songService.updateSong).toHaveBeenCalledWith(
         'song-a',
         expect.objectContaining({ durationSeconds: 300 }),
       ),
     );
-    // ...and only then is the play recorded
+    // ...and the play is recorded.
     await waitFor(() =>
       expect(songPlayService.markPlayed).toHaveBeenCalledWith(
         'song-a',
@@ -87,7 +82,7 @@ describe('Songs — Mark as Played with unsaved changes', () => {
     );
   });
 
-  test('with no unsaved changes, Mark as played marks directly (no dialog)', async () => {
+  test('with no changes, Mark as played marks directly (no dialog)', async () => {
     renderSongs();
     fireEvent.click(await screen.findByText('Alpha')); // open edit, change nothing
 

@@ -2,7 +2,7 @@ import { useEffect, useMemo, useRef, useState } from 'react';
 import { Link, useLocation, useNavigate } from 'react-router-dom';
 import { SongForm } from '../components/SongForm';
 import SongsList from '../components/SongsList';
-import { songService, type CreateSongDTO, type Song } from '../services/songService';
+import { songService, type CreateSongDTO, type UpdateSongDTO, type Song } from '../services/songService';
 import { instrumentService, type Instrument } from '../services/instrumentService';
 import { songPlayService, type SongPlay } from '../services/songPlayService';
 import { playlistService, PlaylistConflictError, type Playlist } from '../services/playlistService';
@@ -45,12 +45,11 @@ function Songs() {
   const [songs, setSongs] = useState<Song[]>([]);
   const [form, setForm] = useState<CreateSongDTO>(initialSong);
   const [editingUid, setEditingUid] = useState<string | null>(null);
-  // Snapshot of the form when a song is opened for edit, so we can tell whether
-  // it has unsaved changes (used by the "Mark as Played" save-first guard).
+  // Story 13.1: serialization of the form as last loaded/saved, used to skip
+  // redundant auto-saves (compared form-to-form, so it's stable). null = not editing.
   const [editBaselineJson, setEditBaselineJson] = useState<string | null>(null);
-  // The instrument awaiting confirmation when "Mark as Played" is clicked with
-  // unsaved changes — non-null while the "save & mark" dialog is open.
-  const [pendingMarkInstrument, setPendingMarkInstrument] = useState<string | null>(null);
+  // Story 13.1: ambient auto-save status shown next to the title while editing.
+  const [saveStatus, setSaveStatus] = useState<'idle' | 'saving' | 'saved' | 'error'>('idle');
   // Removed unused sortByLastPlayed
   const [sortColumn, setSortColumn] = useState<string | null>(() => {
     const saved = typeof window !== 'undefined' ? window.localStorage.getItem('songsSortColumn') : null;
@@ -726,14 +725,24 @@ function Songs() {
 
 
 
-  const handleTogglePlaylist = (playlistUid: string) => {
+  const handleTogglePlaylist = async (playlistUid: string) => {
+    const wasIn = selectedPlaylistUids.has(playlistUid);
     const next = new Set(selectedPlaylistUids);
-    if (next.has(playlistUid)) {
-      next.delete(playlistUid);
-    } else {
-      next.add(playlistUid);
-    }
+    if (wasIn) next.delete(playlistUid); else next.add(playlistUid);
     setSelectedPlaylistUids(next);
+    // Story 13.1: no more Save button — in edit mode, membership is persisted
+    // immediately on toggle (like inline playlist creation). In add mode there's
+    // no song uid yet, so it's committed on Add (handleSubmit create branch).
+    if (editingUid !== null) {
+      try {
+        if (wasIn) await playlistService.removeSongFromPlaylist(playlistUid, editingUid);
+        else await playlistService.addSongToPlaylist(playlistUid, editingUid);
+      } catch (err) {
+        console.error(err);
+        setToastMessage('Could not update playlist');
+        setTimeout(() => setToastMessage(null), 2500);
+      }
+    }
   };
 
   // Select a playlist (existing or just-created) into the edited song and reset
@@ -773,21 +782,13 @@ function Songs() {
     }
   };
 
-  // True when the edited song's form differs from what was last loaded/saved.
-  const isDirty = useMemo(
-    () => editingUid !== null && editBaselineJson !== null && JSON.stringify(form) !== editBaselineJson,
-    [editingUid, editBaselineJson, form],
-  );
-
-  // Persist the current form for the edited song WITHOUT leaving the edit
-  // screen. Returns true on success, false if blocked (duplicate) or on error.
-  const saveSongEdits = async (): Promise<boolean> => {
+  // Story 13.1 — Auto-save: persist the edited song WITHOUT leaving the screen.
+  // While a live duplicate is active, the identity fields (title/artist) are
+  // FROZEN (excluded from the payload → the server keeps their previous value),
+  // so every OTHER field keeps auto-saving (decision 🅰️). Returns true on success.
+  const autoSaveSong = async (): Promise<boolean> => {
     if (editingUid === null) return false;
-    if (liveDuplicate) {
-      setError('This song already exists in your songlist.');
-      return false;
-    }
-    const payload: CreateSongDTO = {
+    const payload: UpdateSongDTO = {
       ...form,
       instrument: form.instrument && form.instrument.length > 0 ? form.instrument : null,
       technique: form.technique && form.technique.length > 0 ? form.technique : [],
@@ -796,10 +797,56 @@ function Songs() {
       instrumentDifficulty: form.instrumentDifficulty || {},
       instrumentTuning: form.instrumentTuning || {},
     };
-    const updatedSong = await songService.updateSong(editingUid, payload);
-    setSongs(prev => prev.map(song => (song.uid === editingUid ? updatedSong : song)));
-    setEditBaselineJson(JSON.stringify(form)); // the form is now the saved state
-    return true;
+    if (liveDuplicate) {
+      delete payload.title;
+      delete payload.artist;
+    }
+    const snapshot = JSON.stringify(form);
+    try {
+      setSaveStatus('saving');
+      const updatedSong = await songService.updateSong(editingUid, payload);
+      setSongs(prev => prev.map(song => (song.uid === editingUid ? updatedSong : song)));
+      setEditBaselineJson(snapshot); // the form is now the saved state
+      setSaveStatus('saved');
+      return true;
+    } catch (err) {
+      console.error(err);
+      setSaveStatus('error'); // ⚠️ Not saved — surfaced ambiently, retried on the next edit
+      return false;
+    }
+  };
+
+  // Always call the latest autoSaveSong from effects/handlers without re-subscribing.
+  const autoSaveRef = useRef(autoSaveSong);
+  autoSaveRef.current = autoSaveSong;
+
+  // Debounced auto-save: ~1.2 s after the last edit (blur-committed fields land in
+  // `form` too). Skips when nothing changed since the last save. Each keystroke
+  // clears the prior timer (true debounce).
+  useEffect(() => {
+    if (editingUid === null) return;
+    if (editBaselineJson !== null && JSON.stringify(form) === editBaselineJson) return;
+    const timer = setTimeout(() => { void autoSaveRef.current(); }, 1200);
+    return () => clearTimeout(timer);
+  }, [form, editingUid, editBaselineJson]);
+
+  // Flush a pending auto-save before leaving the edit screen (Back / Cancel / Enter).
+  const flushAutoSave = async (): Promise<void> => {
+    if (editingUid !== null && editBaselineJson !== null && JSON.stringify(form) !== editBaselineJson) {
+      await autoSaveRef.current();
+    }
+  };
+
+  // Story 13.1: leave the edit screen explicitly (sticky "Back to songlist" /
+  // Cancel) — flush any pending auto-save first so nothing is lost.
+  const backToList = async (): Promise<void> => {
+    await flushAutoSave();
+    setEditingUid(null);
+    setForm(initialSong);
+    setMetadataSource(null);
+    setCameFromDuplicate(false);
+    setSaveStatus('idle');
+    setPage('list');
   };
 
   // The actual mark — reads the song server-side, so the form must be saved
@@ -830,35 +877,13 @@ function Songs() {
     }
   };
 
-  // Mark as Played reads the song from the server, so unsaved form fields (e.g.
-  // a freshly typed duration) would be ignored. If there are unsaved changes,
-  // ask to save first; otherwise mark right away.
+  // Story 13.1: under auto-save the form is always persisted, so "Mark as played"
+  // marks right away — the old "unsaved changes" guard/dialog is obsolete. Flush
+  // any pending edit first so the server-side mark reads fresh fields (e.g. duration).
   const handleMarkAsPlayedNow = async (instrumentType: string) => {
     if (!editingUid) return;
-    if (isDirty) {
-      setPendingMarkInstrument(instrumentType); // opens the save-and-mark dialog
-      return;
-    }
+    await flushAutoSave();
     await performMarkAsPlayed(instrumentType);
-  };
-
-  // Dialog "Save changes and mark as played?" confirmed: save, then mark.
-  const confirmSaveAndMark = async () => {
-    const instrumentType = pendingMarkInstrument;
-    setPendingMarkInstrument(null);
-    if (!editingUid || !instrumentType) return;
-    let saved = false;
-    try {
-      setLoading(true);
-      setError(null);
-      saved = await saveSongEdits();
-    } catch (err) {
-      setError('Error while saving');
-      console.error(err);
-    } finally {
-      setLoading(false);
-    }
-    if (saved) await performMarkAsPlayed(instrumentType);
   };
 
   // Update suggested albums when artist changes
@@ -1149,8 +1174,10 @@ function Songs() {
       genre: Array.isArray(song.genre) ? song.genre : (song.genre ? [song.genre] : []),
     };
     setForm(builtForm);
-    // Baseline for the unsaved-changes check (Mark as Played save-first guard)
+    // Story 13.1: baseline = the just-loaded form, so auto-save only fires once
+    // the user actually changes something.
     setEditBaselineJson(JSON.stringify(builtForm));
+    setSaveStatus('idle');
     setMetadataSource(null);
     setCameFromDuplicate(fromDuplicate);
     setError(null);
@@ -1194,6 +1221,14 @@ function Songs() {
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
 
+    // Story 13.1: in EDIT mode there is no Save button — pressing Enter just
+    // flushes the pending auto-save and STAYS on the song (no redirect).
+    if (editingUid !== null) {
+      await flushAutoSave();
+      return;
+    }
+
+    // CREATE mode (explicit "Add"): validation + duplicate guard + redirect to list.
     const payload: CreateSongDTO = {
       ...form,
       instrument: form.instrument && form.instrument.length > 0 ? form.instrument : null,
@@ -1208,56 +1243,27 @@ function Songs() {
       setLoading(true);
       setError(null);
 
-      // Duplicate guard (add + rename): reuse liveDuplicate, the exact value that
-      // drives the form warning, so what blocks here is always what the user saw.
       if (liveDuplicate) {
         setError('This song already exists in your songlist.');
         setLoading(false);
         return;
       }
 
-      if (editingUid !== null) {
-        const updatedSong = await songService.updateSong(editingUid, payload);
-        setSongs(songs.map(song => (song.uid === editingUid ? updatedSong : song)));
-        
-        // Update playlists for the edited song
-        const latestPlaylists = await playlistService.getAllPlaylists();
-        setPlaylists(latestPlaylists);
+      const newSong = await songService.createSong(payload);
 
-        await Promise.all(
-          latestPlaylists.map(async playlist => {
-            const hasSong = (playlist.songUids || []).includes(editingUid);
-            const shouldHaveSong = selectedPlaylistUids.has(playlist.uid);
+      // Add new song to selected playlists
+      await Promise.all(
+        playlists.map(async playlist => {
+          const shouldHaveSong = selectedPlaylistUids.has(playlist.uid);
+          if (shouldHaveSong) {
+            const nextSongUids = [...(playlist.songUids || []), newSong.uid];
+            await playlistService.updatePlaylist(playlist.uid, { songUids: nextSongUids });
+          }
+        })
+      );
 
-            if (shouldHaveSong && !hasSong) {
-              const nextSongUids = [...(playlist.songUids || []), editingUid];
-              await playlistService.updatePlaylist(playlist.uid, { songUids: nextSongUids });
-            } else if (!shouldHaveSong && hasSong) {
-              const nextSongUids = (playlist.songUids || []).filter(uid => uid !== editingUid);
-              await playlistService.updatePlaylist(playlist.uid, { songUids: nextSongUids });
-            }
-          })
-        );
-
-        setEditingUid(null);
-      } else {
-        const newSong = await songService.createSong(payload);
-
-        // Add new song to selected playlists
-        await Promise.all(
-          playlists.map(async playlist => {
-            const shouldHaveSong = selectedPlaylistUids.has(playlist.uid);
-
-            if (shouldHaveSong) {
-              const nextSongUids = [...(playlist.songUids || []), newSong.uid];
-              await playlistService.updatePlaylist(playlist.uid, { songUids: nextSongUids });
-            }
-          })
-        );
-
-        // Reset playlist filter so the new song is visible
-        setPlaylistFilter('');
-      }
+      // Reset playlist filter so the new song is visible
+      setPlaylistFilter('');
 
       setForm(initialSong);
       setMetadataSource(null);
@@ -1610,16 +1616,6 @@ function Songs() {
         }}
       />
 
-      <ConfirmDialog
-        isOpen={pendingMarkInstrument !== null}
-        title="Unsaved changes"
-        message="This song has unsaved changes. Save them and mark it as played?"
-        confirmText="Save & mark as played"
-        cancelText="Cancel"
-        onConfirm={confirmSaveAndMark}
-        onCancel={() => setPendingMarkInstrument(null)}
-      />
-
       {error && (
         <div className="mx-4 my-4 rounded-md border border-red-300 bg-red-50 text-red-700 p-3 flex items-center justify-between">
           <span>{error}</span>
@@ -1749,25 +1745,33 @@ function Songs() {
       ) : (
         <div className="max-w-3xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
           <div className="card-base glass-effect p-6">
-            <div className="flex items-center justify-between mb-6">
-              <div>
-                <Link to="/" className="text-2xl font-semibold text-gradient">Musician Tools</Link>
-                <p className="text-sm text-gray-600 dark:text-gray-400">{editingUid ? 'Edit a song' : 'Add a song'}</p>
-              </div>
+            {/* Story 13.1: sticky header so "Back to songlist" + the auto-save
+                status stay reachable while editing (the form scrolls under it). */}
+            <div className="sticky top-0 z-20 -mx-6 -mt-6 mb-6 px-6 py-3 bg-white/90 dark:bg-gray-800/90 backdrop-blur border-b border-gray-200 dark:border-gray-700 flex items-center justify-between gap-3">
               <button
                 type="button"
                 className="btn-secondary text-sm"
-                onClick={() => {
-                  setEditingUid(null);
-                  setForm(initialSong);
-                  setMetadataSource(null);
-                  setCameFromDuplicate(false);
-                  setPage('list');
-                }}
-                disabled={loading}
+                onClick={() => { void backToList(); }}
               >
-                <span aria-hidden="true">←</span> Songlist
+                <span aria-hidden="true">←</span> Back to songlist
               </button>
+              {editingUid && (
+                <span
+                  className={`text-xs font-medium ${
+                    saveStatus === 'error' ? 'text-red-600 dark:text-red-400' : 'text-gray-500 dark:text-gray-400'
+                  }`}
+                  role="status"
+                  aria-live="polite"
+                >
+                  {saveStatus === 'saving' && 'Saving…'}
+                  {saveStatus === 'saved' && 'Saved ✓'}
+                  {saveStatus === 'error' && '⚠️ Not saved — retry'}
+                </span>
+              )}
+            </div>
+            <div className="mb-6">
+              <Link to="/" className="text-2xl font-semibold text-gradient">Musician Tools</Link>
+              <p className="text-sm text-gray-600 dark:text-gray-400">{editingUid ? 'Edit a song' : 'Add a song'}</p>
             </div>
           {editingUid && cameFromDuplicate && (
             <div className="mb-4 rounded-md border border-blue-300 dark:border-blue-700 bg-blue-50 dark:bg-blue-900/30 p-3 text-sm text-blue-800 dark:text-blue-100">
@@ -1791,13 +1795,7 @@ function Songs() {
             onSetInstrumentLinksForInstrument={setInstrumentLinksForInstrument}
             onSetStreamingLinks={setStreamingLinks}
             onSubmit={handleSubmit}
-            onCancel={() => {
-              setEditingUid(null);
-              setForm(initialSong);
-              setMetadataSource(null);
-              setCameFromDuplicate(false);
-              setPage('list');
-            }}
+            onCancel={() => { void backToList(); }}
             duplicate={liveDuplicate}
             onEditDuplicate={liveDuplicate ? () => openSongForEdit(liveDuplicate, editingUid === null) : undefined}
             onDelete={editingUid ? () => handleDelete(editingUid) : undefined}
