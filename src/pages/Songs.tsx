@@ -50,6 +50,8 @@ function Songs() {
   const [editBaselineJson, setEditBaselineJson] = useState<string | null>(null);
   // Story 13.1: ambient auto-save status shown next to the title while editing.
   const [saveStatus, setSaveStatus] = useState<'idle' | 'saving' | 'saved' | 'error'>('idle');
+  // Local clock time (HH:MM) of the last successful save — reassurance that it landed.
+  const [lastSavedAt, setLastSavedAt] = useState<string | null>(null);
   // Removed unused sortByLastPlayed
   const [sortColumn, setSortColumn] = useState<string | null>(() => {
     const saved = typeof window !== 'undefined' ? window.localStorage.getItem('songsSortColumn') : null;
@@ -832,7 +834,12 @@ function Songs() {
       setEditBaselineJson(snapshot); // the form is now the saved state
       // Don't claim "Saved ✓" while the title is frozen — the duplicate warning is
       // the real signal that the identity wasn't persisted.
-      setSaveStatus(frozen ? 'idle' : 'saved');
+      if (frozen) {
+        setSaveStatus('idle');
+      } else {
+        setLastSavedAt(new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }));
+        setSaveStatus('saved');
+      }
       return true;
     } catch (err) {
       console.error(err);
@@ -1218,6 +1225,7 @@ function Songs() {
     // the user actually changes something.
     setEditBaselineJson(JSON.stringify(builtForm));
     setSaveStatus('idle');
+    setLastSavedAt(null);
     setMetadataSource(null);
     setCameFromDuplicate(fromDuplicate);
     setError(null);
@@ -1805,7 +1813,7 @@ function Songs() {
                 aria-live="polite"
               >
                 {saveStatus === 'saving' && 'Saving…'}
-                {saveStatus === 'saved' && 'Saved ✓'}
+                {saveStatus === 'saved' && `Saved ✓${lastSavedAt ? ` · ${lastSavedAt}` : ''}`}
                 {saveStatus === 'error' && '⚠️ Not saved — retry'}
               </span>
             )}
