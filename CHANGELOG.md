@@ -6,6 +6,8 @@ project adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+## [1.7.1] — 2026-06-29
+
 ### Fixed
 - **Re-opening a confirmation link on a second device** — if you've already confirmed your email, opening the same link again (e.g. on your phone) now says "Email already verified — sign in" instead of the misleading "link invalid or expired".
 
