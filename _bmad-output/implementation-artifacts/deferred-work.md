@@ -64,6 +64,14 @@ _Note : prio 1 + prio 2 touchent la même zone (UX de vérification email) → g
 
 - **12-1 — Flux change-email (jumeau) garde le souci 2e-appareil** : `confirmEmailChange` n'a pas le fallback `findConsumedToken` de 12.1 → un clic redondant sur un lien **change-email** consommé affiche encore « Link invalid or expired » (au lieu d'un « already updated / sign in »). 12.1 n'a traité que le verify-signup ; le même fix s'applique. Faible impact (lien 1 h, initié par l'user). [`backend/controllers/usercontroller.js` confirmEmailChange + `src/pages/VerifyEmailPage.tsx` branche `?flow=change-email`]
 
+## Deferred from: code review of story-13.1 (2026-06-29)
+
+> Review 3 couches sur l'auto-save. 1 HIGH (clobber lastPlayed) + 5 Med corrigés. 3 reports :
+
+- **13-1 — Doublon résolu sans édition du form** : si le jumeau d'un titre dupliqué est supprimé ailleurs, `liveDuplicate` repasse à null mais l'effet d'auto-save (deps `[form, editingUid, editBaselineJson]`) ne re-tourne pas → le titre tapé (corrigé) n'est pas réécrit. Rarissime à l'échelle mono-user. [`src/pages/Songs.tsx` autoSaveSong/effet debounce]
+- **13-1 — Warning doublon = bannière, pas ✗ discret** : le spec demandait un « ✗ discret à côté du titre » ; l'implémentation réutilise la bannière ambre existante (« already exists in your songlist »). Fonctionnel, mais pas le marqueur discret. À polir si l'UX gêne. [`src/components/SongForm.tsx:353-371`]
+- **13-1 — Seed playlist vs toggle avant chargement** : toggler une playlist avant que `playlists` ait chargé peut être clobbé par le re-seed (`seededPlaylistsForEditRef` ne verrouille qu'une fois `playlists.length > 0`). Pré-existant (Epic 10). [`src/pages/Songs.tsx` effet de seed]
+
 ## Deferred from: code review of story-11.1 (2026-06-28)
 
 > Review 3 couches. 2 patches appliqués (garde gating `app.listen` ; requête `pg_indexes` qualifiée). 1 report :

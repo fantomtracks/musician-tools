@@ -337,8 +337,13 @@ function Songs() {
   // Reset to list view when clicking on Songs in header
   useEffect(() => {
     if (location.state?.resetToList) {
+      // Story 13.1: this switches to the list without unmounting, so flush any
+      // pending auto-save here too (the unmount-flush effect won't fire).
+      void flushOnUnmountRef.current();
       setPage('list');
       setEditingUid(null);
+      setEditBaselineJson(null);
+      setSaveStatus('idle');
       // Clear the state to avoid triggering again
       window.history.replaceState({}, document.title);
     }
@@ -739,6 +744,12 @@ function Songs() {
         else await playlistService.addSongToPlaylist(playlistUid, editingUid);
       } catch (err) {
         console.error(err);
+        // Roll back the optimistic toggle so the UI matches the server.
+        setSelectedPlaylistUids(prev => {
+          const reverted = new Set(prev);
+          if (wasIn) reverted.add(playlistUid); else reverted.delete(playlistUid);
+          return reverted;
+        });
         setToastMessage('Could not update playlist');
         setTimeout(() => setToastMessage(null), 2500);
       }
@@ -786,8 +797,14 @@ function Songs() {
   // While a live duplicate is active, the identity fields (title/artist) are
   // FROZEN (excluded from the payload → the server keeps their previous value),
   // so every OTHER field keeps auto-saving (decision 🅰️). Returns true on success.
+  // In-flight guard + a shared debounce timer (in a ref) so flush / Mark / rapid
+  // edits can't overlap or leave a pending save uncancelled.
+  const savingRef = useRef(false);
+  const saveTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
   const autoSaveSong = async (): Promise<boolean> => {
     if (editingUid === null) return false;
+    if (savingRef.current) return false; // a save is already in flight
     const payload: UpdateSongDTO = {
       ...form,
       instrument: form.instrument && form.instrument.length > 0 ? form.instrument : null,
@@ -797,22 +814,32 @@ function Songs() {
       instrumentDifficulty: form.instrumentDifficulty || {},
       instrumentTuning: form.instrumentTuning || {},
     };
-    if (liveDuplicate) {
+    // `lastPlayed` is server-managed (set by Mark as Played), never edited in the
+    // form — never send it, or the auto-save would clobber a fresh play.
+    delete payload.lastPlayed;
+    const frozen = !!liveDuplicate;
+    if (frozen) {
+      // 🅰️: freeze the identity fields while a duplicate is shown; the rest saves.
       delete payload.title;
       delete payload.artist;
     }
     const snapshot = JSON.stringify(form);
+    savingRef.current = true;
     try {
       setSaveStatus('saving');
       const updatedSong = await songService.updateSong(editingUid, payload);
       setSongs(prev => prev.map(song => (song.uid === editingUid ? updatedSong : song)));
       setEditBaselineJson(snapshot); // the form is now the saved state
-      setSaveStatus('saved');
+      // Don't claim "Saved ✓" while the title is frozen — the duplicate warning is
+      // the real signal that the identity wasn't persisted.
+      setSaveStatus(frozen ? 'idle' : 'saved');
       return true;
     } catch (err) {
       console.error(err);
       setSaveStatus('error'); // ⚠️ Not saved — surfaced ambiently, retried on the next edit
       return false;
+    } finally {
+      savingRef.current = false;
     }
   };
 
@@ -820,33 +847,46 @@ function Songs() {
   const autoSaveRef = useRef(autoSaveSong);
   autoSaveRef.current = autoSaveSong;
 
-  // Debounced auto-save: ~1.2 s after the last edit (blur-committed fields land in
-  // `form` too). Skips when nothing changed since the last save. Each keystroke
-  // clears the prior timer (true debounce).
+  // Debounced auto-save (~1.2 s). The timer lives in a ref so flush can cancel it.
   useEffect(() => {
     if (editingUid === null) return;
     if (editBaselineJson !== null && JSON.stringify(form) === editBaselineJson) return;
-    const timer = setTimeout(() => { void autoSaveRef.current(); }, 1200);
-    return () => clearTimeout(timer);
+    if (saveTimerRef.current) clearTimeout(saveTimerRef.current);
+    saveTimerRef.current = setTimeout(() => { void autoSaveRef.current(); }, 1200);
+    return () => { if (saveTimerRef.current) { clearTimeout(saveTimerRef.current); saveTimerRef.current = null; } };
   }, [form, editingUid, editBaselineJson]);
 
-  // Flush a pending auto-save before leaving the edit screen (Back / Cancel / Enter).
-  const flushAutoSave = async (): Promise<void> => {
+  // Flush a pending auto-save (Back / Cancel / Enter / Mark / unmount). Cancels the
+  // debounce timer first so it can't fire a second, overlapping save. Returns false
+  // only when a save was attempted and FAILED.
+  const flushAutoSave = async (): Promise<boolean> => {
+    if (saveTimerRef.current) { clearTimeout(saveTimerRef.current); saveTimerRef.current = null; }
     if (editingUid !== null && editBaselineJson !== null && JSON.stringify(form) !== editBaselineJson) {
-      await autoSaveRef.current();
+      return autoSaveRef.current();
     }
+    return true;
   };
 
-  // Story 13.1: leave the edit screen explicitly (sticky "Back to songlist" /
-  // Cancel) — flush any pending auto-save first so nothing is lost.
+  // Flush the latest pending edit on unmount — covers the "Musician Tools" link and
+  // any route change that doesn't go through Back/Cancel.
+  const flushOnUnmountRef = useRef(flushAutoSave);
+  flushOnUnmountRef.current = flushAutoSave;
+  useEffect(() => () => { void flushOnUnmountRef.current(); }, []);
+
+  // Story 13.1: leave the edit screen explicitly (sticky "Back to songlist" / Cancel).
   const backToList = async (): Promise<void> => {
-    await flushAutoSave();
+    const ok = await flushAutoSave();
     setEditingUid(null);
     setForm(initialSong);
+    setEditBaselineJson(null);
     setMetadataSource(null);
     setCameFromDuplicate(false);
     setSaveStatus('idle');
     setPage('list');
+    if (!ok) {
+      setToastMessage('Some changes could not be saved');
+      setTimeout(() => setToastMessage(null), 2500);
+    }
   };
 
   // The actual mark — reads the song server-side, so the form must be saved

@@ -5,7 +5,7 @@ arch_decision: "Auto-save de la fiche chanson (atelier vivant) : persistance dé
 
 # Story 13.1: Auto-save de la fiche chanson (« atelier vivant »)
 
-Status: review
+Status: done
 
 <!-- Note: Validation is optional. Run validate-create-story for quality check before dev-story. -->
 
@@ -124,6 +124,25 @@ Décisions actées au brainstorm : auto-save (debounce + flush blur + flush au d
 - [Source: src/__tests__/SongsMarkAsPlayedDirty.test.tsx] — test de la garde (à mettre à jour)
 - [Source: _bmad-output/project-context.md] — conventions front/tests, garde-fous
 
+## Review Findings
+
+_Code review adversariale 3 couches (Blind / Edge / Auditor) — 2026-06-29. Les 13 AC satisfaites, mais le mécanisme d'auto-save neuf demandait du durcissement. 1 HIGH (régression), 5 Med corrigés ; 3 reports._
+
+- [x] [Review][Patch→Fixed] **HIGH — l'auto-save écrase `lastPlayed`** [src/pages/Songs.tsx autoSaveSong] — `form.lastPlayed` (figé à l'ouverture, jamais rafraîchi par `performMarkAsPlayed` qui n'update pas `form`) repart dans le PUT whole-form → annule le `lastPlayed=now` du « Mark as played » (le tri « last played » revient en arrière). **Fix** : exclure `lastPlayed` du payload d'auto-save (`delete payload.lastPlayed`) — champ géré serveur, jamais édité dans le form.
+- [x] [Review][Patch→Fixed] **Med — sorties sans flush → édition sub-1.2 s perdue** [Songs.tsx] — seuls Back/Cancel/Enter flushent ; le lien « Musician Tools » (header édition), la nav « Songlist » (effet `resetToList`) et tout unmount ne flushent pas (cleanup = `clearTimeout` seul). **Fix** : effet de flush au **démontage** (ref-based) + flush dans le handler `resetToList`.
+- [x] [Review][Patch→Fixed] **Med — « Saved ✓ » menteur pendant un titre gelé** [autoSaveSong] — sur `liveDuplicate`, le payload exclut title/artist mais on affiche « Saved ✓ ». **Fix** : ne pas montrer « Saved ✓ » quand `liveDuplicate` (statut neutre ; la bannière doublon porte le message).
+- [x] [Review][Patch→Fixed] **Med — timer/save sans cancel-lock partagé** [debounce effect + flush + mark] — chevauchements possibles (flush double-fire, mark race, frappes concurrentes). **Fix** : timer en **ref** (annulé par `flushAutoSave`) + garde **in-flight** (`savingRef`) dans `autoSaveSong`.
+- [x] [Review][Patch→Fixed] **Med — toggle playlist non rollback sur erreur** [handleTogglePlaylist] — `setSelectedPlaylistUids` optimiste, `catch` ne restaure pas → UI diverge du serveur. **Fix** : restaurer la sélection précédente sur erreur.
+- [x] [Review][Patch→Fixed] **Med — Back pendant un échec de save** [backToList] — flushe (échoue), part quand même, remet `saveStatus` à idle → édition perdue sans signal. **Fix** : `flushAutoSave` renvoie un booléen ; toast « Some changes could not be saved » si échec ; `editBaselineJson` remis à `null` au départ (Low, contrat).
+- [x] [Review][Patch→Fixed] **Test gap AC12 — persist playlist au toggle non testé** [SongsAutoSave.test.tsx] — ajouter un test : toggle en édition → `addSongToPlaylist`/`removeSongFromPlaylist` appelé.
+- [x] [Review][Defer] **Doublon résolu sans édition du form → titre jamais réécrit** [Songs.tsx] — si le jumeau est supprimé ailleurs, `liveDuplicate` repasse à null mais l'effet (deps `[form,...]`) ne re-tourne pas → le titre corrigé n'est pas sauvé. Rarissime (mono-user). — deferred, edge beta.
+- [x] [Review][Defer] **AC8 cosmétique — bannière au lieu d'un ✗ discret** [SongForm] — le warning doublon existe (bannière ambre), mais pas le « ✗ discret sur le champ titre » du mot du spec. — deferred, cosmétique.
+- [x] [Review][Defer] **Seed playlist vs toggle avant chargement** [Songs.tsx seededPlaylistsForEditRef] — toggle avant que `playlists` charge → re-seed peut clobber (pré-existant Epic 10). — deferred, rare.
+
+### Findings écartés
+- **`autoSaveRef.current = …` assigné en render** — pattern « latest ref » standard, risque pratique nul. Écarté.
+- **Saves out-of-order résiduels** — largement couverts par la garde in-flight. Écarté.
+
 ## Dev Agent Record
 
 ### Agent Model Used
@@ -159,4 +178,5 @@ claude-opus-4-8[1m] (dev-story workflow)
 
 | Date       | Version | Description                                                                 |
 |------------|---------|-----------------------------------------------------------------------------|
+| 2026-06-29 | 0.2     | Code review 3 couches : **1 HIGH** corrigé (auto-save n'envoie plus `lastPlayed` → plus d'écrasement du « dernier joué ») + 5 Med (flush au démontage + `resetToList` ; pas de « Saved ✓ » si titre gelé ; timer en ref + garde in-flight ; rollback toggle playlist ; Back→toast si échec) + test toggle-playlist (AC12). 3 reports. Front 308 ✓, tsc/lint clean. Statut → done. |
 | 2026-06-29 | 0.1     | Story 13.1 — auto-save fiche chanson (« atelier vivant »). Auto-save débouncé + flush blur/départ, suppression du bouton Save (édition), reste sur la chanson, sticky « Back to songlist » + indicateur `Saving/Saved/Not-saved`, doublon gèle title/artist (🅰️), playlists auto-persistées au toggle. Résout `isDirty` fragile + retire la garde Mark-as-Played. Backend non touché. Front 307 ✓ (+4), tsc/lint clean. ⚠️ smoke test manuel avant merge. Statut → review. |

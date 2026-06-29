@@ -24,6 +24,7 @@ jest.mock('../services/playlistService', () => ({
 }));
 
 import { songService } from '../services/songService';
+import { playlistService } from '../services/playlistService';
 const updateSong = songService.updateSong as jest.Mock;
 
 function renderSongs() {
@@ -86,5 +87,18 @@ describe('Songs — auto-save (story 13.1)', () => {
     fireEvent.change(screen.getByLabelText('Artist'), { target: { value: 'Boom' } });
 
     await waitFor(() => expect(screen.getByText(/not saved/i)).toBeInTheDocument(), { timeout: 2500 });
+  });
+
+  test('toggling a playlist in edit mode persists immediately (AC12)', async () => {
+    (playlistService.getAllPlaylists as jest.Mock).mockResolvedValue([{ uid: 'pl-1', name: 'Rock', songUids: [] }]);
+    (playlistService.addSongToPlaylist as jest.Mock).mockResolvedValue({});
+    renderSongs();
+    fireEvent.click(await screen.findByText('Alpha'));
+
+    const picker = await screen.findByPlaceholderText(/search, select or create a playlist/i);
+    fireEvent.focus(picker);
+    fireEvent.click(await screen.findByRole('option', { name: 'Rock' }));
+
+    await waitFor(() => expect(playlistService.addSongToPlaylist).toHaveBeenCalledWith('pl-1', 'song-a'));
   });
 });

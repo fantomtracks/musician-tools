@@ -35,7 +35,7 @@
 # - Dev moves story to 'review', then runs code-review (fresh context, different LLM recommended)
 
 generated: 2026-06-07
-last_updated: 2026-06-29  # 13-1 (auto-save fiche chanson) → review ; front 307✓
+last_updated: 2026-06-29  # 13-1 done (review 3 couches, 1 HIGH + 5 Med corrigés) ; Epic 13 complet
 project: musician-tools
 project_key: NOKEY
 tracking_system: file-system
@@ -137,5 +137,5 @@ development_status:
   12-1-verif-email-ux: done            # backend consommé-valide vs invalide + front CTA selon loggé ; review 3 couches OK (sécu validée, 2 patches) ; back 246✓ front 303✓
 
   # Epic 13: Confort édition « atelier vivant » (issu brainstorm auto-save 2026-06-29, deferred-work prio 3)
-  epic-13: in-progress
-  13-1-autosave-fiche-chanson: review          # front ; auto-save (debounce+flush) + sticky Back + statut ; isDirty + garde Mark-as-Played retirés ; doublon gèle title/artist (A) ; playlists au toggle ; front 307✓
+  epic-13: done
+  13-1-autosave-fiche-chanson: done            # front ; auto-save (debounce+flush, lastPlayed exclu) + sticky Back + statut ; review 3 couches (1 HIGH lastPlayed + 5 Med) ; front 308✓

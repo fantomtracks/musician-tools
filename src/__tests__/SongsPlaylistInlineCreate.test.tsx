@@ -48,6 +48,9 @@ jest.mock('../services/playlistService', () => {
       getAllPlaylists: jest.fn().mockResolvedValue([]),
       createPlaylist: jest.fn(),
       updatePlaylist: jest.fn().mockResolvedValue({}),
+      // Story 13.1: toggling a playlist in edit mode now persists immediately.
+      addSongToPlaylist: jest.fn().mockResolvedValue({}),
+      removeSongFromPlaylist: jest.fn().mockResolvedValue({}),
     },
   };
 });
