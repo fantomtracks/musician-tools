@@ -28,13 +28,25 @@ test('a valid token verifies, hydrates auth from the returned user, and shows su
   // the user the server just signed in, which the page applies to auth state.
   mockedUseAuth.mockReturnValue({ isAuthenticated: false, user: null, patchUser: jest.fn(), applyAuthenticatedUser });
   const user = { uid: 'u1', name: 'Ada', email: 'ada@example.com', emailVerified: true, isAdmin: false };
-  svc.verify.mockResolvedValue(user);
+  svc.verify.mockResolvedValue({ user });
 
   renderAt('/verify-email?token=good');
 
   await screen.findByText(/email confirmed/i);
   expect(svc.verify).toHaveBeenCalledWith('good');
   expect(applyAuthenticatedUser).toHaveBeenCalledWith(user);
+});
+
+test('a consumed-but-valid token shows "already verified" + Sign in even when logged OUT (story 12.1)', async () => {
+  // The 2nd-device case: never logged in here, the server says alreadyVerified.
+  mockedUseAuth.mockReturnValue({ isAuthenticated: false, user: null, patchUser: jest.fn(), applyAuthenticatedUser: jest.fn() });
+  svc.verify.mockResolvedValue({ alreadyVerified: true });
+
+  renderAt('/verify-email?token=usedonotherdevice');
+
+  await screen.findByRole('heading', { name: /already verified/i });
+  expect(screen.getByRole('link', { name: /sign in/i })).toBeInTheDocument();
+  expect(screen.queryByText(/invalid or expired/i)).not.toBeInTheDocument();
 });
 
 test('an invalid token shows the error state', async () => {

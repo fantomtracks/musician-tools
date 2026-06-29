@@ -13,7 +13,7 @@ jest.mock('../models', () => ({
 // Email composition (7.7/7.9) + token issuance (7.6/7.9) are mocked: no real
 // email/token in tests.
 jest.mock('../services/authEmails', () => ({ sendSignupAttemptNotice: jest.fn(), sendVerifyEmail: jest.fn() }));
-jest.mock('../services/authTokenService', () => ({ issueToken: jest.fn(async () => 'tok'), verifyToken: jest.fn() }));
+jest.mock('../services/authTokenService', () => ({ issueToken: jest.fn(async () => 'tok'), verifyToken: jest.fn(), findConsumedToken: jest.fn(async () => null) }));
 
 const { User, Topic } = require('../models');
 const authEmails = require('../services/authEmails');
@@ -391,14 +391,41 @@ describe('usercontroller — email verification (story 7.9 + hard gate 7.13)', (
       expect(req.session.loggedIn).toBeUndefined();
     });
 
-    test('an invalid/expired/used token → generic 400, no update, no session', async () => {
+    test('an invalid/expired/unknown token → generic 400, no update, no session', async () => {
       authTokenService.verifyToken.mockResolvedValue(null);
+      authTokenService.findConsumedToken.mockResolvedValue(null); // not a consumed token either
       const req = { body: { token: 'bad' }, session: {} };
       const next = mockNext();
       await controller.verifyEmail(req, mockRes(), next);
       expect(next.mock.calls[0][0].status).toBe(400);
       expect(User.update).not.toHaveBeenCalled();
       expect(req.session.loggedIn).toBeUndefined();
+    });
+
+    test('a consumed-but-valid token (2nd-device redundant click) → 200 alreadyVerified, NO session (story 12.1)', async () => {
+      authTokenService.verifyToken.mockResolvedValue(null); // atomic consume misses: already used
+      authTokenService.findConsumedToken.mockResolvedValue({ userUid: 'u1' });
+      User.findByPk.mockResolvedValue({ uid: 'u1', emailVerified: true });
+
+      const req = { body: { token: 'used-but-valid' }, session: mockSession() };
+      const res = mockRes();
+      await controller.verifyEmail(req, res, mockNext());
+
+      expect(res.json).toHaveBeenCalledWith({ alreadyVerified: true });
+      // No session is opened from a spent token, and nothing is re-updated.
+      expect(req.session.regenerate).not.toHaveBeenCalled();
+      expect(req.session.loggedIn).toBeUndefined();
+      expect(User.update).not.toHaveBeenCalled();
+    });
+
+    test('a consumed token whose user is NOT verified → 400 (not alreadyVerified)', async () => {
+      authTokenService.verifyToken.mockResolvedValue(null);
+      authTokenService.findConsumedToken.mockResolvedValue({ userUid: 'u1' });
+      User.findByPk.mockResolvedValue({ uid: 'u1', emailVerified: false });
+
+      const next = mockNext();
+      await controller.verifyEmail({ body: { token: 'x' }, session: {} }, mockRes(), next);
+      expect(next.mock.calls[0][0].status).toBe(400);
     });
 
     test('missing token → 400', async () => {

@@ -35,7 +35,7 @@
 # - Dev moves story to 'review', then runs code-review (fresh context, different LLM recommended)
 
 generated: 2026-06-07
-last_updated: 2026-06-29  # Epic 12 ouvert ; story 12-1 (UX vérif email : consommé-valide vs invalide) → ready-for-dev
+last_updated: 2026-06-29  # 12-1 (UX vérif email) → review ; back 246✓ front 302✓
 project: musician-tools
 project_key: NOKEY
 tracking_system: file-system
@@ -134,4 +134,4 @@ development_status:
 
   # Epic 12: Confort vérification email (issu deferred-work, items 7-13 promus)
   epic-12: in-progress
-  12-1-verif-email-ux: ready-for-dev   # backend distingue token consommé-valide (200 alreadyVerified, sans session) vs invalide (400) + front message clair déconnecté + tests branches verif (Login/Register)
+  12-1-verif-email-ux: review          # backend distingue consommé-valide (200 alreadyVerified, sans session) vs invalide (400) + front message clair déconnecté + tests verif (Login/Register) ; back 246✓ front 302✓

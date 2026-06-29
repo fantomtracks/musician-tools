@@ -2,6 +2,7 @@ import { render, screen, fireEvent, waitFor } from '@testing-library/react';
 import { MemoryRouter } from 'react-router-dom';
 import RegisterPage from '../pages/RegisterPage';
 import { useAuth } from '../contexts/AuthContext';
+import { verificationService } from '../services/verificationService';
 
 const mockNavigate = jest.fn();
 jest.mock('react-router-dom', () => ({
@@ -9,7 +10,11 @@ jest.mock('react-router-dom', () => ({
   useNavigate: () => mockNavigate,
 }));
 jest.mock('../contexts/AuthContext', () => ({ useAuth: jest.fn() }));
+jest.mock('../services/verificationService', () => ({
+  verificationService: { resend: jest.fn(), verify: jest.fn(), confirmEmailChange: jest.fn() },
+}));
 const mockedUseAuth = useAuth as jest.Mock;
+const svc = verificationService as jest.Mocked<typeof verificationService>;
 
 function renderPage() {
   return render(
@@ -64,5 +69,19 @@ describe('RegisterPage (story 7.7 — two outcomes)', () => {
 
     await screen.findByText(/at least 10 characters/i);
     expect(register).not.toHaveBeenCalled();
+  });
+
+  test('on the pending screen, Resend calls verificationService.resend with the email (story 12.1 test gap)', async () => {
+    mockedUseAuth.mockReturnValue({ register: jest.fn().mockResolvedValue({ status: 'pending' }) });
+    svc.resend.mockResolvedValue(undefined);
+
+    renderPage();
+    fillAndSubmit({ email: 'ada@example.com' });
+    await screen.findByText(/check your email/i);
+
+    fireEvent.click(screen.getByRole('button', { name: /resend the link/i }));
+
+    await waitFor(() => expect(svc.resend).toHaveBeenCalledWith('ada@example.com'));
+    await screen.findByText(/verification email sent/i);
   });
 });

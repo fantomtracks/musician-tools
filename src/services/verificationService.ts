@@ -7,7 +7,9 @@ export const verificationService = {
   // Confirm an email from the link token (public; the token is the authority).
   // Story 7.13 (hard gate): the link is clicked while logged out and the server
   // auto-logs-in on success, returning the user so the client can hydrate auth.
-  async verify(token: string): Promise<User> {
+  // Story 12.1: a redundant click on a 2nd device gets 200 { alreadyVerified: true }
+  // (no session) — distinct from a genuinely invalid link (non-2xx → throw).
+  async verify(token: string): Promise<{ user?: User; alreadyVerified?: boolean }> {
     const res = await apiFetch(`${API_BASE}/auth/verify-email`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
@@ -16,7 +18,8 @@ export const verificationService = {
     });
     if (!res.ok) throw new Error('Invalid or expired verification link');
     const body = await res.json();
-    return body.user as User;
+    if (body.alreadyVerified) return { alreadyVerified: true };
+    return { user: body.user as User };
   },
 
   // Confirm a new email from the change-email link token (public; story 7.11).

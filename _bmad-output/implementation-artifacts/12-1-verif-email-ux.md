@@ -5,7 +5,7 @@ arch_decision: "Distinguer côté backend un token de vérif CONSOMMÉ-MAIS-VALI
 
 # Story 12.1: UX de vérification email — token consommé-valide vs invalide (+ tests des branches verif)
 
-Status: ready-for-dev
+Status: review
 
 <!-- Note: Validation is optional. Run validate-create-story for quality check before dev-story. -->
 
@@ -62,22 +62,22 @@ Le front (`VerifyEmailPage.tsx:53-61`) **gère déjà** ce cas **uniquement si l
 
 ### Task 1 — Backend : helper consommé + `verifyEmail` (AC1–AC4)
 
-- [ ] `backend/services/authTokenService.js` : ajouter `async function findConsumedToken(clearToken, type)` → `AuthToken.findOne({ where: { tokenHash: hashToken(clearToken), type, usedAt: { [Op.ne]: null } } })` → renvoie `{ userUid }` ou `null`. **Lecture seule.** Exporter.
-- [ ] `backend/controllers/usercontroller.js` › `verifyEmail` (l.214-258) : sur `result === null` (avant le `createError(400)`), tenter `const consumed = await authTokenService.findConsumedToken(token, 'verify_email')` ; si `consumed`, charger l'user (`User.findByPk(consumed.userUid)`) et si `user && user.emailVerified` → `return res.json({ alreadyVerified: true })` (**200, aucune session**). Sinon → 400 inchangé. Le happy path (result non-null) **inchangé**.
-- [ ] Garder le `catch` → `createError(500)` ; ne pas avaler d'erreurs.
+- [x] `backend/services/authTokenService.js` : ajouter `async function findConsumedToken(clearToken, type)` → `AuthToken.findOne({ where: { tokenHash: hashToken(clearToken), type, usedAt: { [Op.ne]: null } } })` → renvoie `{ userUid }` ou `null`. **Lecture seule.** Exporter.
+- [x] `backend/controllers/usercontroller.js` › `verifyEmail` (l.214-258) : sur `result === null` (avant le `createError(400)`), tenter `const consumed = await authTokenService.findConsumedToken(token, 'verify_email')` ; si `consumed`, charger l'user (`User.findByPk(consumed.userUid)`) et si `user && user.emailVerified` → `return res.json({ alreadyVerified: true })` (**200, aucune session**). Sinon → 400 inchangé. Le happy path (result non-null) **inchangé**.
+- [x] Garder le `catch` → `createError(500)` ; ne pas avaler d'erreurs.
 
 ### Task 2 — Frontend : service + page (AC5–AC7)
 
-- [ ] `src/services/verificationService.ts` › `verify` : changer le retour en type discriminé, ex. `Promise<{ user?: User; alreadyVerified?: boolean }>`. Sur `res.ok`, lire le body : `if (body.alreadyVerified) return { alreadyVerified: true }` sinon `return { user: body.user }`. Sur `!res.ok` → throw (inchangé). Adapter le type d'appel.
-- [ ] `src/pages/VerifyEmailPage.tsx` : ajouter un état (`Status` → ajouter `'already-verified'`, ou un flag). Dans le `.then` de `verificationService.verify` : `if (res.alreadyVerified) setStatus('already-verified')` ; `else if (res.user) { applyAuthenticatedUser(res.user); setStatus('success') }`. Rendre un bloc « already-verified » : titre « Email already verified ✓ », texte « Your email is already verified. » + `<Link to="/login">Sign in</Link>`. **Tailwind + dark mode** comme les blocs existants. Le `.catch` (cas loggé-vérifié) peut rester en filet. `ranRef` inchangé.
+- [x] `src/services/verificationService.ts` › `verify` : changer le retour en type discriminé, ex. `Promise<{ user?: User; alreadyVerified?: boolean }>`. Sur `res.ok`, lire le body : `if (body.alreadyVerified) return { alreadyVerified: true }` sinon `return { user: body.user }`. Sur `!res.ok` → throw (inchangé). Adapter le type d'appel.
+- [x] `src/pages/VerifyEmailPage.tsx` : ajouter un état (`Status` → ajouter `'already-verified'`, ou un flag). Dans le `.then` de `verificationService.verify` : `if (res.alreadyVerified) setStatus('already-verified')` ; `else if (res.user) { applyAuthenticatedUser(res.user); setStatus('success') }`. Rendre un bloc « already-verified » : titre « Email already verified ✓ », texte « Your email is already verified. » + `<Link to="/login">Sign in</Link>`. **Tailwind + dark mode** comme les blocs existants. Le `.catch` (cas loggé-vérifié) peut rester en filet. `ranRef` inchangé.
 
 ### Task 3 — Tests (AC1–AC9)
 
-- [ ] **Back `backend/__tests__/usercontroller.test.js`** (ou le fichier verifyEmail) : (a) token consommé + user vérifié → `res.json({ alreadyVerified: true })`, **pas** de `req.session.loggedIn`, pas de `regenerateSession` ; (b) token inconnu/expiré → 400 ; (c) happy path inchangé (session + user). Mock `authTokenService.verifyToken`/`findConsumedToken` + `User`.
-- [ ] **Front `src/__tests__/VerifyEmailPage.test.tsx`** (existe) : ajouter — `verify` résout `{ alreadyVerified: true }` (user **déconnecté**) → affiche « already verified » + lien Sign in, **pas** « invalid or expired ». Garder les cas success/error existants.
-- [ ] **Front `src/__tests__/LoginPage.test.tsx`** (NEW) : login → `{ needsVerification: true }` → prompt vérif + Resend ; clic Resend → `verificationService.resend` appelé. Mock `useAuth().login` + `verificationService`.
-- [ ] **Front `src/__tests__/RegisterPage.test.tsx`** (existe) : ajouter — clic Resend → `verificationService.resend(email)` + message de confirmation.
-- [ ] Vérifs : `cd backend && npm test` + `npm test` (front) verts ; `tsc -b` + `eslint .` clean.
+- [x] **Back `backend/__tests__/usercontroller.test.js`** (ou le fichier verifyEmail) : (a) token consommé + user vérifié → `res.json({ alreadyVerified: true })`, **pas** de `req.session.loggedIn`, pas de `regenerateSession` ; (b) token inconnu/expiré → 400 ; (c) happy path inchangé (session + user). Mock `authTokenService.verifyToken`/`findConsumedToken` + `User`.
+- [x] **Front `src/__tests__/VerifyEmailPage.test.tsx`** (existe) : ajouter — `verify` résout `{ alreadyVerified: true }` (user **déconnecté**) → affiche « already verified » + lien Sign in, **pas** « invalid or expired ». Garder les cas success/error existants.
+- [x] **Front `src/__tests__/LoginPage.test.tsx`** (NEW) : login → `{ needsVerification: true }` → prompt vérif + Resend ; clic Resend → `verificationService.resend` appelé. Mock `useAuth().login` + `verificationService`.
+- [x] **Front `src/__tests__/RegisterPage.test.tsx`** (existe) : ajouter — clic Resend → `verificationService.resend(email)` + message de confirmation.
+- [x] Vérifs : `cd backend && npm test` + `npm test` (front) verts ; `tsc -b` + `eslint .` clean.
 
 ## Dev Notes
 
@@ -122,10 +122,32 @@ Le front (`VerifyEmailPage.tsx:53-61`) **gère déjà** ce cas **uniquement si l
 
 ### Agent Model Used
 
-{{agent_model_name_version}}
+claude-opus-4-8[1m] (dev-story workflow)
 
 ### Debug Log References
+- **Tests** : back `npm test` **246/246** (+2 verifyEmail) ; front `npm test` **302/302** (+5 : VerifyEmailPage +1, LoginPage +3, RegisterPage +1) ; `tsc -b` 0 ; `eslint .` front + back clean.
+- Détail test : `findByText(/already verified/i)` matchait le titre **et** le paragraphe → ciblé sur `findByRole('heading', …)`. L'ancien test de succès mockait `verify` → user brut ; mis à jour pour le nouveau contrat `{ user }`.
 
 ### Completion Notes List
+- **AC1–AC4 (backend)** : `authTokenService.findConsumedToken(clearToken, type)` (lecture seule : `AuthToken.findOne` sur `tokenHash+type+usedAt != null`). `verifyEmail` : sur `verifyToken` null, tente `findConsumedToken` ; si trouvé **et** `User.findByPk(...).emailVerified` → `res.json({ alreadyVerified: true })` (**200, aucune session**) ; sinon 400. `verifyToken` atomique **inchangé** ; happy path 7.13 intact.
+- **AC5–AC7 (front)** : `verificationService.verify` renvoie désormais `{ user? , alreadyVerified? }`. `VerifyEmailPage` : nouvel état `'already-verified'` → « Email already verified ✓ / Sign in » (lien `/login`), affiché **même déconnecté**. Branches success (auto-login) + change-email + `ranRef` inchangées ; le `.catch` (clic redondant **loggé**) reste en filet.
+- **AC8–AC9 (tests prio 2)** : `LoginPage.test.tsx` (NEW) — `needsVerification` → prompt + pas de navigation ; clic Resend → `verificationService.resend(email)` ; login vérifié → `/songs`. `RegisterPage.test.tsx` — clic « Resend the link » sur l'écran pending → `resend(email)` + confirmation.
+- **Sécurité** : token consommé **n'ouvre jamais** de session (testé : pas de `regenerate`/`loggedIn`) ; distinction keyée sur le **hash** du token (secret), pas l'email → pas d'oracle.
 
 ### File List
+- `backend/services/authTokenService.js` (EDIT — `findConsumedToken` lecture seule + export)
+- `backend/controllers/usercontroller.js` (EDIT — `verifyEmail` fallback consommé-valide → 200 `{alreadyVerified}`)
+- `backend/__tests__/usercontroller.test.js` (EDIT — mock `findConsumedToken` + 2 tests consommé/valide & consommé/non-vérifié)
+- `src/services/verificationService.ts` (EDIT — `verify` retour discriminé `{user?, alreadyVerified?}`)
+- `src/pages/VerifyEmailPage.tsx` (EDIT — état `already-verified` + adaptation `.then`)
+- `src/__tests__/VerifyEmailPage.test.tsx` (EDIT — contrat `{user}` + test already-verified déconnecté)
+- `src/__tests__/LoginPage.test.tsx` (NEW — branches needsVerification + Resend)
+- `src/__tests__/RegisterPage.test.tsx` (EDIT — test bouton Resend)
+- `CHANGELOG.md` (EDIT — entrée `[Unreleased]`)
+- `_bmad-output/implementation-artifacts/sprint-status.yaml` (EDIT — statut 12-1 → review)
+
+## Change Log
+
+| Date       | Version | Description                                                                 |
+|------------|---------|-----------------------------------------------------------------------------|
+| 2026-06-29 | 0.1     | Story 12.1 — UX vérif email : backend distingue token **consommé-valide** (clic redondant 2e appareil → 200 `{alreadyVerified}` **sans session**) d'**invalide** (400) ; front affiche « Email already verified ✓ / Sign in » même déconnecté. + tests des branches verif Login (`needsVerification`/Resend) & Register (Resend). `verifyToken` atomique inchangé ; pas d'oracle (keyé hash). Back 246 ✓ (+2), front 302 ✓ (+5), tsc/lint clean. Statut → review. |

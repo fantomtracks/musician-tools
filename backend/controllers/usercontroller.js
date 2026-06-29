@@ -219,6 +219,17 @@ const verifyEmail = async (req, res, next) => {
     }
     const result = await authTokenService.verifyToken(token, 'verify_email');
     if (!result) {
+      // Story 12.1: the atomic consume can miss simply because the token was
+      // ALREADY used (a redundant click on a 2nd device that never logged in) —
+      // not because it's invalid. If so and the account is verified, say so
+      // clearly WITHOUT opening a session (the single-use token is already spent).
+      const consumed = await authTokenService.findConsumedToken(token, 'verify_email');
+      if (consumed) {
+        const verifiedUser = await User.findByPk(consumed.userUid);
+        if (verifiedUser && verifiedUser.emailVerified) {
+          return res.json({ alreadyVerified: true });
+        }
+      }
       return next(createError(400, 'Invalid or expired verification link'));
     }
     await User.update({ emailVerified: true }, { where: { uid: result.userUid } });

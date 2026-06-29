@@ -56,4 +56,16 @@ async function verifyToken(clearToken, type) {
   return { userUid: token.userUid, payload: token.payload };
 }
 
-module.exports = { issueToken, verifyToken };
+// Story 12.1: a single-use token whose atomic consume (verifyToken) failed may
+// simply have been ALREADY consumed — a redundant click on a 2nd device — rather
+// than invalid. This read-only lookup finds a token by hash+type that was already
+// used, so the caller can show a friendly "already verified" message. It NEVER
+// consumes or grants anything (no session is ever opened from a spent token).
+async function findConsumedToken(clearToken, type) {
+  const token = await AuthToken.findOne({
+    where: { tokenHash: hashToken(clearToken), type, usedAt: { [Op.ne]: null } },
+  });
+  return token ? { userUid: token.userUid } : null;
+}
+
+module.exports = { issueToken, verifyToken, findConsumedToken };

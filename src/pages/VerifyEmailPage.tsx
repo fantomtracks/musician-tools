@@ -3,7 +3,7 @@ import { Link, useSearchParams } from 'react-router-dom';
 import { useAuth } from '../contexts/AuthContext';
 import { verificationService } from '../services/verificationService';
 
-type Status = 'verifying' | 'success' | 'error';
+type Status = 'verifying' | 'success' | 'already-verified' | 'error';
 
 // Public page reached from the email link (?token=…). Shared with the change-email
 // confirmation (story 7.11). Verifies the token, then — if the user is logged in —
@@ -44,11 +44,18 @@ function VerifyEmailPage() {
       return;
     }
     verificationService.verify(token)
-      .then((verifiedUser) => {
+      .then((result) => {
+        // Story 12.1: a redundant click on a 2nd device (token already consumed,
+        // account already verified) — show a clear message even when logged out,
+        // NOT the "invalid/expired" error. No session is opened server-side.
+        if (result.alreadyVerified) {
+          setStatus('already-verified');
+          return;
+        }
         setStatus('success');
         // Hard gate (story 7.13): the server auto-logged-in and returned the
         // user → hydrate auth state so "Go to the app" lands signed in.
-        if (verifiedUser) applyAuthenticatedUser(verifiedUser);
+        if (result.user) applyAuthenticatedUser(result.user);
       })
       .catch(() => {
         // A consumed token on a redundant click / refresh isn't a real failure if
@@ -78,6 +85,15 @@ function VerifyEmailPage() {
               {changeMode ? 'Your account email address has been changed.' : 'Your email address is now verified.'}
             </p>
             <Link to="/songs" className="btn-primary inline-flex">Go to the app</Link>
+          </>
+        )}
+        {status === 'already-verified' && (
+          <>
+            <h1 className="text-2xl font-bold text-gray-900 dark:text-gray-100">Email already verified ✓</h1>
+            <p className="text-gray-600 dark:text-gray-300">
+              Your email address is already verified — you can sign in.
+            </p>
+            <Link to="/login" className="btn-primary inline-flex">Sign in</Link>
           </>
         )}
         {status === 'error' && (
