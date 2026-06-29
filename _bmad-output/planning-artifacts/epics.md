@@ -1090,3 +1090,26 @@ So that je n'aie ni divergence dev/CI silencieuse, ni SQL de migration dupliqué
 **Then** les migrations sont jouées (cibles dépendant de `migrate`) → les index existent → la garde ne se déclenche jamais en flux normal
 
 **And** commentaire trompeur de `server.js` (« Run migrations on startup » alors qu'il ne fait que `sync`) corrigé ; garde extraite en util **testée** (présent → no-op ; manquant → échec) ; suite back verte ; **prod non impactée** (release-migrate a déjà créé les index → garde passe) ; pas de dépendance npm.
+
+## Epic 12: Confort vérification email
+
+_Ajouté 2026-06-29 — issu de la revue `deferred-work.md` (items reviews 7-13 promus). Epic de confort/polissage du flux de vérification email._
+
+**Objectif :** lever les frottements UX restants autour de la vérification email, et combler les lacunes de test des branches vérif.
+
+### Story 12.1: UX de vérification email — token consommé-valide vs invalide
+
+As a utilisateur qui vérifie son email,
+I want que rouvrir mon lien de vérif (déjà utilisé) sur un 2e appareil affiche un message clair plutôt que « lien invalide ou expiré »,
+So that je ne croie pas que ma vérification a échoué alors qu'elle a réussi.
+
+**Acceptance Criteria:**
+
+**Given** un token `verify_email` au hash connu mais **déjà consommé** (`usedAt != null`), dont l'user existe et est `emailVerified`
+**When** `POST /api/auth/verify-email`
+**Then** réponse **200 `{ alreadyVerified: true }` sans ouvrir de session** (le token single-use est déjà dépensé) ; un token réellement inconnu/expiré reste **400** ; le happy path auto-login (7.13) inchangé
+
+**Given** la réponse `alreadyVerified` (y compris **déconnecté**, cas du 2e appareil)
+**Then** `VerifyEmailPage` affiche un état clair (« Email already verified ✓ / Sign in ») distinct de « Link invalid or expired »
+
+**And** sécurité : aucune session sur un token consommé ; **pas d'oracle** (keyé sur le hash du token, secret, jamais sur l'email) ; tests front ajoutés pour les branches vérif `needsVerification` (Login) et Resend (Register) — lacunes de test des stories 7-13.
