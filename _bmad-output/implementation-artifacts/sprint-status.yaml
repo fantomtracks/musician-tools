@@ -35,7 +35,7 @@
 # - Dev moves story to 'review', then runs code-review (fresh context, different LLM recommended)
 
 generated: 2026-06-07
-last_updated: 2026-06-29  # 12-1 done (review 3 couches, sécu validée, 2 patches) ; Epic 12 complet
+last_updated: 2026-06-29  # Epic 13 ouvert ; story 13-1 (auto-save fiche chanson) → ready-for-dev
 project: musician-tools
 project_key: NOKEY
 tracking_system: file-system
@@ -135,3 +135,7 @@ development_status:
   # Epic 12: Confort vérification email (issu deferred-work, items 7-13 promus)
   epic-12: done
   12-1-verif-email-ux: done            # backend consommé-valide vs invalide + front CTA selon loggé ; review 3 couches OK (sécu validée, 2 patches) ; back 246✓ front 303✓
+
+  # Epic 13: Confort édition « atelier vivant » (issu brainstorm auto-save 2026-06-29, deferred-work prio 3)
+  epic-13: in-progress
+  13-1-autosave-fiche-chanson: ready-for-dev   # front ; auto-save (debounce+flush) + suppression Save + sticky Back + indicateur statut ; résout isDirty fragile + garde Mark-as-Played ; décision doublon = exclure title/artist client (A) ; backend a priori intact

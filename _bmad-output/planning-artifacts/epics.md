@@ -1113,3 +1113,30 @@ So that je ne croie pas que ma vérification a échoué alors qu'elle a réussi.
 **Then** `VerifyEmailPage` affiche un état clair (« Email already verified ✓ / Sign in ») distinct de « Link invalid or expired »
 
 **And** sécurité : aucune session sur un token consommé ; **pas d'oracle** (keyé sur le hash du token, secret, jamais sur l'email) ; tests front ajoutés pour les branches vérif `needsVerification` (Login) et Resend (Register) — lacunes de test des stories 7-13.
+
+## Epic 13: Confort édition — « atelier vivant »
+
+_Ajouté 2026-06-29 — issu du brainstorm auto-save (deferred-work prio 3). Repenser la fiche d'édition comme un espace qu'on ajuste en jouant, pas un formulaire à soumettre._
+
+**Objectif :** supprimer les frottements du save manuel (bouton en bas + ré-éjection vers la liste) en passant à l'auto-save, et résoudre la dette `isDirty` fragile + la garde « modifs non enregistrées ».
+
+### Story 13.1: Auto-save de la fiche chanson
+
+As a musicien qui ajuste une chanson pendant qu'il la joue,
+I want que la fiche se sauve toute seule et que je reste dessus (Back to songlist explicite en haut),
+So that je ne pense plus à Save, je ne suis plus ré-éjecté, et je ne perds rien.
+
+**Acceptance Criteria:**
+
+**Given** la fiche en **mode édition** et un champ modifié
+**When** une pause de frappe (debounce ~1–1.5 s) ou un blur survient
+**Then** la chanson est persistée automatiquement (`updateSong`), je **reste sur la chanson** (pas de redirection, pas de reset du form) ; le bouton **Save est retiré** (mode création inchangé)
+
+**Given** une modif en attente
+**When** je clique « ← Back to songlist » (sticky en haut) ou quitte l'écran
+**Then** l'auto-save est **flushé avant** de naviguer ; un indicateur ambiant montre `Saving…/Saved ✓/⚠️ Not saved — retry` (jamais de modale)
+
+**Given** un titre/artiste transitoirement en doublon (`liveDuplicate`)
+**Then** **les autres champs continuent de se sauver**, `title`/`artist` sont gelés + ✗ discret (décision 🅰️) — _NB : aucune unicité backend, c'est 100% client_
+
+**And** la garde « Unsaved changes » du Mark-as-Played devient **caduque** (fiche toujours sauvée) ; `isDirty` fragile résolu ; course 2-appareils **reportée** (beta) ; suites vertes.
