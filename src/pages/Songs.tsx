@@ -827,11 +827,17 @@ function Songs() {
     }
     const snapshot = JSON.stringify(form);
     savingRef.current = true;
+    const startedAt = Date.now();
     try {
       setSaveStatus('saving');
       const updatedSong = await songService.updateSong(editingUid, payload);
       setSongs(prev => prev.map(song => (song.uid === editingUid ? updatedSong : song)));
       setEditBaselineJson(snapshot); // the form is now the saved state
+      // Keep "Saving…" perceptible even on an instant (local) save, so every save
+      // produces a visible Saving→Saved transition. On a slow server it just stays
+      // until the response, which already shows progress.
+      const elapsed = Date.now() - startedAt;
+      if (elapsed < 500) await new Promise(res => setTimeout(res, 500 - elapsed));
       // Don't claim "Saved ✓" while the title is frozen — the duplicate warning is
       // the real signal that the identity wasn't persisted.
       if (frozen) {
@@ -1805,16 +1811,22 @@ function Songs() {
               <span aria-hidden="true">←</span> Back to songlist
             </button>
             {editingUid && (
-              <span
-                className={`text-xs font-medium ${
-                  saveStatus === 'error' ? 'text-red-600 dark:text-red-400' : 'text-gray-500 dark:text-gray-400'
-                }`}
-                role="status"
-                aria-live="polite"
-              >
-                {saveStatus === 'saving' && 'Saving…'}
-                {saveStatus === 'saved' && `Saved ✓${lastSavedAt ? ` · ${lastSavedAt}` : ''}`}
-                {saveStatus === 'error' && '⚠️ Not saved — retry'}
+              <span className="text-xs font-medium" role="status" aria-live="polite">
+                {saveStatus === 'saving' && (
+                  <span className="inline-flex items-center gap-1.5 text-gray-500 dark:text-gray-400">
+                    <span className="w-1.5 h-1.5 rounded-full bg-gray-400 dark:bg-gray-500 animate-pulse" aria-hidden="true" />
+                    Saving…
+                  </span>
+                )}
+                {saveStatus === 'saved' && (
+                  // key on the time so the fade-in replays on every save (a visible "blip").
+                  <span key={lastSavedAt ?? 'saved'} className="inline-flex items-center gap-1 text-gray-500 dark:text-gray-400 animate-fade-in">
+                    Saved ✓{lastSavedAt ? ` · ${lastSavedAt}` : ''}
+                  </span>
+                )}
+                {saveStatus === 'error' && (
+                  <span className="text-red-600 dark:text-red-400">⚠️ Not saved — retry</span>
+                )}
               </span>
             )}
           </div>
