@@ -35,7 +35,7 @@
 # - Dev moves story to 'review', then runs code-review (fresh context, different LLM recommended)
 
 generated: 2026-06-07
-last_updated: 2026-06-29  # 12-1 (UX vérif email) → review ; back 246✓ front 302✓
+last_updated: 2026-06-29  # 12-1 done (review 3 couches, sécu validée, 2 patches) ; Epic 12 complet
 project: musician-tools
 project_key: NOKEY
 tracking_system: file-system
@@ -133,5 +133,5 @@ development_status:
   11-1-parite-sync-unicite-dev: done            # backend ; garde fail-fast au boot (listen gardé) + CMD dev migrate-then-app ; hook afterSync topic retiré ; review 3 couches OK (2 patches) ; back 244✓
 
   # Epic 12: Confort vérification email (issu deferred-work, items 7-13 promus)
-  epic-12: in-progress
-  12-1-verif-email-ux: review          # backend distingue consommé-valide (200 alreadyVerified, sans session) vs invalide (400) + front message clair déconnecté + tests verif (Login/Register) ; back 246✓ front 302✓
+  epic-12: done
+  12-1-verif-email-ux: done            # backend consommé-valide vs invalide + front CTA selon loggé ; review 3 couches OK (sécu validée, 2 patches) ; back 246✓ front 303✓

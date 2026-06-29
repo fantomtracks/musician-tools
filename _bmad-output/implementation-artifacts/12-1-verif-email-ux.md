@@ -5,7 +5,7 @@ arch_decision: "Distinguer côté backend un token de vérif CONSOMMÉ-MAIS-VALI
 
 # Story 12.1: UX de vérification email — token consommé-valide vs invalide (+ tests des branches verif)
 
-Status: review
+Status: done
 
 <!-- Note: Validation is optional. Run validate-create-story for quality check before dev-story. -->
 
@@ -118,6 +118,21 @@ Le front (`VerifyEmailPage.tsx:53-61`) **gère déjà** ce cas **uniquement si l
 - [Source: _bmad-output/implementation-artifacts/deferred-work.md] — items promus (prio 1 bug 2e-appareil, prio 2 tests verif)
 - [Source: _bmad-output/project-context.md] — conventions backend/front, tests, garde-fous
 
+## Review Findings
+
+_Code review adversariale 3 couches (Blind / Edge / Auditor) — 2026-06-29. **Sécurité validée** (pas de session sur token consommé, pas d'oracle — confirmé + asserté par les tests). 10 AC satisfaites. 2 patches, 1 report, reste écarté._
+
+- [x] [Review][Patch→Fixed] **Med — clic redondant d'un user DÉJÀ LOGGÉ → « Sign in » au lieu de « Go to the app »** [src/pages/VerifyEmailPage.tsx] — convergent Blind+Edge. Le nouveau 200 `alreadyVerified` fait résoudre `verify()` → état `already-verified` (CTA « Sign in » `/login`) **sans** brancher sur `isAuthenticated` ; l'ancien fallback `.catch` (loggé+vérifié → success « Go to the app ») est préempté. **Corrigé** : sur `alreadyVerified`, `setStatus(isAuthenticated ? 'success' : 'already-verified')` → loggé voit « Email confirmed ✓ / Go to the app », déconnecté (2e appareil) voit « already verified / Sign in ».
+- [x] [Review][Patch→Fixed] **Med — test stale donnant un faux sentiment de sécurité** [src/__tests__/VerifyEmailPage.test.tsx] — le test « consumed → success (logged-in) » mockait `verify` en **rejet** (ancien backend) alors que le vrai backend renvoie 200 `alreadyVerified` → il validait un chemin qui n'arrive plus. **Corrigé** : mis à jour pour mocker `verify` résolvant `{ alreadyVerified: true }` avec `isAuthenticated: true` → asserte la branche loggé → « Go to the app » (couvre le patch ci-dessus, échouerait sur le bug).
+- [x] [Review][Defer] **Low — le flux change-email (jumeau) garde le même souci 2e-appareil** [backend/controllers/usercontroller.js confirmEmailChange + VerifyEmailPage `?flow=change-email`] — `confirmEmailChange` n'a pas de fallback `findConsumedToken` → un clic redondant sur un lien change-email affiche encore « Link invalid or expired ». Hors périmètre 12.1 (qui ne traite que verify-signup) ; même fix applicable. — deferred, jumeau hors-scope.
+
+### Findings écartés (bruit / déjà géré, non persistés)
+- **`.catch` fallback partiellement mort** — devient un filet pour le cas throw rare (token invalide tout en étant loggé+vérifié) ; inoffensif, conservé. Écarté.
+- **`alreadyVerified` ne rafraîchit pas l'état auth local** — un user loggé via le hard gate est **déjà** `emailVerified` (invariant 7.13) → non-problème. Écarté.
+- **`findConsumedToken` sans filtre d'expiry** — intentionnel (token consommé pendant sa validité ; `type` filtré → pas de fuite inter-flux). Écarté (Edge+Blind confirment handled).
+- **Couverture try/catch des 2 nouveaux awaits** — tout le corps de `verifyEmail` est dans le `try` existant → 500 propre sur throw. Écarté (handled).
+- **Helper `findConsumedToken` sans test unitaire isolé** — read-only structurellement garanti + asserté indirectement (le test contrôleur prouve l'absence de mutation). Optionnel. Écarté.
+
 ## Dev Agent Record
 
 ### Agent Model Used
@@ -151,3 +166,4 @@ claude-opus-4-8[1m] (dev-story workflow)
 | Date       | Version | Description                                                                 |
 |------------|---------|-----------------------------------------------------------------------------|
 | 2026-06-29 | 0.1     | Story 12.1 — UX vérif email : backend distingue token **consommé-valide** (clic redondant 2e appareil → 200 `{alreadyVerified}` **sans session**) d'**invalide** (400) ; front affiche « Email already verified ✓ / Sign in » même déconnecté. + tests des branches verif Login (`needsVerification`/Resend) & Register (Resend). `verifyToken` atomique inchangé ; pas d'oracle (keyé hash). Back 246 ✓ (+2), front 302 ✓ (+5), tsc/lint clean. Statut → review. |
+| 2026-06-29 | 0.2     | Code review 3 couches (sécurité validée) : 2 patches — (1) Med, brancher la CTA `alreadyVerified` sur `isAuthenticated` (loggé → « Go to the app », déconnecté → « Sign in ») ; (2) corriger le test stale (mockait un rejet ; remis sur le vrai 200 `alreadyVerified`, asserte la branche loggé). 1 report (flux change-email jumeau). Front 303 ✓, tsc/lint clean. Statut → done. |

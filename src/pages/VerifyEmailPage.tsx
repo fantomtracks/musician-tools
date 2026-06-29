@@ -48,8 +48,10 @@ function VerifyEmailPage() {
         // Story 12.1: a redundant click on a 2nd device (token already consumed,
         // account already verified) — show a clear message even when logged out,
         // NOT the "invalid/expired" error. No session is opened server-side.
+        // A logged-in re-clicker is already in: send them to the app rather than
+        // telling them to sign in.
         if (result.alreadyVerified) {
-          setStatus('already-verified');
+          setStatus(isAuthenticated ? 'success' : 'already-verified');
           return;
         }
         setStatus('success');

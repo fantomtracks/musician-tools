@@ -58,11 +58,26 @@ test('an invalid token shows the error state', async () => {
   await screen.findByText(/invalid or expired/i);
 });
 
-test('a consumed token shows success when the logged-in user is already verified (refresh/2nd click)', async () => {
+test('a logged-in redundant click (server says alreadyVerified) lands on success → "Go to the app", not "Sign in"', async () => {
+  // The real backend now returns 200 { alreadyVerified: true } for a consumed
+  // token + verified user; a logged-in re-clicker should be sent INTO the app.
+  mockedUseAuth.mockReturnValue({ isAuthenticated: true, user: { emailVerified: true }, patchUser: jest.fn(), applyAuthenticatedUser: jest.fn() });
+  svc.verify.mockResolvedValue({ alreadyVerified: true });
+
+  renderAt('/verify-email?token=alreadyused');
+
+  await screen.findByText(/email confirmed/i);
+  expect(screen.getByRole('link', { name: /go to the app/i })).toBeInTheDocument();
+  expect(screen.queryByRole('link', { name: /sign in/i })).not.toBeInTheDocument();
+});
+
+test('a still-throwing verify keeps the logged-in+verified fallback to success (belt)', async () => {
+  // A genuine non-2xx (e.g. truly invalid link) while logged-in+verified still
+  // shows success via the .catch fallback — unchanged safety net.
   mockedUseAuth.mockReturnValue({ isAuthenticated: true, user: { emailVerified: true }, patchUser: jest.fn(), applyAuthenticatedUser: jest.fn() });
   svc.verify.mockRejectedValue(new Error('token used'));
 
-  renderAt('/verify-email?token=alreadyused');
+  renderAt('/verify-email?token=bad');
 
   await screen.findByText(/email confirmed/i);
 });

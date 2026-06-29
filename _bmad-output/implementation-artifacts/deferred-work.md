@@ -58,6 +58,12 @@ _Note : prio 1 + prio 2 touchent la même zone (UX de vérification email) → g
 - **10-2 — Pas de garde anti-double-soumission sur `handleCreatePlaylist`** : double Entrée/clic rapide sur « Create playlist » lance 2 `createPlaylist` concurrents ; le 2ᵉ retombe en 409 et sélectionne le 1ᵉ (inoffensif vu l'unicité serveur 10.1, mais un flicker possible). Durcir avec un flag in-flight si ça se voit. [`src/pages/Songs.tsx` handleCreatePlaylist]
 - **10-2 — Empty-state « No playlists found » trompeur** : taper le nom exact d'une playlist déjà sélectionnée cache l'option Create (correct) mais `filteredPlaylists` (exclut les sélectionnées) est vide → libellé « No playlists found » alors qu'elle existe et est cochée. Cosmétique. [`src/pages/Songs.tsx` picker empty-state]
 
+## Deferred from: code review of story-12.1 (2026-06-29)
+
+> Review 3 couches. Sécurité validée (pas de session sur token consommé, pas d'oracle). 2 patches appliqués (CTA loggé + test stale). 1 report :
+
+- **12-1 — Flux change-email (jumeau) garde le souci 2e-appareil** : `confirmEmailChange` n'a pas le fallback `findConsumedToken` de 12.1 → un clic redondant sur un lien **change-email** consommé affiche encore « Link invalid or expired » (au lieu d'un « already updated / sign in »). 12.1 n'a traité que le verify-signup ; le même fix s'applique. Faible impact (lien 1 h, initié par l'user). [`backend/controllers/usercontroller.js` confirmEmailChange + `src/pages/VerifyEmailPage.tsx` branche `?flow=change-email`]
+
 ## Deferred from: code review of story-11.1 (2026-06-28)
 
 > Review 3 couches. 2 patches appliqués (garde gating `app.listen` ; requête `pg_indexes` qualifiée). 1 report :
