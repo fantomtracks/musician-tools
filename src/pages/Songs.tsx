@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
-import { Link, useLocation, useNavigate } from 'react-router-dom';
+import { useLocation, useNavigate } from 'react-router-dom';
 import { SongForm } from '../components/SongForm';
 import SongsList from '../components/SongsList';
 import { songService, type CreateSongDTO, type UpdateSongDTO, type Song } from '../services/songService';
@@ -1784,35 +1784,36 @@ function Songs() {
         />
       ) : (
         <div className="max-w-3xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
-          <div className="card-base glass-effect p-6">
-            {/* Story 13.1: sticky header so "Back to songlist" + the auto-save
-                status stay reachable while editing (the form scrolls under it). */}
-            <div className="sticky top-0 z-20 -mx-6 -mt-6 mb-6 px-6 py-3 bg-white/90 dark:bg-gray-800/90 backdrop-blur border-b border-gray-200 dark:border-gray-700 flex items-center justify-between gap-3">
-              <button
-                type="button"
-                className="btn-secondary text-sm"
-                onClick={() => { void backToList(); }}
+          {/* Story 13.1: the sticky bar lives OUTSIDE the glass card — .glass-effect
+              uses backdrop-filter, which makes the card a containing block and
+              would break `position: sticky` for a child (it would stick to the
+              card, which scrolls away, instead of the viewport). */}
+          <div className="sticky top-16 z-20 mb-4 px-4 py-3 rounded-lg bg-white/90 dark:bg-gray-800/90 backdrop-blur border border-gray-200 dark:border-gray-700 shadow-sm flex items-center justify-between gap-3">
+            <button
+              type="button"
+              className="btn-secondary text-sm"
+              onClick={() => { void backToList(); }}
+            >
+              <span aria-hidden="true">←</span> Back to songlist
+            </button>
+            {editingUid && (
+              <span
+                className={`text-xs font-medium ${
+                  saveStatus === 'error' ? 'text-red-600 dark:text-red-400' : 'text-gray-500 dark:text-gray-400'
+                }`}
+                role="status"
+                aria-live="polite"
               >
-                <span aria-hidden="true">←</span> Back to songlist
-              </button>
-              {editingUid && (
-                <span
-                  className={`text-xs font-medium ${
-                    saveStatus === 'error' ? 'text-red-600 dark:text-red-400' : 'text-gray-500 dark:text-gray-400'
-                  }`}
-                  role="status"
-                  aria-live="polite"
-                >
-                  {saveStatus === 'saving' && 'Saving…'}
-                  {saveStatus === 'saved' && 'Saved ✓'}
-                  {saveStatus === 'error' && '⚠️ Not saved — retry'}
-                </span>
-              )}
-            </div>
-            <div className="mb-6">
-              <Link to="/" className="text-2xl font-semibold text-gradient">Musician Tools</Link>
-              <p className="text-sm text-gray-600 dark:text-gray-400">{editingUid ? 'Edit a song' : 'Add a song'}</p>
-            </div>
+                {saveStatus === 'saving' && 'Saving…'}
+                {saveStatus === 'saved' && 'Saved ✓'}
+                {saveStatus === 'error' && '⚠️ Not saved — retry'}
+              </span>
+            )}
+          </div>
+          <div className="card-base glass-effect p-6">
+            <h1 className="mb-6 text-2xl font-semibold text-gray-900 dark:text-gray-100">
+              {editingUid ? 'Edit song' : 'Add song'}
+            </h1>
           {editingUid && cameFromDuplicate && (
             <div className="mb-4 rounded-md border border-blue-300 dark:border-blue-700 bg-blue-50 dark:bg-blue-900/30 p-3 text-sm text-blue-800 dark:text-blue-100">
               If you couldn't find this song in your songlist, remember to reset your filters.
