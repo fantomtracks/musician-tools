@@ -65,7 +65,20 @@ async function findConsumedToken(clearToken, type) {
   const token = await AuthToken.findOne({
     where: { tokenHash: hashToken(clearToken), type, usedAt: { [Op.ne]: null } },
   });
-  return token ? { userUid: token.userUid } : null;
+  return token ? { userUid: token.userUid, payload: token.payload } : null;
 }
 
-module.exports = { issueToken, verifyToken, findConsumedToken };
+// Mark every still-pending (unused) token of this type for a user as consumed, so
+// a superseding request invalidates earlier ones. Used by change_email: requesting
+// a new address must revoke any prior confirmation link still in flight (otherwise
+// an older link could switch the email to a now-stale target). Returns the count
+// of tokens invalidated.
+async function invalidatePendingTokens(userUid, type) {
+  const [count] = await AuthToken.update(
+    { usedAt: new Date() },
+    { where: { userUid, type, usedAt: null } }
+  );
+  return count;
+}
+
+module.exports = { issueToken, verifyToken, findConsumedToken, invalidatePendingTokens };

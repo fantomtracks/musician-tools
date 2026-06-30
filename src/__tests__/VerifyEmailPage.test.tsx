@@ -94,12 +94,36 @@ test('a missing token shows the error state without calling the service', async 
 test('flow=change-email confirms the change (own copy) and patches the new email — story 7.11', async () => {
   const patchUser = jest.fn();
   mockedUseAuth.mockReturnValue({ isAuthenticated: true, user: { emailVerified: true }, patchUser, applyAuthenticatedUser: jest.fn() });
-  svc.confirmEmailChange.mockResolvedValue('new@example.com');
+  svc.confirmEmailChange.mockResolvedValue({ email: 'new@example.com' });
 
   renderAt('/verify-email?token=chg&flow=change-email');
 
   await screen.findByText(/email updated/i);
   expect(svc.confirmEmailChange).toHaveBeenCalledWith('chg');
   expect(svc.verify).not.toHaveBeenCalled();
+  expect(patchUser).toHaveBeenCalledWith({ email: 'new@example.com' });
+});
+
+test('flow=change-email, consumed link, logged OUT → "already updated" + Sign in, not an error (12.1 twin)', async () => {
+  // 2nd-device redundant click on an already-confirmed change link.
+  mockedUseAuth.mockReturnValue({ isAuthenticated: false, user: null, patchUser: jest.fn(), applyAuthenticatedUser: jest.fn() });
+  svc.confirmEmailChange.mockResolvedValue({ alreadyChanged: true, email: 'new@example.com' });
+
+  renderAt('/verify-email?token=reused&flow=change-email');
+
+  await screen.findByRole('heading', { name: /already updated/i });
+  expect(screen.getByRole('link', { name: /sign in/i })).toBeInTheDocument();
+  expect(screen.queryByText(/invalid or expired/i)).not.toBeInTheDocument();
+});
+
+test('flow=change-email, alreadyChanged while logged IN → success (Go to the app), email refreshed', async () => {
+  const patchUser = jest.fn();
+  mockedUseAuth.mockReturnValue({ isAuthenticated: true, user: { emailVerified: true }, patchUser, applyAuthenticatedUser: jest.fn() });
+  svc.confirmEmailChange.mockResolvedValue({ alreadyChanged: true, email: 'new@example.com' });
+
+  renderAt('/verify-email?token=reused&flow=change-email');
+
+  await screen.findByText(/email updated/i);
+  expect(screen.getByRole('link', { name: /go to the app/i })).toBeInTheDocument();
   expect(patchUser).toHaveBeenCalledWith({ email: 'new@example.com' });
 });

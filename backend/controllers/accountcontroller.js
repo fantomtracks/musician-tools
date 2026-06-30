@@ -3,6 +3,7 @@ const createError = require('http-errors');
 const logger = require('../logger');
 const sessionService = require('../services/sessionService');
 const authFlows = require('../services/authFlows');
+const authTokenService = require('../services/authTokenService');
 const { validateNewPassword } = require('../utils/passwordPolicy');
 const { CHECK_YOUR_INBOX } = require('../constants/messages');
 
@@ -187,6 +188,17 @@ const requestEmailChange = async (req, res, next) => {
     // the same generic message whether or not it was.
     const taken = await User.findOne({ where: { email: trimmed } }); // citext
     if (!taken) {
+      // Revoke any earlier change_email confirmation link still in flight (story
+      // 7.11 deferred): issuing a new link supersedes the old target, so a stale
+      // link must not still switch the email to a now-abandoned address. Done ONLY
+      // when we actually issue a replacement — a request to a TAKEN address must
+      // not nuke a still-valid prior link without replacing it (review). Best-effort
+      // (must never fail the request); before issueAndSend so the fresh token survives.
+      try {
+        await authTokenService.invalidatePendingTokens(user.uid, 'change_email');
+      } catch (revokeErr) {
+        logger.error('Failed to revoke pending change-email tokens', { uid: user.uid, error: revokeErr.message });
+      }
       await authFlows.issueAndSend('change_email', { uid: user.uid, email: trimmed, payload: { pendingEmail: trimmed } });
     }
 

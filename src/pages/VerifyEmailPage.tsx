@@ -35,10 +35,13 @@ function VerifyEmailPage() {
     if (isChangeEmail) {
       setChangeMode(true);
       verificationService.confirmEmailChange(token)
-        .then((newEmail) => {
-          setStatus('success');
+        .then((result) => {
+          // Story 12.1 twin: a redundant click on an already-confirmed change link
+          // (logged out) shows a clear "already updated" message, NOT an error. A
+          // logged-in re-clicker is already in → straight to success.
+          setStatus(result.alreadyChanged && !isAuthenticated ? 'already-verified' : 'success');
           // Refresh the cached email so the app stops showing the old one.
-          if (isAuthenticated && newEmail) patchUser({ email: newEmail });
+          if (isAuthenticated && result.email) patchUser({ email: result.email });
         })
         .catch(() => setStatus('error'));
       return;
@@ -91,9 +94,13 @@ function VerifyEmailPage() {
         )}
         {status === 'already-verified' && (
           <>
-            <h1 className="text-2xl font-bold text-gray-900 dark:text-gray-100">Email already verified ✓</h1>
+            <h1 className="text-2xl font-bold text-gray-900 dark:text-gray-100">
+              {changeMode ? 'Email already updated ✓' : 'Email already verified ✓'}
+            </h1>
             <p className="text-gray-600 dark:text-gray-300">
-              Your email address is already verified — you can sign in.
+              {changeMode
+                ? 'Your account email address has already been changed — you can sign in.'
+                : 'Your email address is already verified — you can sign in.'}
             </p>
             <Link to="/login" className="btn-primary inline-flex">Sign in</Link>
           </>

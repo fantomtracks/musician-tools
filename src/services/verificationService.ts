@@ -24,7 +24,10 @@ export const verificationService = {
 
   // Confirm a new email from the change-email link token (public; story 7.11).
   // Returns the newly-confirmed address so the client can refresh it locally.
-  async confirmEmailChange(token: string): Promise<string> {
+  // Twin of verify (story 12.1): a redundant click on an already-confirmed link
+  // gets 200 { alreadyChanged: true } — distinct from a genuinely invalid link
+  // (non-2xx → throw).
+  async confirmEmailChange(token: string): Promise<{ email?: string; alreadyChanged?: boolean }> {
     const res = await apiFetch(`${API_BASE}/auth/change-email/confirm`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
@@ -33,7 +36,8 @@ export const verificationService = {
     });
     if (!res.ok) throw new Error('Invalid or expired link');
     const body = await res.json();
-    return body.email as string;
+    if (body.alreadyChanged) return { alreadyChanged: true, email: body.email as string };
+    return { email: body.email as string };
   },
 
   // Re-send a verification link, keyed by email (story 7.13: the user isn't

@@ -4,12 +4,13 @@ jest.mock('../models', () => ({
   AuthToken: {
     create: jest.fn(async (data) => ({ ...data, uid: 'tok-uid' })),
     update: jest.fn(),
+    findOne: jest.fn(),
   },
 }));
 
 const { Op } = require('sequelize');
 const { AuthToken } = require('../models');
-const { issueToken, verifyToken } = require('../services/authTokenService');
+const { issueToken, verifyToken, findConsumedToken, invalidatePendingTokens } = require('../services/authTokenService');
 
 const sha256 = (s) => crypto.createHash('sha256').update(s).digest('hex');
 
@@ -74,6 +75,38 @@ describe('authTokenService (story 7.6)', () => {
       // produce 0 affected rows — indistinguishable, returns null.
       AuthToken.update.mockResolvedValue([0, []]);
       expect(await verifyToken('clear-abc', 'password_reset')).toBeNull();
+    });
+  });
+
+  describe('findConsumedToken (story 12.1 — redundant-click lookup)', () => {
+    test('an already-used token → { userUid, payload } (read-only, by hash+type+used)', async () => {
+      AuthToken.findOne.mockResolvedValue({ userUid: 'user-1', payload: { pendingEmail: 'new@example.com' } });
+
+      const result = await findConsumedToken('clear-abc', 'change_email');
+
+      expect(result).toEqual({ userUid: 'user-1', payload: { pendingEmail: 'new@example.com' } });
+      const where = AuthToken.findOne.mock.calls[0][0].where;
+      expect(where.tokenHash).toBe(sha256('clear-abc'));
+      expect(where.type).toBe('change_email');
+      expect(where.usedAt).toHaveProperty([Op.ne], null); // only USED tokens
+    });
+
+    test('no used token by that hash → null', async () => {
+      AuthToken.findOne.mockResolvedValue(null);
+      expect(await findConsumedToken('clear-abc', 'change_email')).toBeNull();
+    });
+  });
+
+  describe('invalidatePendingTokens (story 7.11 deferred — supersede stale links)', () => {
+    test('marks every unused token of the type as used, returns the count', async () => {
+      AuthToken.update.mockResolvedValue([2]);
+
+      const count = await invalidatePendingTokens('user-1', 'change_email');
+
+      expect(count).toBe(2);
+      const [values, options] = AuthToken.update.mock.calls[0];
+      expect(values).toEqual({ usedAt: expect.any(Date) });
+      expect(options.where).toEqual({ userUid: 'user-1', type: 'change_email', usedAt: null });
     });
   });
 });

@@ -369,6 +369,21 @@ const confirmEmailChange = async (req, res, next) => {
     const result = await authTokenService.verifyToken(token, 'change_email');
     const pendingEmail = result && result.payload && result.payload.pendingEmail;
     if (!result || !pendingEmail) {
+      // Twin of verifyEmail (story 12.1): the atomic consume can miss simply
+      // because the token was ALREADY used — a redundant click on a 2nd device
+      // for a change that already went through — not because the link is invalid.
+      // If so, confirm it WITHOUT re-switching or opening a session (the single-use
+      // token is spent). We only say "already changed" when the user's current
+      // email actually matches the token's target (guards the rare case where the
+      // consume succeeded but the switch failed on a unique collision → still 400).
+      const consumed = await authTokenService.findConsumedToken(token, 'change_email');
+      const consumedPending = consumed && consumed.payload && consumed.payload.pendingEmail;
+      if (consumedPending) {
+        const changedUser = await User.findByPk(consumed.userUid);
+        if (changedUser && changedUser.email === consumedPending) {
+          return res.json({ alreadyChanged: true, email: changedUser.email });
+        }
+      }
       return next(createError(400, 'Invalid or expired link'));
     }
     try {
