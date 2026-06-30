@@ -776,9 +776,17 @@ function Songs() {
   // it) without leaving the form. The on-Save diff then sees it already has the
   // song → no double-add. A 409 (stale catalog raced server-side) selects the
   // existing playlist instead of erroring.
+  // In-flight guard (10-2 deferred): a fast double Enter/click would otherwise fire
+  // two concurrent createPlaylist calls — the 2nd 409s and re-selects the 1st
+  // (harmless given server-side uniqueness from 10.1, but a possible flicker).
+  // Mirrors savingRef. Released in finally so a failure never wedges the picker.
+  const creatingPlaylistRef = useRef(false);
+
   const handleCreatePlaylist = async (rawText: string) => {
     const name = rawText.trim();
     if (!name) return;
+    if (creatingPlaylistRef.current) return; // a create is already in flight
+    creatingPlaylistRef.current = true;
     try {
       const created = await playlistService.createPlaylist({
         name,
@@ -792,6 +800,8 @@ function Songs() {
       }
       setToastMessage('Could not create playlist');
       setTimeout(() => setToastMessage(null), 2500);
+    } finally {
+      creatingPlaylistRef.current = false;
     }
   };
 

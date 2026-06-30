@@ -183,6 +183,24 @@ describe('Songs — create a playlist on the fly (story 10.2)', () => {
     expect(screen.queryByTitle('Jazz')).not.toBeInTheDocument(); // no playlist chip added
   });
 
+  test('10-2 deferred: a rapid double-trigger fires createPlaylist only once (in-flight guard)', async () => {
+    // Hold createPlaylist pending so the 2nd click lands while the 1st is in flight.
+    let resolveCreate!: (v: Playlist) => void;
+    mockedPlaylistService.createPlaylist.mockImplementation(
+      () => new Promise<Playlist>((r) => { resolveCreate = r; }),
+    );
+    await openPickerAndType('Jazz');
+
+    const createOption = await screen.findByText('Create playlist "Jazz"');
+    fireEvent.click(createOption);
+    fireEvent.click(createOption); // 2nd trigger before the 1st resolves → must be a no-op
+
+    expect(mockedPlaylistService.createPlaylist).toHaveBeenCalledTimes(1);
+
+    await act(async () => { resolveCreate({ uid: 'pl-new', name: 'Jazz', songUids: ['song-a'] }); });
+    await settle();
+  });
+
   test('AC11: keyboard — ArrowDown to the Create option + Enter selects it without submitting', async () => {
     mockedPlaylistService.createPlaylist.mockResolvedValue({ uid: 'pl-kbd', name: 'Blues', songUids: ['song-a'] });
     const input = await openPickerAndType('Blues');
