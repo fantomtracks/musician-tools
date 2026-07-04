@@ -12,6 +12,17 @@ project adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+## [1.9.0] — 2026-07-04
+
+### Changed
+- **The app now works properly on your phone** — the Songs page and the song editor finally fit in one hand, with no change to how things look on desktop.
+  - Filters collapse into a **"Filters"** button (showing how many are active), so your songs show up straight away instead of behind a wall of filters
+  - The song list fills the screen width and scrolls sideways for the wider columns — the page itself scrolls normally
+  - The search box now has a **"Search"** label, so a remembered search term makes sense at a glance
+  - Song editor fields stack into a single, readable column on narrow screens instead of being squeezed into three
+- **The signed-out top bar no longer overflows on small screens** — the Sign in / Create account buttons moved onto the home page.
+- **A proper app icon in the browser tab**, replacing the default placeholder.
+
 ## [1.8.0] — 2026-06-29
 
 ### Changed

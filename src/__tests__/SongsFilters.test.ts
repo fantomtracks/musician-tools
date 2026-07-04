@@ -1,5 +1,57 @@
-import { applySongFilters, NO_INSTRUMENT } from '../utils/songFilters';
+import { applySongFilters, countActiveFilters, NO_INSTRUMENT, type ActiveFilterState } from '../utils/songFilters';
 import type { Song } from '../services/songService';
+
+const noFilters: ActiveFilterState = {
+  instrumentFilter: '',
+  myInstrumentFilter: '',
+  instrumentDifficultyFilter: '',
+  capoFilter: '',
+  tuningFilter: '',
+  keyFilter: '',
+  bpmMinFilter: '',
+  bpmMaxFilter: '',
+  pitchStandardMinFilter: '',
+  pitchStandardMaxFilter: '',
+  timeSignatureFilter: '',
+  modeFilter: '',
+  languageFilters: new Set(),
+  playlistFilter: '',
+  techniqueFilters: new Set(),
+  genreFilters: new Set(),
+};
+
+describe('countActiveFilters', () => {
+  test('returns 0 when nothing is set', () => {
+    expect(countActiveFilters(noFilters)).toBe(0);
+  });
+
+  test('counts a single active select filter', () => {
+    expect(countActiveFilters({ ...noFilters, keyFilter: 'C' })).toBe(1);
+  });
+
+  test('a non-empty Set counts as one dimension', () => {
+    expect(countActiveFilters({ ...noFilters, genreFilters: new Set(['Rock', 'Jazz']) })).toBe(1);
+    expect(countActiveFilters({ ...noFilters, techniqueFilters: new Set(['Bend']) })).toBe(1);
+    expect(countActiveFilters({ ...noFilters, languageFilters: new Set(['en']) })).toBe(1);
+  });
+
+  test('capo 0 is active (!== ""), empty string is not', () => {
+    expect(countActiveFilters({ ...noFilters, capoFilter: 0 })).toBe(1);
+    expect(countActiveFilters({ ...noFilters, capoFilter: '' })).toBe(0);
+  });
+
+  test('sums multiple active dimensions', () => {
+    expect(
+      countActiveFilters({
+        ...noFilters,
+        instrumentFilter: 'Guitar',
+        bpmMinFilter: '90',
+        genreFilters: new Set(['Rock']),
+        playlistFilter: 'pl-1',
+      }),
+    ).toBe(4);
+  });
+});
 
 const baseSong: Song = {
   uid: '1',

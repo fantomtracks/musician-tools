@@ -1,6 +1,6 @@
 # Deferred Work
 
-> **Rituel (acté rétro Epic 8, 2026-06-21)** : ce fichier passe en revue **avant le démarrage de chaque nouvelle epic**. Chaque item est tranché — _fix maintenant_ / _story planifiée_ / _gardé-avec-raison_ / _tué_. Il ne doit jamais redevenir un cimetière. Dernière passe : **2026-06-28** (post-Epic 11 — cluster afterSync/parité-sync soldé par 11.1).
+> **Rituel (acté rétro Epic 8, 2026-06-21)** : ce fichier passe en revue **avant le démarrage de chaque nouvelle epic**. Chaque item est tranché — _fix maintenant_ / _story planifiée_ / _gardé-avec-raison_ / _tué_. Il ne doit jamais redevenir un cimetière. Dernière passe : **2026-07-04** (avant epic confort mobile — lot UX/UI mobile promu ; tous les résidus de review confirmés 🧊 gardés à l'échelle beta mono-user ; rien tué, rien à fixer en urgence hors lot mobile).
 
 ---
 
@@ -27,6 +27,14 @@ _Les 4 stories UI/confort (filtres Songlist, refacto SessionHistoryCard, chanson
 
 ### 🎨 UX/UI mobile + assets — à cadrer en stories BMAD (notes 2026-06-29)
 > Items relevés en session le 2026-06-29. **Aucun code livré** : une première passe a été tentée puis **revertée** (on partait en yolo sans cadrage) → à reprendre proprement via le process BMAD (stories). Les diagnostics ci-dessous restent valides, les pistes de fix sont indicatives.
+>
+> ⬆️ **PROMU → Epic 14 « Confort mobile » (revue 2026-07-04, option 1 tranchée ; cadré `bmad-ux` + découpé `bmad-create-epics-and-stories`)**. Cadrage UX : `planning-artifacts/ux-designs/ux-musician-tools-2026-07-04/` (DESIGN.md + EXPERIENCE.md, status:final). Stories (dans `epics.md`) :
+> - **14.1** favicon produit (quick-win)
+> - **14.2** header overflow non-connecté (fix tactique : retirer/relayer les CTA _Sign in_ / _Create account_ ; V1 sobre)
+> - **14.3** Songlist responsive (D2 tableau cap 65vh + en-tête sticky · D3 disclosure filtres <lg + compteur · D4 `min-w-0` + scroll horizontal)
+> - **14.4** SongForm mobile (D8 `grid-cols-1 sm:grid-cols-3` + audit save-bar/playlist picker)
+>
+> La **vraie landing page** reste un sujet produit séparé (cf. § À brainstormer), **non incluse** dans cette epic.
 
 - **Changer le favicon** : le favicon par défaut est encore en place, à remplacer par une icône propre au produit.
 - **Header non connecté qui déborde sur mobile** : sur iPhone 13 (390px) les boutons _Sign in_ / _Create account_ sont posés directement dans la barre du header (pas de hamburger en non-connecté) → ils débordent à côté du titre + toggle dark. Piste explorée : **retirer ces boutons du header** en non-connecté et porter les CTA _Create account_ / _Sign in_ **dans la HomePage** (avec un padding pour ne pas coller au footer). ⚠️ Impacte `Header.test.tsx` (test « unauthenticated … sign-in actions remain » à inverser). [`src/App.tsx` HomePage, `src/components/Header.tsx`]
@@ -213,3 +221,15 @@ _Les 4 stories UI/confort (filtres Songlist, refacto SessionHistoryCard, chanson
 ## Deferred from: manual QA of story-7.7 (2026-06-26)
 
 - ~~**Différentiel de comportement register (résidu anti-énumération assumé)**~~ — ✅ **RÉSOLU le 2026-06-26 par la story 7.13** (hard email gate). Register n'auto-connecte plus : email neuf et email existant renvoient désormais la **même** réponse générique `{auth:false, pending:true}` sans session → plus de différentiel observable. La connexion exige la vérification de l'email. [usercontroller.js — voir 7-13-hard-email-verification-gate.md]
+
+## Deferred from: code review of 14-1-favicon-produit (2026-07-04)
+
+- **Favicon SVG-only, sans fallback raster / apple-touch-icon** — `index.html:5` ne déclare qu'un favicon `image/svg+xml`. Contextes sans support du favicon SVG (vieux Safari, bookmark écran d'accueil iOS) n'affichent pas d'icône produit. Pré-existant (l'ancien `vite.svg` était aussi SVG-only) et sanctionné par l'AC2 (SVG seul autorisé) — donc non bloquant. Enhancement futur possible : ajouter `apple-touch-icon.png` (180×180) + éventuel `favicon-32.png` dans `public/` et les déclarer.
+
+## Deferred from: code review of 14-2-header-overflow-non-connecte (2026-07-04)
+
+- **Couplage test↔module — `HomePage` exporté depuis `App.tsx`** — `HomePage.test.tsx` importe `HomePage` via `../App`, ce qui évalue tout le graphe de modules de `App.tsx` (toutes les pages, contexts, Footer) à l'import, juste pour tester un composant. Vert aujourd'hui (aucun effet de bord au chargement ; `tsc -b` exit 0). Fragile à terme : une future page ajoutant un effet de bord au module-load casserait ce test sans rapport. Durcissement optionnel : extraire `HomePage` dans son propre fichier (`src/pages/HomePage.tsx`) et l'importer directement dans App.tsx + le test. Non bloquant, pas de régression actuelle.
+
+## Deferred from: code review of 14-3-songlist-responsive (2026-07-04)
+
+- ~~**En-tête de tableau sticky — fond sur `<thead>` plutôt que sur les cellules `<th>`**~~ — ✅ **CADUC (2026-07-04)** : la décision D2 (cap `max-h-[65vh]` + en-tête `sticky`) a été **retirée lors de la QA manuelle de l'Epic 14** (northwood) — le tableau ne scrolle plus qu'en horizontal (`overflow-x-auto`), la page scrolle verticalement normalement. Plus d'en-tête sticky → ce durcissement n'a plus d'objet.

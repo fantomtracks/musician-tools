@@ -621,7 +621,7 @@ export function SongForm(props: SongFormProps) {
                 </div>
               )}
             </div>
-            <div className="grid grid-cols-3 gap-4">
+            <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
               <div>
                 <label htmlFor="song-duration" className="block text-sm font-medium text-gray-700 dark:text-gray-100">Duration (m:ss)</label>
                 <input
@@ -694,7 +694,7 @@ export function SongForm(props: SongFormProps) {
                 </select>
               </div>
             </div>
-            <div className="grid grid-cols-3 gap-4">
+            <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
               <div>
                 <label htmlFor="song-key" className="block text-sm font-medium text-gray-700 dark:text-gray-100">Key</label>
                 <select

@@ -35,7 +35,7 @@
 # - Dev moves story to 'review', then runs code-review (fresh context, different LLM recommended)
 
 generated: 2026-06-07
-last_updated: 2026-06-29  # 13-1 done (review 3 couches, 1 HIGH + 5 Med corrigés) ; Epic 13 complet
+last_updated: 2026-07-04  # Epic 14 : 4/4 stories done + QA manuelle passée (correctifs sur branche : full-width, D2 retirée, Search label, Filters dedup) ; epic-14 done, en attente merge main
 project: musician-tools
 project_key: NOKEY
 tracking_system: file-system
@@ -139,3 +139,11 @@ development_status:
   # Epic 13: Confort édition « atelier vivant » (issu brainstorm auto-save 2026-06-29, deferred-work prio 3)
   epic-13: done
   13-1-autosave-fiche-chanson: done            # front ; auto-save (debounce+flush, lastPlayed exclu) + sticky Back + statut ; review 3 couches (1 HIGH lastPlayed + 5 Med) ; front 308✓
+
+  # Epic 14: Confort mobile — Songlist + édition (issu deferred-work, cadré bmad-ux 2026-07-04 : ux-designs/ux-musician-tools-2026-07-04, DESIGN.md + EXPERIENCE.md status:final)
+  # 4 stories largement indépendantes, exécution légère ; ordre reco 14-1→14-4 (quick-wins d'abord, cœur responsive ensuite). Breakpoints existants lg (1024) / sm (640), pas de nouveau seuil.
+  epic-14: done   # 4/4 stories done ; QA manuelle epic passée 2026-07-04 (correctifs sur feat/epic-14-mobile-comfort) ; en attente merge main (northwood)
+  14-1-favicon-produit: done                   # public/favicon.svg réplique le logo (carré dégradé brand→purple + croche blanche) remplace vite.svg ; review 3 couches OK (1 patch : git add asset non suivi) ; front 311✓ back 253✓
+  14-2-header-overflow-non-connecte: done          # CTA retirés du header non-connecté → relayés dans HomePage ; connecté inchangé ; HomePage exporté+testé ; review 3 couches OK (0 patch, 1 defer couplage test) ; front 313✓ back 253✓
+  14-3-songlist-responsive: done               # tableau cap 65vh scroll V+H + thead sticky (D2/D4) + min-w-0 + filtres disclosure « Filters · N » sous lg (D3) + rail desktop-only ; countActiveFilters extrait ; review 3 couches OK (5/5 ACs, 1 patch test, 1 defer sticky-th) ; front 323✓ back 253✓ ; visuel = QA manuelle epic
+  14-4-songform-mobile: done                   # grilles méta grid-cols-1 sm:grid-cols-3 (D8) ; save-bar/picker audités (déjà conformes) ; review consolidée clean ; front 323✓ back 253✓ ; visuel = QA manuelle epic

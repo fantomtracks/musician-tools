@@ -1,4 +1,4 @@
-import { Navigate, Route, Routes } from 'react-router-dom';
+import { Link, Navigate, Route, Routes } from 'react-router-dom';
 import { useAuth } from './contexts/AuthContext';
 import Songs from './pages/Songs';
 import LoginPage from './pages/LoginPage';
@@ -16,7 +16,7 @@ import Header from './components/Header';
 import VerifyEmailBanner from './components/VerifyEmailBanner';
 import Footer from './components/Footer';
 
-function HomePage() {
+export function HomePage() {
   const { isAuthenticated, user } = useAuth();
 
   return (
@@ -40,6 +40,16 @@ function HomePage() {
             <p className="text-xl text-gray-600 dark:text-gray-300">
               Practice management for musicians. Track your songs, tempos, keys, and progress.
             </p>
+            {/* Sign-in actions live here (not in the header) so the mobile header
+                stays uncluttered for signed-out visitors. */}
+            <div className="flex flex-wrap items-center justify-center gap-3 pt-4">
+              <Link to="/register" className="btn-primary">
+                Create account
+              </Link>
+              <Link to="/login" className="btn-secondary">
+                Sign in
+              </Link>
+            </div>
           </div>
         )}
       </div>
