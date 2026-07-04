@@ -9,6 +9,9 @@ inputDocuments:
 epic7:
   source: 'hors-PRD — brief + addendum + architecture (validé northwood 2026-06-21)'
   stepsCompleted: [1, 2, 3, 4]
+epic14:
+  source: 'issu deferred-work (lot UX/UI mobile, option 1) — cadré bmad-ux 2026-07-04 (DESIGN.md + EXPERIENCE.md status:final)'
+  added: 2026-07-04
 ---
 
 # musician-tools - Epic Breakdown
@@ -195,7 +198,10 @@ Distinguer un lien de vérif consommé-mais-valide d'un lien invalide (clic redo
 ### Epic 13: Confort édition — « atelier vivant » (issu brainstorm auto-save 2026-06-29)
 Auto-save de la fiche chanson (debounce + flush, `lastPlayed` exclu), statut « Saving/Saved », barre Back sticky. Story : 13.1 auto-save fiche chanson (done). _Détail § Epic 13 ci-dessous._
 
-**Dépendances :** E1 → E2 → (E3 ∥ E4). Les epics 3 et 4 sont indépendants l'un de l'autre. E6 dépend d'E4 (pont Mark as Played). E5 est transverse ; E9 (confort UI, post-rétro) est autonome et se solde avant E7 ; E7 (compte + sécurité, hors-PRD) est autonome — ne dépend d'aucun épic PRD et n'en bloque aucun. Les NFR1-NFR6 transverses s'appliquent aux critères d'acceptation des stories concernées.
+### Epic 14: Confort mobile — Songlist + édition (issu deferred-work, cadré bmad-ux 2026-07-04)
+Rendre l'app pleinement utilisable au téléphone (NFR3) : favicon produit, header non-connecté qui ne déborde plus, Songlist responsive (tableau scroll interne cap 65vh + en-tête sticky + filtres repliables + `min-w-0`/scroll horizontal), fiche d'édition lisible. Stories : 14.1 favicon, 14.2 header overflow non-connecté, 14.3 Songlist responsive, 14.4 SongForm mobile (toutes backlog). _Détail § Epic 14 ci-dessous._
+
+**Dépendances :** E1 → E2 → (E3 ∥ E4). Les epics 3 et 4 sont indépendants l'un de l'autre. E6 dépend d'E4 (pont Mark as Played). E5 est transverse ; E9 (confort UI, post-rétro) est autonome et se solde avant E7 ; E7 (compte + sécurité, hors-PRD) est autonome — ne dépend d'aucun épic PRD et n'en bloque aucun. E10–E14 (confort/dette post-rétro) sont de même autonomes, sans dépendance inter-epics, en exécution légère. Les NFR1-NFR6 transverses s'appliquent aux critères d'acceptation des stories concernées.
 
 ## Epic 1: Ma bibliothèque de sujets de travail
 
@@ -1152,3 +1158,83 @@ So that je ne pense plus à Save, je ne suis plus ré-éjecté, et je ne perds r
 **Then** **les autres champs continuent de se sauver**, `title`/`artist` sont gelés + ✗ discret (décision 🅰️) — _NB : aucune unicité backend, c'est 100% client_
 
 **And** la garde « Unsaved changes » du Mark-as-Played devient **caduque** (fiche toujours sauvée) ; `isDirty` fragile résolu ; course 2-appareils **reportée** (beta) ; suites vertes.
+
+## Epic 14: Confort mobile (Songlist + édition)
+
+_Ajouté 2026-07-04 — issu de la revue `deferred-work.md` (lot UX/UI mobile promu, option 1). Cadré via `bmad-ux` : `planning-artifacts/ux-designs/ux-musician-tools-2026-07-04/` (DESIGN.md + EXPERIENCE.md, `status: final`). Epic de **confort**, exécution **légère**._
+
+**Objectif :** rendre l'app pleinement utilisable au téléphone (NFR3) — la page Songs (liste + filtres) et la fiche d'édition tiennent enfin dans la main, sans régresser le desktop. Plus un quick-win favicon.
+
+**Découpage :** 4 stories largement **indépendantes**, livrables une à une. Ordre recommandé 14.1→14.4 (quick-wins d'abord, cœur responsive ensuite). Breakpoints déjà en place : `lg` (1024px) layout, `sm` (640px) grille form — aucun nouveau seuil introduit.
+
+### Story 14.1: Favicon produit
+
+As a visiteur,
+I want voir une icône propre au produit dans l'onglet,
+So that l'app n'affiche plus le favicon Vite par défaut.
+
+**Acceptance Criteria:**
+
+**Given** l'app chargée dans un navigateur
+**Then** le favicon est une icône propre au produit (remplace le `vite.svg` par défaut), déclarée dans `index.html` ; formats raisonnables (svg ou png 32/180) ; pas de 404 sur l'ancien asset
+
+**And** quick-win, aucune dépendance ; pas d'impact fonctionnel.
+
+### Story 14.2: Header non-connecté qui ne déborde plus sur mobile
+
+As a visiteur déconnecté sur mobile,
+I want un header qui ne déborde pas à 390px,
+So that le titre et le toggle dark ne soient plus poussés hors écran par les boutons Sign in / Create account.
+
+**Acceptance Criteria:**
+
+**Given** un utilisateur **non connecté** sur mobile (~390px)
+**When** il voit le header
+**Then** les CTA _Sign in_ / _Create account_ ne débordent plus : ils sont **retirés du header en non-connecté** et **relayés dans la HomePage** (padding pour ne pas coller au footer) ; header = titre + toggle dark seulement
+
+**Given** un utilisateur connecté
+**Then** le header (hamburger `md:hidden` de 9.1, liens) est **inchangé**
+
+**And** V1 sobre — le placement définitif des CTA sera repris par une future landing page (deferred-work § À brainstormer) ; `Header.test.tsx` mis à jour (le test « unauthenticated … sign-in actions remain » est inversé) ; UI en anglais ; dark mode. `[src/App.tsx HomePage, src/components/Header.tsx]`
+
+### Story 14.3: Songlist responsive — tableau scrollable + filtres repliables
+
+As a musicien qui cherche une chanson au téléphone,
+I want une liste qui tient dans l'écran (tableau qui scrolle en interne, filtres repliés, pas de débordement latéral),
+So that je vois mes chansons tout de suite au lieu de scroller un mur de filtres et une page infinie.
+
+**Cadrage UX :** décisions D2/D3/D4 (`EXPERIENCE.md` § Responsive & Platform, `DESIGN.md` § Components). Groupée volontairement (un écran, un PR).
+
+**Acceptance Criteria:**
+
+**Given** la page Songs avec beaucoup de chansons
+**When** je la consulte (mobile ou desktop)
+**Then** le tableau est **plafonné à ~65vh** et **scrolle en interne** (la page ne s'allonge plus) ; l'**en-tête de colonnes est `sticky`** dans la zone de scroll (fond opaque, `z-10` sous les dropdowns `z-50` et la save-bar `z-20`) — **D2**
+
+**Given** un tableau plus large que l'écran
+**Then** il **scrolle horizontalement dans son conteneur** (toutes colonnes gardées, pas de reflow en cartes) ; les blocs voisins (recherche, filtres) **ne débordent plus** grâce à **`min-w-0`** sur la colonne `flex-1` (`SongsList.tsx:202`) — **D4**
+
+**Given** un écran **sous `lg` (1024px)**
+**When** j'arrive sur la page
+**Then** les filtres sont dans un **disclosure « Filters » replié par défaut** (chansons visibles immédiatement) ; le bouton affiche le **compteur de filtres actifs** (« Filters · 2 ») même replié ; `aria-expanded` / `aria-controls` posés ; au-dessus de `lg`, la **sidebar reste statique** (comportement actuel)  — **D3**
+
+**And** zéro régression desktop ; dark mode sur les nouveaux éléments (bouton disclosure, fond sticky) ; conteneur scroll focalisable clavier ; microcopie EN ; état déplié non persisté (D7). `[src/components/SongsList.tsx, src/components/SongsSidebar.tsx]`
+
+### Story 14.4: Fiche d'édition (SongForm) lisible sur mobile
+
+As a musicien qui édite une chanson au téléphone,
+I want des champs qui s'empilent lisiblement au lieu d'être écrasés,
+So that je puisse corriger une méta sans zoomer.
+
+**Cadrage UX :** décision D8 (`DESIGN.md` § Components, form grid).
+
+**Acceptance Criteria:**
+
+**Given** le SongForm sur un écran **sous `sm` (640px)**
+**When** j'affiche les grilles de méta (`SongForm.tsx:624`, `:697`)
+**Then** elles passent de `grid-cols-3` à **`grid-cols-1 sm:grid-cols-3`** : une colonne empilée sous `sm`, trois dès `sm+`
+
+**Given** la fiche en édition sur mobile
+**Then** la **save-bar sticky** (13-1, `Songs.tsx:1815`) ne déborde pas (statut « Saving/Saved » tronque si besoin) et le **playlist picker** (`Songs.tsx:1917`) reste utilisable (dropdown déjà `overflow-y-auto`) — audit visuel, pas de régression de l'auto-save
+
+**And** dark mode ; UI en anglais ; suites front vertes. `[src/components/SongForm.tsx, src/pages/Songs.tsx]`
