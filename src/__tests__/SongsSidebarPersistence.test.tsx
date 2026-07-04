@@ -45,12 +45,16 @@ describe('Songs sidebar persistence', () => {
       </MemoryRouter>
     );
 
+    // Collapsed (desktop rail): the "Expand sidebar" » control is rendered.
+    // NB: since 14.3 the full filter content is always in the DOM (CSS-gated by
+    // breakpoint), so the collapsed/expanded discriminator is the » rail button,
+    // which only renders while collapsed.
     expect(screen.getByLabelText('Expand sidebar')).toBeInTheDocument();
-    expect(screen.queryByLabelText('Collapse sidebar')).not.toBeInTheDocument();
 
     fireEvent.click(screen.getByLabelText('Expand sidebar'));
 
-    await waitFor(() => expect(screen.getByLabelText('Collapse sidebar')).toBeInTheDocument());
+    await waitFor(() => expect(screen.queryByLabelText('Expand sidebar')).not.toBeInTheDocument());
+    expect(screen.getByLabelText('Collapse sidebar')).toBeInTheDocument();
     await waitFor(() => expect(localStorage.getItem('songsSidebarExpanded')).toBe('true'));
   });
 });

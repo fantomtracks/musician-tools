@@ -2,6 +2,7 @@ import { NO_INSTRUMENT } from '../utils/songFilters';
 
 export interface SongsSidebarProps {
   // UI state
+  mobileFiltersOpen: boolean;
   sidebarExpanded: boolean;
   setSidebarExpanded: (e: boolean) => void;
   filtersAccordionOpen: boolean;
@@ -90,12 +91,13 @@ export default function SongsSidebar(props: SongsSidebarProps) {
   return (
     <aside
       id="songs-sidebar"
-      className={`${props.sidebarExpanded ? 'w-full lg:w-80' : 'w-12 lg:w-12'} shrink-0 min-w-[48px] overflow-hidden transition-all duration-300 card-base glass-effect lg:sticky lg:top-24`}
+      className={`${props.mobileFiltersOpen ? '' : 'hidden'} lg:block ${props.sidebarExpanded ? 'w-full lg:w-80' : 'w-full lg:w-12'} shrink-0 min-w-[48px] overflow-hidden transition-all duration-300 card-base glass-effect lg:sticky lg:top-24`}
       aria-hidden={false}
     >
-      {/* Collapsed rail shows only toggle button */}
-      {!props.sidebarExpanded ? (
-        <div className="p-2 flex items-center justify-center">
+      {/* Collapsed rail — desktop only (>= lg). Under lg the "Filters" disclosure
+          controls visibility, so the sidebar always shows its full content there. */}
+      {!props.sidebarExpanded && (
+        <div className="hidden lg:flex p-2 items-center justify-center">
           <button
             type="button"
             className="btn-secondary text-xs px-2 py-1"
@@ -105,8 +107,8 @@ export default function SongsSidebar(props: SongsSidebarProps) {
             »
           </button>
         </div>
-      ) : (
-        <div className="p-4 space-y-3">
+      )}
+      <div className={`${props.sidebarExpanded ? '' : 'lg:hidden'} p-4 space-y-3`}>
           <div className="flex items-center justify-between mb-2">
             <div className="flex items-center gap-2">
               <h3 className="text-sm font-semibold text-gray-800 dark:text-gray-100">Filters</h3>
@@ -122,7 +124,7 @@ export default function SongsSidebar(props: SongsSidebarProps) {
             </div>
             <button
               type="button"
-              className="btn-secondary text-xs px-2 py-1"
+              className="hidden lg:inline-flex btn-secondary text-xs px-2 py-1"
               aria-label="Collapse sidebar"
               onClick={() => props.setSidebarExpanded(false)}
             >
@@ -737,7 +739,6 @@ export default function SongsSidebar(props: SongsSidebarProps) {
             )}
           </div>
         </div>
-      )}
     </aside>
   );
 }

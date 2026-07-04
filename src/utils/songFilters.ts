@@ -30,6 +30,50 @@ export type SongFilterOptions = {
   instrumentMatchModeAll?: boolean;
 };
 
+// Subset of filter state that counts as an "active filter" — mirrors, one-for-one,
+// the conditions behind `hasActiveFilters` in Songs.tsx. Search query is NOT a filter.
+export type ActiveFilterState = {
+  instrumentFilter: string;
+  myInstrumentFilter: string;
+  instrumentDifficultyFilter: number | '';
+  capoFilter: number | '';
+  tuningFilter: string;
+  keyFilter: string;
+  bpmMinFilter: string;
+  bpmMaxFilter: string;
+  pitchStandardMinFilter: string;
+  pitchStandardMaxFilter: string;
+  timeSignatureFilter: string;
+  modeFilter: string;
+  languageFilters: Set<string>;
+  playlistFilter: string;
+  techniqueFilters: Set<string>;
+  genreFilters: Set<string>;
+};
+
+// Number of active filter dimensions (a non-empty Set counts as one). Single source
+// of truth for both `hasActiveFilters` (> 0) and the mobile "Filters · N" counter.
+export function countActiveFilters(f: ActiveFilterState): number {
+  let n = 0;
+  if (f.instrumentFilter) n++;
+  if (f.myInstrumentFilter) n++;
+  if (f.instrumentDifficultyFilter) n++;
+  if (f.capoFilter !== '') n++;
+  if (f.tuningFilter) n++;
+  if (f.keyFilter) n++;
+  if (f.bpmMinFilter) n++;
+  if (f.bpmMaxFilter) n++;
+  if (f.pitchStandardMinFilter) n++;
+  if (f.pitchStandardMaxFilter) n++;
+  if (f.timeSignatureFilter) n++;
+  if (f.modeFilter) n++;
+  if (f.languageFilters.size > 0) n++;
+  if (f.playlistFilter) n++;
+  if (f.techniqueFilters.size > 0) n++;
+  if (f.genreFilters.size > 0) n++;
+  return n;
+}
+
 export function applySongFilters(songs: Song[], opts: SongFilterOptions): Song[] {
   const {
     searchQuery,

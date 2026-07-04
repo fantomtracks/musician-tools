@@ -2,6 +2,7 @@ import { Link } from 'react-router-dom';
 import type { Song } from '../services/songService';
 import type { ReactNode } from 'react';
 import SongsSidebar from './SongsSidebar';
+import FiltersDisclosureButton from './FiltersDisclosureButton';
 
 export interface SongsListProps {
   // State
@@ -36,6 +37,8 @@ export interface SongsListProps {
   
   // UI state
   sidebarExpanded: boolean;
+  mobileFiltersOpen: boolean;
+  setMobileFiltersOpen: (o: boolean) => void;
   filtersAccordionOpen: boolean;
   playlistAccordionOpen: boolean;
   tuningAccordionOpen: boolean;
@@ -60,6 +63,7 @@ export interface SongsListProps {
   availableTechniqueFilters: string[];
   allDisplayedSelected: boolean;
   hasActiveFilters: boolean;
+  activeFilterCount: number;
   showTuningFilters: boolean;
   bulkPlaylistSelection: Set<string>;
   
@@ -121,7 +125,13 @@ export default function SongsList(props: SongsListProps) {
   return (
     <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-10 space-y-6">
       <div className="flex flex-col lg:flex-row gap-6 items-start">
+        <FiltersDisclosureButton
+          open={props.mobileFiltersOpen}
+          onToggle={() => props.setMobileFiltersOpen(!props.mobileFiltersOpen)}
+          activeFilterCount={props.activeFilterCount}
+        />
         <SongsSidebar
+          mobileFiltersOpen={props.mobileFiltersOpen}
           sidebarExpanded={props.sidebarExpanded}
           setSidebarExpanded={props.setSidebarExpanded}
           filtersAccordionOpen={props.filtersAccordionOpen}
@@ -199,7 +209,7 @@ export default function SongsList(props: SongsListProps) {
           showTuningFilters={props.showTuningFilters}
           clearAllFilters={props.clearAllFilters}
         />
-        <div className="flex-1 space-y-4">
+        <div className="flex-1 min-w-0 space-y-4">
           <div className="card-base glass-effect p-4 sm:p-5">
             <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
               <div>
@@ -337,9 +347,9 @@ export default function SongsList(props: SongsListProps) {
             </div>
           ) : (
             <div className="card-base overflow-hidden">
-              <div className="overflow-x-auto">
+              <div className="overflow-auto max-h-[65vh]" tabIndex={0}>
                 <table className="w-full text-sm">
-                  <thead className="bg-gray-50 dark:bg-gray-800 dark:text-gray-100 hover:bg-gray-100 dark:hover:bg-gray-700 shadow-sm">
+                  <thead className="sticky top-0 z-10 bg-gray-50 dark:bg-gray-800 dark:text-gray-100 hover:bg-gray-100 dark:hover:bg-gray-700 shadow-sm">
                     <tr>
                       <th className="text-center p-2 border-b dark:border-gray-700 w-12">
                         <input

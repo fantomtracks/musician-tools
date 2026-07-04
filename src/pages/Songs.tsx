@@ -8,7 +8,7 @@ import { songPlayService, type SongPlay } from '../services/songPlayService';
 import { playlistService, PlaylistConflictError, type Playlist } from '../services/playlistService';
 import { ConfirmDialog } from '../components/ConfirmDialog';
 import { instrumentTechniquesMap, instrumentTuningsMap, instrumentTypeOptions } from '../constants/instrumentTypes';
-import { applySongFilters, NO_INSTRUMENT } from '../utils/songFilters';
+import { applySongFilters, countActiveFilters, NO_INSTRUMENT } from '../utils/songFilters';
 import { handleComboKeyDown, useScrollHighlightIntoView, comboboxInputAria, comboboxOptionAria } from '../utils/comboboxKeyboard';
 import { findDuplicateSong } from '../utils/songDuplicate';
 import { formatLocalDate } from '../utils/heatmap';
@@ -92,6 +92,8 @@ function Songs() {
     const saved = typeof window !== 'undefined' ? window.localStorage.getItem('songsSidebarExpanded') : null;
     return saved === 'false' ? false : true; // default to expanded unless persisted false
   });
+  // Mobile-only "Filters" disclosure (< lg). Ephemeral by design — never persisted (D7).
+  const [mobileFiltersOpen, setMobileFiltersOpen] = useState(false);
   const [instrumentFilter, setInstrumentFilter] = useState<string>(() => {
     const saved = typeof window !== 'undefined' ? window.localStorage.getItem('songsInstrumentFilter') : null;
     return saved ? saved : '';
@@ -265,24 +267,26 @@ function Songs() {
   const location = useLocation();
   const navigate = useNavigate();
 
-  const hasActiveFilters = Boolean(
-    instrumentFilter ||
-    myInstrumentFilter ||
-    instrumentDifficultyFilter ||
-    capoFilter !== '' ||
-    tuningFilter ||
-    keyFilter ||
-    bpmMinFilter ||
-    bpmMaxFilter ||
-    pitchStandardMinFilter ||
-    pitchStandardMaxFilter ||
-    timeSignatureFilter ||
-    modeFilter ||
-    languageFilters.size > 0 ||
-    playlistFilter ||
-    techniqueFilters.size > 0 ||
-    genreFilters.size > 0
-  );
+  // Single source of truth: the count drives both the boolean and the mobile "Filters · N" badge.
+  const activeFilterCount = countActiveFilters({
+    instrumentFilter,
+    myInstrumentFilter,
+    instrumentDifficultyFilter,
+    capoFilter,
+    tuningFilter,
+    keyFilter,
+    bpmMinFilter,
+    bpmMaxFilter,
+    pitchStandardMinFilter,
+    pitchStandardMaxFilter,
+    timeSignatureFilter,
+    modeFilter,
+    languageFilters,
+    playlistFilter,
+    techniqueFilters,
+    genreFilters,
+  });
+  const hasActiveFilters = activeFilterCount > 0;
 
   const clearAllFilters = () => {
     setInstrumentFilter('');
@@ -1785,6 +1789,9 @@ function Songs() {
           availableTechniqueFilters={availableTechniqueFilters}
           allDisplayedSelected={allDisplayedSelected}
           hasActiveFilters={hasActiveFilters}
+          activeFilterCount={activeFilterCount}
+          mobileFiltersOpen={mobileFiltersOpen}
+          setMobileFiltersOpen={setMobileFiltersOpen}
           showTuningFilters={showTuningFilters}
           bulkPlaylistSelection={bulkPlaylistSelection}
           toggleSelectSong={toggleSelectSong}

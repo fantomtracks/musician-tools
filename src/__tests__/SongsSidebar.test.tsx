@@ -4,6 +4,7 @@ import SongsSidebar, { type SongsSidebarProps } from '../components/SongsSidebar
 function makeProps(overrides: Partial<SongsSidebarProps> = {}): SongsSidebarProps {
   return {
     // UI state
+    mobileFiltersOpen: true,
     sidebarExpanded: true,
     setSidebarExpanded: jest.fn(),
     filtersAccordionOpen: true,
@@ -108,4 +109,18 @@ test('clear all triggers callback when active filters', () => {
   const clear = screen.getByText('Clear all');
   fireEvent.click(clear);
   expect(props.clearAllFilters).toHaveBeenCalled();
+});
+
+test('mobileFiltersOpen gates the aside visibility below lg (hidden class), always shown at lg', () => {
+  const { rerender } = render(<SongsSidebar {...makeProps({ mobileFiltersOpen: false })} />);
+  const asideClosed = document.getElementById('songs-sidebar') as HTMLElement;
+  // Token-match (not substring) so the standalone `hidden` isn't confused with `overflow-hidden`.
+  const closedTokens = asideClosed.className.split(/\s+/);
+  expect(closedTokens).toContain('hidden');   // hidden below lg when disclosure closed
+  expect(closedTokens).toContain('lg:block'); // but shown on desktop
+
+  rerender(<SongsSidebar {...makeProps({ mobileFiltersOpen: true })} />);
+  const asideOpen = document.getElementById('songs-sidebar') as HTMLElement;
+  // Open: no standalone `hidden` token (overflow-hidden is a distinct token).
+  expect(asideOpen.className.split(/\s+/)).not.toContain('hidden');
 });
