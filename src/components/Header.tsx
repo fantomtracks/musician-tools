@@ -141,9 +141,11 @@ function Header() {
                 <span className="text-lg">🌙</span>
               )}
             </button>
-            {isAuthenticated ? (
-              /* Account dropdown (desktop ≥ lg): Profile + Sign out. On mobile these
-                 live in the hamburger menu instead, so this is lg-only. */
+            {/* Account dropdown (desktop ≥ lg): Profile + Sign out. On mobile these
+               live in the hamburger menu instead, so this is lg-only. Signed-out
+               visitors get no header CTAs — Sign in / Create account live on the
+               HomePage instead, to keep the mobile header from overflowing. */}
+            {isAuthenticated && (
               <div className="relative hidden lg:block" ref={accountMenuRef}>
                 <button
                   type="button"
@@ -179,15 +181,6 @@ function Header() {
                   </div>
                 )}
               </div>
-            ) : (
-              <>
-                <Link to="/login" className="btn-secondary text-sm">
-                  Sign in
-                </Link>
-                <Link to="/register" className="btn-primary text-sm">
-                  Create account
-                </Link>
-              </>
             )}
           </div>
         </div>

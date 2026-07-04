@@ -76,14 +76,17 @@ test('authenticated mobile: Sign out lives inside the menu and logs out', () => 
   expect(logout).toHaveBeenCalled();
 });
 
-test('unauthenticated: no hamburger and no nav links, but sign-in actions remain', () => {
+test('unauthenticated: no hamburger, no nav links, and no sign-in actions in the header', () => {
   mockedUseAuth.mockReturnValue({ isAuthenticated: false, logout: jest.fn() });
   renderHeader();
 
   expect(screen.queryByRole('button', { name: /navigation menu/i })).not.toBeInTheDocument();
   expect(screen.queryByRole('link', { name: 'Sessions' })).not.toBeInTheDocument();
-  expect(screen.getByRole('link', { name: /sign in/i })).toBeInTheDocument();
-  expect(screen.getByRole('link', { name: /create account/i })).toBeInTheDocument();
+  // Sign in / Create account moved to the HomePage so the mobile header does not overflow.
+  expect(screen.queryByRole('link', { name: /sign in/i })).not.toBeInTheDocument();
+  expect(screen.queryByRole('link', { name: /create account/i })).not.toBeInTheDocument();
+  // The dark-mode toggle stays for everyone (its accessible name comes from the title attr).
+  expect(screen.getByTitle(/switch to (dark|light) mode/i)).toBeInTheDocument();
 });
 
 // Profile + Sign out moved out of the main nav into a desktop account dropdown.
