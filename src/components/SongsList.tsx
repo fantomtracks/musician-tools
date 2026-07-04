@@ -209,7 +209,7 @@ export default function SongsList(props: SongsListProps) {
           showTuningFilters={props.showTuningFilters}
           clearAllFilters={props.clearAllFilters}
         />
-        <div className="flex-1 min-w-0 space-y-4">
+        <div className="w-full lg:flex-1 min-w-0 space-y-4">
           <div className="card-base glass-effect p-4 sm:p-5">
             <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
               <div>
@@ -225,8 +225,13 @@ export default function SongsList(props: SongsListProps) {
                 Add a song
               </button>
             </div>
-            <div className="mt-4 relative">
+            <div className="mt-4">
+              <label htmlFor="songs-search" className="block text-sm font-medium text-gray-700 dark:text-gray-100 mb-1">
+                Search
+              </label>
+              <div className="relative">
               <input
+                id="songs-search"
                 type="text"
                 placeholder="Search by title, artist, or album..."
                 value={props.searchQuery}
@@ -243,6 +248,7 @@ export default function SongsList(props: SongsListProps) {
                   ✕
                 </button>
               )}
+              </div>
             </div>
           </div>
           {props.selectedSongs.size > 0 && (
@@ -347,9 +353,9 @@ export default function SongsList(props: SongsListProps) {
             </div>
           ) : (
             <div className="card-base overflow-hidden">
-              <div className="overflow-auto max-h-[65vh]" tabIndex={0}>
+              <div className="overflow-x-auto">
                 <table className="w-full text-sm">
-                  <thead className="sticky top-0 z-10 bg-gray-50 dark:bg-gray-800 dark:text-gray-100 hover:bg-gray-100 dark:hover:bg-gray-700 shadow-sm">
+                  <thead className="bg-gray-50 dark:bg-gray-800 dark:text-gray-100 hover:bg-gray-100 dark:hover:bg-gray-700 shadow-sm">
                     <tr>
                       <th className="text-center p-2 border-b dark:border-gray-700 w-12">
                         <input

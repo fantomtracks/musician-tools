@@ -109,9 +109,13 @@ export default function SongsSidebar(props: SongsSidebarProps) {
         </div>
       )}
       <div className={`${props.sidebarExpanded ? '' : 'lg:hidden'} p-4 space-y-3`}>
-          <div className="flex items-center justify-between mb-2">
+          {/* On mobile this row only ever holds "Clear all" (the title and «-collapse are
+              desktop-only), so hide it entirely when there's nothing to show — no ghost gap. */}
+          <div className={`${props.hasActiveFilters ? 'flex' : 'hidden'} lg:flex items-center justify-between mb-2`}>
             <div className="flex items-center gap-2">
-              <h3 className="text-sm font-semibold text-gray-800 dark:text-gray-100">Filters</h3>
+              {/* Redundant with the mobile "Filters" disclosure button; keep it only as the
+                  static sidebar title on desktop (>= lg). */}
+              <h3 className="hidden lg:block text-sm font-semibold text-gray-800 dark:text-gray-100">Filters</h3>
               {props.hasActiveFilters && (
                 <button
                   type="button"
