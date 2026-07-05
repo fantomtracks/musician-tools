@@ -14,6 +14,7 @@ const { User } = require('../models');
 const authEmails = require('../services/authEmails');
 const authTokenService = require('../services/authTokenService');
 const sessionService = require('../services/sessionService');
+const authFlows = require('../services/authFlows');
 const { CHECK_YOUR_INBOX } = require('../constants/messages');
 const controller = require('../controllers/usercontroller');
 
@@ -21,6 +22,9 @@ const mockRes = () => ({ status: jest.fn().mockReturnThis(), json: jest.fn() });
 const mockNext = () => jest.fn();
 
 beforeEach(() => jest.clearAllMocks());
+// Restore any jest.spyOn (e.g. the fire-and-forget tests) even if an assertion
+// throws before an inline mockRestore — keeps a spy from leaking into later tests.
+afterEach(() => jest.restoreAllMocks());
 
 describe('forgotPassword (story 7.10 — anti-enumeration)', () => {
   test('a non-existent email → generic 200, NO token, NO email', async () => {
@@ -48,6 +52,21 @@ describe('forgotPassword (story 7.10 — anti-enumeration)', () => {
     authEmails.sendPasswordResetEmail.mockRejectedValueOnce(new Error('resend down'));
     const res = mockRes();
     await controller.forgotPassword({ body: { email: 'ada@example.com' } }, res, mockNext());
+    expect(res.json).toHaveBeenCalledWith({ message: CHECK_YOUR_INBOX });
+  });
+
+  // Story 15.2 (anti-timing-oracle): the email send must NOT be awaited before
+  // responding, else the account-exists branch is measurably slower than the
+  // unknown one. issueAndSend never settles here — if it were awaited, res.json
+  // would never run and the test would hang.
+  test('does not await the email send before responding (fire-and-forget)', async () => {
+    User.findOne.mockResolvedValue({ uid: 'u1', email: 'ada@example.com' });
+    const spy = jest.spyOn(authFlows, 'issueAndSend').mockReturnValue(new Promise(() => {}));
+    const res = mockRes();
+
+    await controller.forgotPassword({ body: { email: 'ada@example.com' } }, res, mockNext());
+
+    expect(spy).toHaveBeenCalledWith('password_reset', { uid: 'u1', email: 'ada@example.com' });
     expect(res.json).toHaveBeenCalledWith({ message: CHECK_YOUR_INBOX });
   });
 });

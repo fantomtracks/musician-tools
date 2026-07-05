@@ -282,7 +282,12 @@ const resendVerificationPublic = async (req, res) => {
     if (typeof email === 'string' && email.trim()) {
       const user = await User.scope(null).findOne({ where: { email: email.trim() } });
       if (user && !user.emailVerified) {
-        await authFlows.issueAndSend('verify_email', { uid: user.uid, email: user.email });
+        // Fire-and-forget: do NOT await the email send before responding, so the
+        // existing-unverified branch isn't measurably slower than the unknown /
+        // already-verified branches — that latency gap was a timing oracle for
+        // account existence (story 15.2). issueAndSend is best-effort (it logs +
+        // swallows its own errors and never rejects), so `void` is safe here.
+        void authFlows.issueAndSend('verify_email', { uid: user.uid, email: user.email });
       }
     }
   } catch (err) {
@@ -303,7 +308,11 @@ const forgotPassword = async (req, res, next) => {
     if (trimmed) {
       const user = await User.findOne({ where: { email: trimmed } }); // citext, case-insensitive
       if (user) {
-        await authFlows.issueAndSend('password_reset', { uid: user.uid, email: user.email });
+        // Fire-and-forget: don't await the email send before responding, so the
+        // account-exists branch isn't measurably slower than the unknown one — that
+        // latency gap was a timing oracle despite the identical body (story 15.2).
+        // issueAndSend is best-effort (logs + swallows, never rejects) → `void` is safe.
+        void authFlows.issueAndSend('password_reset', { uid: user.uid, email: user.email });
       }
     }
     // Identical reply whether or not the account exists.
