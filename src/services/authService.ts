@@ -1,4 +1,5 @@
 import { getCsrfToken, clearCsrfToken } from './csrf';
+import { RateLimitError } from './rateLimit';
 
 export type User = {
   uid: string;
@@ -84,6 +85,12 @@ export const authService = {
       credentials: 'include',
       body: JSON.stringify({ login, password }),
     });
+    // A 429 from the login limiter (story 7.4) must read as "too many attempts",
+    // not as a credential error — detect it by status before touching the body
+    // (story 15.1). authService bypasses apiFetch, so this check lives here.
+    if (response.status === 429) {
+      throw new RateLimitError();
+    }
     if (!response.ok) {
       // Read the body once: a second response.json() on the same response throws
       // "body stream already read". Story 7.13: correct credentials on an

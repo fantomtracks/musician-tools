@@ -1,6 +1,7 @@
 import { useState } from 'react';
 import { useAuth } from '../contexts/AuthContext';
 import { verificationService } from '../services/verificationService';
+import { RateLimitError } from '../services/rateLimit';
 
 // Persistent soft-gate banner (story 7.9): shown to a logged-in user whose email
 // is not yet verified. Only when emailVerified === false (not undefined, so a
@@ -21,8 +22,10 @@ function VerifyEmailBanner() {
       setSending(true);
       await verificationService.resend(user.email);
       setMessage('Verification email sent — check your inbox.');
-    } catch {
-      setMessage('Could not send right now, please try again later.');
+    } catch (err) {
+      // This resend hits the same rate-limited endpoint (story 7.4) — surface the
+      // clear "too many attempts" copy instead of the generic fallback (story 15.1).
+      setMessage(err instanceof RateLimitError ? err.message : 'Could not send right now, please try again later.');
     } finally {
       setSending(false);
     }

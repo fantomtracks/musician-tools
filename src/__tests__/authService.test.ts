@@ -1,5 +1,6 @@
 import { authService } from '../services/authService';
 import { clearCsrfToken } from '../services/csrf';
+import { RateLimitError } from '../services/rateLimit';
 
 // Mutations first fetch the CSRF token (story 7.3), then hit the endpoint.
 function mockFetchWithCsrf(endpointResponse: unknown) {
@@ -55,6 +56,20 @@ describe('authService excluded from the 401 interceptor', () => {
       auth: false,
       needsVerification: true,
     });
+  });
+
+  test('a 429 throws RateLimitError, NOT a credential error (story 15.1)', async () => {
+    // The login limiter (story 7.4) replies 429 { message: 'Too Many Requests' }.
+    // It must map to the rate-limit copy, not "Login failed" — detected by status,
+    // and without touching the body (json must never be read on a 429).
+    const json = jest.fn().mockResolvedValue({ message: 'Too Many Requests' });
+    global.fetch = mockFetchWithCsrf({ ok: false, status: 429, json }) as unknown as typeof fetch;
+
+    const err = await authService.login('ada@example.com', 'pw').catch((e) => e);
+    expect(err).toBeInstanceOf(RateLimitError);
+    expect(err.message).toMatch(/too many attempts/i);
+    expect(err.message).not.toMatch(/login failed/i);
+    expect(json).not.toHaveBeenCalled(); // status-based detection, body untouched
   });
 
   test('a 403 WITHOUT that code throws a clean error (regression: body read only once)', async () => {

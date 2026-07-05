@@ -3,6 +3,7 @@ import { useNavigate, Link } from 'react-router-dom';
 
 import { useAuth } from '../contexts/AuthContext';
 import { verificationService } from '../services/verificationService';
+import { RateLimitError } from '../services/rateLimit';
 
 function LoginPage() {
   const [formData, setFormData] = useState({
@@ -10,6 +11,9 @@ function LoginPage() {
     password: '',
   });
   const [error, setError] = useState<string | null>(null);
+  // A rate-limit 429 (story 15.1) reads as "too many attempts", not a credential
+  // error — track it so the message renders amber (info), distinct from red errors.
+  const [rateLimited, setRateLimited] = useState(false);
   const [loading, setLoading] = useState(false);
   const [showPassword, setShowPassword] = useState(false);
   // Story 7.13: correct credentials on an unverified account → show a verify
@@ -28,6 +32,7 @@ function LoginPage() {
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     setError(null);
+    setRateLimited(false);
     setResendMessage(null);
     setNeedsVerification(false); // clear a prior "verify your email" banner on resubmit
 
@@ -40,7 +45,12 @@ function LoginPage() {
       }
       navigate('/songs');
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'Login failed');
+      if (err instanceof RateLimitError) {
+        setRateLimited(true);
+        setError(err.message);
+      } else {
+        setError(err instanceof Error ? err.message : 'Login failed');
+      }
     } finally {
       setLoading(false);
     }
@@ -52,8 +62,10 @@ function LoginPage() {
       setResending(true);
       await verificationService.resend(formData.login);
       setResendMessage('Verification email sent — check your inbox.');
-    } catch {
-      setResendMessage('Could not send right now, please try again later.');
+    } catch (err) {
+      // The resend endpoint is rate-limited too (story 7.4) — surface the clear
+      // "too many attempts" copy instead of the generic fallback (story 15.1).
+      setResendMessage(err instanceof RateLimitError ? err.message : 'Could not send right now, please try again later.');
     } finally {
       setResending(false);
     }
@@ -75,9 +87,15 @@ function LoginPage() {
           </div>
         </div>
 
-        {/* Error Message */}
+        {/* Error Message — a rate-limit 429 (story 15.1) shows amber (info: "try
+            again later"), visually distinct from the red of a credential error. */}
         {error && (
-          <div className="rounded-lg border border-red-200 bg-red-50 text-red-700 px-4 py-3 text-sm">
+          <div
+            className={rateLimited
+              ? 'rounded-lg border border-amber-200 bg-amber-50 text-amber-800 dark:border-amber-800 dark:bg-amber-900/40 dark:text-amber-200 px-4 py-3 text-sm'
+              : 'rounded-lg border border-red-200 bg-red-50 text-red-700 px-4 py-3 text-sm'}
+            role={rateLimited ? 'status' : undefined}
+          >
             {error}
           </div>
         )}

@@ -1,6 +1,7 @@
 import React, { useEffect, useState } from 'react';
 import { useAuth } from '../contexts/AuthContext';
 import { profileService, type Profile } from '../services/profileService';
+import { RateLimitError } from '../services/rateLimit';
 
 function ProfilePage() {
   const { patchUser } = useAuth();
@@ -17,6 +18,8 @@ function ProfilePage() {
   const [newEmail, setNewEmail] = useState('');
   const [emailMsg, setEmailMsg] = useState<string | null>(null);
   const [emailError, setEmailError] = useState<string | null>(null);
+  // A rate-limit 429 (story 15.1) renders amber (info), distinct from a red error.
+  const [emailRateLimited, setEmailRateLimited] = useState(false);
   const [savingEmail, setSavingEmail] = useState(false);
 
   // Password
@@ -24,6 +27,7 @@ function ProfilePage() {
   const [newPassword, setNewPassword] = useState('');
   const [confirmPassword, setConfirmPassword] = useState('');
   const [pwError, setPwError] = useState<string | null>(null);
+  const [pwRateLimited, setPwRateLimited] = useState(false);
   const [savingPw, setSavingPw] = useState(false);
 
   const showToast = (msg: string) => {
@@ -60,6 +64,7 @@ function ProfilePage() {
   const handleRequestEmailChange = async (e: React.FormEvent) => {
     e.preventDefault();
     setEmailError(null);
+    setEmailRateLimited(false);
     setEmailMsg(null);
     try {
       setSavingEmail(true);
@@ -68,7 +73,12 @@ function ProfilePage() {
       setEmailMsg('If that address is available, we sent a confirmation link to it. Your current email stays until you confirm.');
       setNewEmail('');
     } catch (err) {
-      setEmailError(err instanceof Error ? err.message : 'Failed to request the change');
+      if (err instanceof RateLimitError) {
+        setEmailRateLimited(true);
+        setEmailError(err.message);
+      } else {
+        setEmailError(err instanceof Error ? err.message : 'Failed to request the change');
+      }
     } finally {
       setSavingEmail(false);
     }
@@ -77,6 +87,7 @@ function ProfilePage() {
   const handleChangePassword = async (e: React.FormEvent) => {
     e.preventDefault();
     setPwError(null);
+    setPwRateLimited(false);
     if (newPassword.length < 10) {
       setPwError('New password must be at least 10 characters');
       return;
@@ -93,7 +104,12 @@ function ProfilePage() {
       setConfirmPassword('');
       showToast('Password changed — your other sessions were signed out');
     } catch (err) {
-      setPwError(err instanceof Error ? err.message : 'Failed to change password');
+      if (err instanceof RateLimitError) {
+        setPwRateLimited(true);
+        setPwError(err.message);
+      } else {
+        setPwError(err instanceof Error ? err.message : 'Failed to change password');
+      }
     } finally {
       setSavingPw(false);
     }
@@ -149,7 +165,7 @@ function ProfilePage() {
           </p>
         ) : (
           <form onSubmit={handleRequestEmailChange} className="space-y-3">
-            {emailError && <p className="text-sm text-red-600 dark:text-red-400">{emailError}</p>}
+            {emailError && <p className={emailRateLimited ? 'text-sm text-amber-700 dark:text-amber-300' : 'text-sm text-red-600 dark:text-red-400'} role={emailRateLimited ? 'status' : undefined}>{emailError}</p>}
             {emailMsg && <p className="text-sm text-green-700 dark:text-green-400">{emailMsg}</p>}
             <input
               className="input-base"
@@ -171,7 +187,7 @@ function ProfilePage() {
       <section className="space-y-3">
         <h2 className="text-lg font-semibold text-gray-900 dark:text-gray-100">Password</h2>
         <form onSubmit={handleChangePassword} className="space-y-3">
-          {pwError && <p className="text-sm text-red-600 dark:text-red-400">{pwError}</p>}
+          {pwError && <p className={pwRateLimited ? 'text-sm text-amber-700 dark:text-amber-300' : 'text-sm text-red-600 dark:text-red-400'} role={pwRateLimited ? 'status' : undefined}>{pwError}</p>}
           <input
             className="input-base"
             type="password"

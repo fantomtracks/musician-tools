@@ -11,6 +11,7 @@
 // Intentionally NOT used by authService: /auth/login returns 401 on bad
 // credentials and must show the login error, not redirect-loop.
 import { getCsrfToken } from './csrf';
+import { RateLimitError } from './rateLimit';
 
 const MUTATING_METHODS = new Set(['POST', 'PUT', 'PATCH', 'DELETE']);
 
@@ -46,6 +47,15 @@ export async function apiFetch(input: RequestInfo | URL, init?: RequestInit): Pr
     // tick before the full reload tears the document down — the exact dead-end
     // this story removes. The pending promise is reclaimed by the reload.
     return new Promise<Response>(() => { /* never settles: navigating to /login */ });
+  }
+
+  // A rate-limited auth endpoint (story 7.4 limiters) replies 429. Surface it as a
+  // typed error so callers show a clear "too many attempts" message instead of a
+  // generic failure (story 15.1). Detail-free: no RateLimit-*/Retry-After is read —
+  // only the status. Covers resend / forgot-password / change-password / change-email
+  // (all go through apiFetch); /auth/login uses raw fetch and checks 429 itself.
+  if (res.status === 429) {
+    throw new RateLimitError();
   }
 
   return res;

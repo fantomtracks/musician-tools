@@ -2,6 +2,7 @@ import React, { useState } from 'react';
 import { useNavigate, Link } from 'react-router-dom';
 import { useAuth } from '../contexts/AuthContext';
 import { verificationService } from '../services/verificationService';
+import { RateLimitError } from '../services/rateLimit';
 
 function RegisterPage() {
   const [formData, setFormData] = useState({
@@ -24,8 +25,10 @@ function RegisterPage() {
       setResending(true);
       await verificationService.resend(formData.email);
       setResendMessage('Verification email sent — check your inbox.');
-    } catch {
-      setResendMessage('Could not send right now, please try again later.');
+    } catch (err) {
+      // The resend endpoint is rate-limited (story 7.4) — surface the clear "too
+      // many attempts" copy instead of the generic fallback (story 15.1).
+      setResendMessage(err instanceof RateLimitError ? err.message : 'Could not send right now, please try again later.');
     } finally {
       setResending(false);
     }
