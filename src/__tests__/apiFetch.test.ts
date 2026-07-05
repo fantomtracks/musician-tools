@@ -1,5 +1,6 @@
 import { apiFetch } from '../services/apiFetch';
 import { clearCsrfToken } from '../services/csrf';
+import { RateLimitError } from '../services/rateLimit';
 
 // Flush pending microtasks/timers so the post-fetch interceptor body runs
 const flush = () => new Promise(resolve => setTimeout(resolve, 0));
@@ -73,6 +74,13 @@ describe('apiFetch — 401 interceptor', () => {
     expect(res).toBe(serverError);
     expect(assignMock).not.toHaveBeenCalled();
     expect(localStorage.getItem('user')).not.toBeNull();
+  });
+
+  test('a 429 throws a RateLimitError, not the raw response (story 15.1)', async () => {
+    global.fetch = jest.fn().mockResolvedValue({ status: 429, ok: false }) as unknown as typeof fetch;
+
+    await expect(apiFetch('/api/auth/forgot-password', { method: 'GET' })).rejects.toBeInstanceOf(RateLimitError);
+    expect(assignMock).not.toHaveBeenCalled(); // 429 is not a session-expiry 401
   });
 
   test('a network rejection propagates and does NOT redirect (AC3)', async () => {

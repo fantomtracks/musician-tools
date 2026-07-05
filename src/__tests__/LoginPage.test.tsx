@@ -3,6 +3,7 @@ import { MemoryRouter } from 'react-router-dom';
 import LoginPage from '../pages/LoginPage';
 import { useAuth } from '../contexts/AuthContext';
 import { verificationService } from '../services/verificationService';
+import { RateLimitError } from '../services/rateLimit';
 
 const mockNavigate = jest.fn();
 jest.mock('react-router-dom', () => ({
@@ -60,5 +61,20 @@ describe('LoginPage — unverified account branch (story 7.13)', () => {
     fillAndSubmit();
 
     await waitFor(() => expect(mockNavigate).toHaveBeenCalledWith('/songs'));
+  });
+});
+
+describe('LoginPage — rate-limit signal (story 15.1)', () => {
+  test('a 429 shows the "too many attempts" copy, not a credential error', async () => {
+    mockedUseAuth.mockReturnValue({ login: jest.fn().mockRejectedValue(new RateLimitError()) });
+
+    renderPage();
+    fillAndSubmit();
+
+    // The rate-limit copy surfaces...
+    await screen.findByText(/too many attempts/i);
+    // ...and it is NOT mislabelled as a login/credential failure.
+    expect(screen.queryByText(/login failed/i)).not.toBeInTheDocument();
+    expect(mockNavigate).not.toHaveBeenCalled();
   });
 });

@@ -1,6 +1,7 @@
 import React, { useState } from 'react';
 import { Link } from 'react-router-dom';
 import { passwordResetService } from '../services/passwordResetService';
+import { RateLimitError } from '../services/rateLimit';
 
 // Public, pre-auth (story 7.10). The response is intentionally generic — we never
 // reveal whether the email exists.
@@ -8,17 +9,25 @@ function ForgotPasswordPage() {
   const [email, setEmail] = useState('');
   const [submitted, setSubmitted] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  // A rate-limit 429 (story 15.1) renders amber (info), distinct from a red error.
+  const [rateLimited, setRateLimited] = useState(false);
   const [loading, setLoading] = useState(false);
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     setError(null);
+    setRateLimited(false);
     try {
       setLoading(true);
       await passwordResetService.requestReset(email);
       setSubmitted(true);
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'Something went wrong');
+      if (err instanceof RateLimitError) {
+        setRateLimited(true);
+        setError(err.message);
+      } else {
+        setError(err instanceof Error ? err.message : 'Something went wrong');
+      }
     } finally {
       setLoading(false);
     }
@@ -38,7 +47,7 @@ function ForgotPasswordPage() {
           </div>
         ) : (
           <form onSubmit={handleSubmit} className="space-y-4">
-            {error && <p className="text-sm text-red-600 dark:text-red-400">{error}</p>}
+            {error && <p className={rateLimited ? 'text-sm text-amber-700 dark:text-amber-300' : 'text-sm text-red-600 dark:text-red-400'} role={rateLimited ? 'status' : undefined}>{error}</p>}
             <input
               className="input-base"
               type="email"

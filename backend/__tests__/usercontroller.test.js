@@ -18,6 +18,7 @@ jest.mock('../services/authTokenService', () => ({ issueToken: jest.fn(async () 
 const { User, Topic } = require('../models');
 const authEmails = require('../services/authEmails');
 const authTokenService = require('../services/authTokenService');
+const authFlows = require('../services/authFlows');
 const controller = require('../controllers/usercontroller');
 const { FREE_PRACTICE_NAME } = require('../constants/topics');
 
@@ -34,6 +35,10 @@ function mockRes() {
 function mockNext() {
   return jest.fn();
 }
+
+// Restore any jest.spyOn (e.g. the fire-and-forget test) even if an assertion
+// throws before an inline mockRestore — keeps a spy from leaking into later tests.
+afterEach(() => jest.restoreAllMocks());
 
 // Session-fixation hardening: loginUser / verifyEmail call req.session.regenerate
 // before setting loggedIn/user. Simulate express-session's rotation: clear the
@@ -486,6 +491,22 @@ describe('usercontroller — email verification (story 7.9 + hard gate 7.13)', (
       const res = mockRes();
       await controller.resendVerificationPublic({ body: { email: 'ada@example.com' } }, res);
 
+      expect(res.json).toHaveBeenCalledWith({ success: true });
+    });
+
+    // Story 15.2 (anti-timing-oracle): the email send must NOT be awaited before
+    // responding, else the existing-unverified branch is measurably slower than the
+    // others. issueAndSend returns a promise that never settles here — if the
+    // controller awaited it, res.json below would never run and the test would hang.
+    test('does not await the email send before responding (fire-and-forget)', async () => {
+      const findOne = jest.fn().mockResolvedValue({ uid: 'u1', email: 'ada@example.com', emailVerified: false });
+      User.scope.mockReturnValue({ findOne });
+      const spy = jest.spyOn(authFlows, 'issueAndSend').mockReturnValue(new Promise(() => {}));
+      const res = mockRes();
+
+      await controller.resendVerificationPublic({ body: { email: 'ada@example.com' } }, res);
+
+      expect(spy).toHaveBeenCalledWith('verify_email', { uid: 'u1', email: 'ada@example.com' });
       expect(res.json).toHaveBeenCalledWith({ success: true });
     });
   });

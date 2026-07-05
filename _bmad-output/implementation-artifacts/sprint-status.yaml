@@ -35,7 +35,7 @@
 # - Dev moves story to 'review', then runs code-review (fresh context, different LLM recommended)
 
 generated: 2026-06-07
-last_updated: 2026-07-04  # Epic 14 : 4/4 stories done + QA manuelle passée (correctifs sur branche : full-width, D2 retirée, Search label, Filters dedup) ; epic-14 done, en attente merge main
+last_updated: 2026-07-05  # Epic 14 mergé main (v1.9.0) + rétro faite ; Epic 15 (signal UX rate-limit + anti-oracle) cadré et ajouté en backlog (epics.md § Epic 15) ; décision : rétro systématique désormais ; Epic 15 démarré → 15-1 done (review 3 couches OK, patch P1 appliqué, front 327✓) ; 15-2 done — fire-and-forget anti-timing sur resend+forgot, review 3 couches OK (patch P1 hygiène spy ; 2 résidus tranchés-clos, 0 deferred), back 255✓ ; EPIC 15 COMPLET (15-1+15-2 done) + rétro faite (epic-15-retro-2026-07-05.md) ; QA device 15.1 passée (amber light+dark OK) → gate levé, merge main débloqué
 project: musician-tools
 project_key: NOKEY
 tracking_system: file-system
@@ -142,8 +142,16 @@ development_status:
 
   # Epic 14: Confort mobile — Songlist + édition (issu deferred-work, cadré bmad-ux 2026-07-04 : ux-designs/ux-musician-tools-2026-07-04, DESIGN.md + EXPERIENCE.md status:final)
   # 4 stories largement indépendantes, exécution légère ; ordre reco 14-1→14-4 (quick-wins d'abord, cœur responsive ensuite). Breakpoints existants lg (1024) / sm (640), pas de nouveau seuil.
-  epic-14: done   # 4/4 stories done ; QA manuelle epic passée 2026-07-04 (correctifs sur feat/epic-14-mobile-comfort) ; en attente merge main (northwood)
+  epic-14: done   # 4/4 stories done ; QA manuelle epic passée 2026-07-04 (correctifs sur feat/epic-14-mobile-comfort) ; mergé main v1.9.0 (9594f61)
   14-1-favicon-produit: done                   # public/favicon.svg réplique le logo (carré dégradé brand→purple + croche blanche) remplace vite.svg ; review 3 couches OK (1 patch : git add asset non suivi) ; front 311✓ back 253✓
   14-2-header-overflow-non-connecte: done          # CTA retirés du header non-connecté → relayés dans HomePage ; connecté inchangé ; HomePage exporté+testé ; review 3 couches OK (0 patch, 1 defer couplage test) ; front 313✓ back 253✓
   14-3-songlist-responsive: done               # tableau cap 65vh scroll V+H + thead sticky (D2/D4) + min-w-0 + filtres disclosure « Filters · N » sous lg (D3) + rail desktop-only ; countActiveFilters extrait ; review 3 couches OK (5/5 ACs, 1 patch test, 1 defer sticky-th) ; front 323✓ back 253✓ ; visuel = QA manuelle epic
   14-4-songform-mobile: done                   # grilles méta grid-cols-1 sm:grid-cols-3 (D8) ; save-bar/picker audités (déjà conformes) ; review consolidée clean ; front 323✓ back 253✓ ; visuel = QA manuelle epic
+  epic-14-retrospective: done    # 2026-07-05 — epic-14-retro-2026-07-05.md ; leçons : décision UX à prouver sur device (D2 retirée en QA), QA manuelle = gate visuel, cadence rétro systématique désormais ; next epic pressenti = A5 signal UX rate-limit
+
+  # Epic 15: Signal UX rate-limit + anti-oracle (issu deferred-work A5 + résidu 7-13 rattaché ; cadrage verrouillé 2026-07-05 ; détail epics.md § Epic 15)
+  # 2 stories indépendantes ; sécu-sensible, exécution légère ; invariant transverse = detail-free (aucun Retry-After/fenêtre exposé). Ordre reco 15-1 (front) puis 15-2 (back), parallèle possible.
+  epic-15: in-progress
+  15-1-signal-ux-rate-limit: done          # front ; détecter le 429 par response.status (pas body.message) + message traduit distinct sur login/resend/forgot/change-pwd/change-email ; detail-free ; couvre NFR-S1
+  15-2-neutraliser-oracle-timing: done     # back ; égaliser la latence de resendVerificationPublic + forgotPassword (7-13 rattaché) ; corps de réponse uniformes préservés ; couvre NFR-S4
+  epic-15-retrospective: done    # 2026-07-05 — epic-15-retro-2026-07-05.md ; leçons : énumérer toutes les surfaces d'un endpoint au create-story (trou VerifyEmailBanner) + « résidu clos » ≠ deferred ; QA device 15.1 passée (amber light+dark OK) → gate levé, merge main débloqué (amber light/dark sur 5 points)

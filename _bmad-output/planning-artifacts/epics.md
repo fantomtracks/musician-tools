@@ -12,6 +12,9 @@ epic7:
 epic14:
   source: 'issu deferred-work (lot UX/UI mobile, option 1) — cadré bmad-ux 2026-07-04 (DESIGN.md + EXPERIENCE.md status:final)'
   added: 2026-07-04
+epic15:
+  source: 'issu deferred-work (A5 signal UX rate-limit, rétro Epic 7) + résidu 7-13 rattaché — cadrage verrouillé 2026-07-05'
+  added: 2026-07-05
 ---
 
 # musician-tools - Epic Breakdown
@@ -201,7 +204,10 @@ Auto-save de la fiche chanson (debounce + flush, `lastPlayed` exclu), statut « 
 ### Epic 14: Confort mobile — Songlist + édition (issu deferred-work, cadré bmad-ux 2026-07-04)
 Rendre l'app pleinement utilisable au téléphone (NFR3) : favicon produit, header non-connecté qui ne déborde plus, Songlist responsive (tableau scroll interne cap 65vh + en-tête sticky + filtres repliables + `min-w-0`/scroll horizontal), fiche d'édition lisible. Stories : 14.1 favicon, 14.2 header overflow non-connecté, 14.3 Songlist responsive, 14.4 SongForm mobile (toutes backlog). _Détail § Epic 14 ci-dessous._
 
-**Dépendances :** E1 → E2 → (E3 ∥ E4). Les epics 3 et 4 sont indépendants l'un de l'autre. E6 dépend d'E4 (pont Mark as Played). E5 est transverse ; E9 (confort UI, post-rétro) est autonome et se solde avant E7 ; E7 (compte + sécurité, hors-PRD) est autonome — ne dépend d'aucun épic PRD et n'en bloque aucun. E10–E14 (confort/dette post-rétro) sont de même autonomes, sans dépendance inter-epics, en exécution légère. Les NFR1-NFR6 transverses s'appliquent aux critères d'acceptation des stories concernées.
+### Epic 15: Signal UX rate-limit + anti-oracle (issu deferred-work, A5 + 7-13)
+Un user légitime rate-limité voit un message **clair et traduit** (« too many attempts ») au lieu du `Too Many Requests` brut confondu avec une erreur d'identifiants ; et la **latence de resend/forgot-password est égalisée** pour fermer l'oracle de timing résiduel — sans affaiblir l'anti-bruteforce ni rouvrir d'oracle d'énumération. Stories : 15.1 signal UX 429, 15.2 égalisation latence (backlog). **Couvre :** NFR-S1 (rate-limit) + NFR-S4 (anti-énumération). _Détail § Epic 15 ci-dessous._
+
+**Dépendances :** E1 → E2 → (E3 ∥ E4). Les epics 3 et 4 sont indépendants l'un de l'autre. E6 dépend d'E4 (pont Mark as Played). E5 est transverse ; E9 (confort UI, post-rétro) est autonome et se solde avant E7 ; E7 (compte + sécurité, hors-PRD) est autonome — ne dépend d'aucun épic PRD et n'en bloque aucun. E10–E15 (confort/dette/sécu post-rétro) sont de même autonomes, sans dépendance inter-epics, en exécution légère (E15 s'adosse à l'auth durcie d'E7 mais ne dépend d'aucun autre épic). Les NFR1-NFR6 et NFR-S1-S4 transverses s'appliquent aux critères d'acceptation des stories concernées.
 
 ## Epic 1: Ma bibliothèque de sujets de travail
 
@@ -1238,3 +1244,50 @@ So that je puisse corriger une méta sans zoomer.
 **Then** la **save-bar sticky** (13-1, `Songs.tsx:1815`) ne déborde pas (statut « Saving/Saved » tronque si besoin) et le **playlist picker** (`Songs.tsx:1917`) reste utilisable (dropdown déjà `overflow-y-auto`) — audit visuel, pas de régression de l'auto-save
 
 **And** dark mode ; UI en anglais ; suites front vertes. `[src/components/SongForm.tsx, src/pages/Songs.tsx]`
+
+## Epic 15: Signal UX rate-limit + anti-oracle
+
+_Ajouté 2026-07-05 — issu de la revue `deferred-work.md` (item A5 « signal UX du rate-limit légitime », rétro Epic 7) avec le résidu **7-13 « oracle de timing »** rattaché. Cadrage sécu verrouillé le 2026-07-05 (cf. deferred-work § À brainstormer). Epic **sécu-sensible**, exécution **légère**._
+
+**Objectif :** combler l'angle mort UX du rate-limit (A5) **et** fermer le résidu d'oracle de timing (7-13), **sans** affaiblir l'anti-bruteforce ni rouvrir d'oracle d'énumération de comptes. Couvre **NFR-S1** (rate-limit) et **NFR-S4** (anti-énumération).
+
+**Insight de cadrage :** améliorer le message `429` est du **pur UX sans coût sécu** — le `429` est déjà observable et ne révèle pas l'existence d'un compte ; le seul secret à garder est `Retry-After`/la fenêtre exacte (qui aiderait à **cadencer** un brute-force). Aujourd'hui `createError(429)` renvoie `{message:"Too Many Requests"}` qui **remonte déjà brut** à l'écran (`authService` fait `throw new Error(body.message)`), dans le même emplacement d'erreur que « Invalid credentials ».
+
+**Découpage :** 2 stories largement **indépendantes** (15.1 front UX, 15.2 back latence), livrables séparément. **Invariant transverse : detail-free** (aucun `Retry-After`/fenêtre/compte à rebours exposé).
+
+### Story 15.1: Signal UX du rate-limit (429 lisible et distinct)
+
+As a utilisateur légitime rate-limité (login, resend, forgot-password, change-password, change-email),
+I want un message clair et traduit m'indiquant que j'ai fait trop de tentatives,
+So that je ne le confonde pas avec une erreur d'identifiants ou une erreur générique.
+
+**Acceptance Criteria:**
+
+**Given** un `429` renvoyé par un endpoint d'auth rate-limité
+**When** le front le reçoit
+**Then** il le détecte par `response.status` (**pas** par `body.message`) et affiche un message localisé clair (« Too many attempts. Please try again in a few minutes. ») **visuellement distinct** des erreurs de champ / d'identifiants
+
+**Given** la posture anti-oracle (7.4)
+**Then** le message reste **detail-free** : formulation **qualitative** seule — aucun `Retry-After`, aucune fenêtre exacte, aucun compte à rebours ; aucun header `RateLimit-*` consommé
+
+**Given** les 5 points d'échec — login · verify-email/resend · forgot-password · change-password · change-email
+**Then** chacun surface le message **inline au point d'échec** (pas de report post-auth)
+
+**And** UI en anglais ; dark mode ; suites front vertes ; **un test** vérifie que la branche `429` mappe vers la copie « rate-limit » et **non** vers la copie « erreur d'identifiants ». `[src/services/authService.ts, src/services/apiFetch.ts, src/pages/{Login,ForgotPassword,Register,VerifyEmail}Page.tsx + page Profil (change email / mot de passe)]`
+
+### Story 15.2: Neutraliser l'oracle de timing (resend + forgot-password)
+
+As a garant de la posture sécurité du système,
+I want une latence de réponse uniforme entre les branches compte-existant et inexistant,
+So that le timing ne distingue plus les cas malgré un corps de réponse déjà uniforme.
+
+**Acceptance Criteria:**
+
+**Given** `resendVerificationPublic`
+**When** il est appelé pour un compte existant-non-vérifié vs un compte inconnu/déjà vérifié
+**Then** l'envoi d'email ne rend plus la branche existante plus lente que les autres (fire-and-forget, **ou** `await` sur **toutes** les branches) → la réponse revient en ~temps uniforme
+
+**Given** `forgotPassword` (même résidu accepté, même famille anti-énumération)
+**Then** la même égalisation de latence est appliquée
+
+**And** les corps de réponse restent **uniformes** (`CHECK_YOUR_INBOX` / générique — **zéro régression NFR-S4**) ; suite back verte ; **un test** documente l'approche (structurel : l'envoi n'est pas awaité avant `res.json`, ou l'est sur toutes les branches). `[backend/controllers/usercontroller.js resendVerificationPublic ~260-279 + forgotPassword ~300-313]`
