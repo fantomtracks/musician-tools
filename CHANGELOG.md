@@ -12,6 +12,14 @@ project adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+## [1.10.0] — 2026-07-05
+
+### Fixed
+- **A clear message when you've tried too many times** — after too many attempts at signing in, resetting your password, resending a confirmation email, or changing your password or email, you now get a plain **"Too many attempts. Please try again in a few minutes."** instead of a cryptic error that looked like a wrong password.
+
+### Security
+- Hardened the account flows against timing analysis — password reset and confirmation-email resend now answer in the same time whether or not an account exists, so the response can't hint at which emails are registered. Nothing changes on screen.
+
 ## [1.9.0] — 2026-07-04
 
 ### Changed
