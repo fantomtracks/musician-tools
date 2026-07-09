@@ -47,6 +47,8 @@ export const instrumentTuningsMap: Record<string, TuningOption[]> = {
     { value: 'BEADG', label: 'BEADG (Standard 5-string)' },
     { value: 'BEADGC', label: 'BEADGC (Standard 6-string)' },
     { value: 'DADG', label: 'DADG (Drop D 4-string)' },
+    { value: 'EbAbDbGb', label: 'EbAbDbGb (Half-step down 4-string)' },
+    { value: 'BbEbAbDbGb', label: 'BbEbAbDbGb (Half-step down 5-string)' },
     { value: 'Other', label: 'Other' },
   ],
   'Ukulele': [

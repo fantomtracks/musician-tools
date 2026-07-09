@@ -1,6 +1,6 @@
 import { render, screen, fireEvent } from '@testing-library/react';
 import SongFormInstruments from '../components/SongFormInstruments';
-import { instrumentTechniquesMap } from '../constants/instrumentTypes';
+import { instrumentTechniquesMap, instrumentTuningsMap } from '../constants/instrumentTypes';
 
 const baseProps = {
   currentInstruments: ['Guitar'],
@@ -76,4 +76,17 @@ test('tuning select calls setter', () => {
   if (!select) throw new Error('select not found');
   fireEvent.change(select, { target: { value: 'DADGBE' } });
   expect(props.onSetInstrumentTuning).toHaveBeenCalledWith('Guitar', 'DADGBE');
+});
+
+test('Bass tunings include the half-step-down 4- and 5-string options (16.2)', () => {
+  const bass = instrumentTuningsMap['Bass'];
+  const values = bass.map(t => t.value);
+  expect(values).toContain('EbAbDbGb');
+  expect(values).toContain('BbEbAbDbGb');
+  // labels are user-facing (English) and disambiguate the string count
+  expect(bass.find(t => t.value === 'EbAbDbGb')?.label).toBe('EbAbDbGb (Half-step down 4-string)');
+  expect(bass.find(t => t.value === 'BbEbAbDbGb')?.label).toBe('BbEbAbDbGb (Half-step down 5-string)');
+  // placed after Drop D, before Other (standards → altered → Other)
+  expect(values.indexOf('EbAbDbGb')).toBeGreaterThan(values.indexOf('DADG'));
+  expect(values.indexOf('BbEbAbDbGb')).toBeLessThan(values.indexOf('Other'));
 });
