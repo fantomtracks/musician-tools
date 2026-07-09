@@ -12,6 +12,14 @@ project adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+## [1.11.0] — 2026-07-09
+
+### Fixed
+- **No more duplicate artists from a stray space** — a trailing space when typing an artist, album or title no longer splits one entry into two in your filters and suggestions. Existing duplicates in your library are cleaned up automatically.
+
+### Added
+- **Half-step-down tunings for bass** — the bass now offers **EbAbDbGb** (4-string) and **BbEbAbDbGb** (5-string), matching what the guitar already had.
+
 ## [1.10.0] — 2026-07-05
 
 ### Fixed

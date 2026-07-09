@@ -155,6 +155,80 @@ describe('songcontroller', () => {
     expect(update2.mock.calls[0][0].durationSeconds).toBe(420);
   });
 
+  describe('16.1 — trim title/artist/album (dedup)', () => {
+    test('createSong trims title, artist and album', async () => {
+      await controller.createSong(
+        { session: { user: 'user-1' }, body: { title: '  Thriller  ', artist: '  michael jackson  ', album: '  Thriller  ' } },
+        mockRes(),
+        mockNext()
+      );
+      const arg = Song.create.mock.calls[0][0];
+      expect(arg.title).toBe('Thriller');
+      expect(arg.artist).toBe('michael jackson');
+      expect(arg.album).toBe('Thriller');
+    });
+
+    test('createSong collapses whitespace-only artist/album to null', async () => {
+      await controller.createSong(
+        { session: { user: 'user-1' }, body: { title: 'Solo', artist: '   ', album: '' } },
+        mockRes(),
+        mockNext()
+      );
+      const arg = Song.create.mock.calls[0][0];
+      expect(arg.artist).toBeNull();
+      expect(arg.album).toBeNull();
+    });
+
+    test('createSong with a whitespace-only title → 400, not persisted', async () => {
+      const next = mockNext();
+      await controller.createSong({ session: { user: 'user-1' }, body: { title: '   ' } }, mockRes(), next);
+      expect(next.mock.calls[0][0].status).toBe(400);
+      expect(Song.create).not.toHaveBeenCalled();
+    });
+
+    test('updateSong trims artist; an absent field leaves it untouched; a whitespace title keeps the existing one', async () => {
+      const update = jest.fn();
+      Song.findOne.mockResolvedValue({ userUid: 'user-1', title: 'Old Title', artist: 'old artist', update });
+      await controller.updateSong(
+        { params: { uid: '55555555-5555-4555-8555-555555555555' }, session: { user: 'user-1' }, body: { artist: '  bowie  ', title: '   ' } },
+        mockRes(),
+        mockNext()
+      );
+      const arg = update.mock.calls[0][0];
+      expect(arg.artist).toBe('bowie');      // trimmed
+      expect(arg.title).toBe('Old Title');   // whitespace-only title → keep existing (no 400, no blank)
+
+      const update2 = jest.fn();
+      Song.findOne.mockResolvedValue({ userUid: 'user-1', artist: 'kept artist', update: update2 });
+      await controller.updateSong(
+        { params: { uid: '55555555-5555-4555-8555-555555555555' }, session: { user: 'user-1' }, body: { title: 'Renamed' } },
+        mockRes(),
+        mockNext()
+      );
+      expect(update2.mock.calls[0][0].artist).toBe('kept artist'); // artist absent → untouched
+    });
+
+    test('updateSong trims album and title', async () => {
+      const update = jest.fn();
+      Song.findOne.mockResolvedValue({ userUid: 'user-1', update });
+      await controller.updateSong(
+        { params: { uid: '55555555-5555-4555-8555-555555555555' }, session: { user: 'user-1' }, body: { title: '  Real Title  ', album: '  Off the Wall  ' } },
+        mockRes(),
+        mockNext()
+      );
+      const arg = update.mock.calls[0][0];
+      expect(arg.title).toBe('Real Title');
+      expect(arg.album).toBe('Off the Wall');
+    });
+
+    test('createSong does not coerce a non-string title (0 → 400, not "0")', async () => {
+      const next = mockNext();
+      await controller.createSong({ session: { user: 'user-1' }, body: { title: 0 } }, mockRes(), next);
+      expect(next.mock.calls[0][0].status).toBe(400);
+      expect(Song.create).not.toHaveBeenCalled();
+    });
+  });
+
   describe('markSongPlayed (4.1 — feeds the journal)', () => {
     function markReq(body) {
       return { params: { uid: '55555555-5555-4555-8555-555555555555' }, session: { user: 'user-1' }, body };
