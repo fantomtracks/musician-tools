@@ -56,6 +56,21 @@ const normalizeLanguage = (value) => {
     .join(' ');
 };
 
+// Trim a free-text field before persisting (title/artist/album). undefined =
+// field absent from the payload -> leave it untouched on update. Whitespace-only
+// collapses to null so a stray trailing space never becomes a distinct "empty"
+// value in the suggestion/filter lists. Mirrors normalizeLanguage's contract.
+const normalizeText = (value) => {
+  if (value === undefined) return undefined;
+  if (value === null) return null;
+  // Non-string (number/boolean/object/array): leave it as-is so the caller's
+  // prior semantics hold (e.g. a numeric/falsy title still fails the required
+  // check) instead of coercing it into "0"/"false"/"[object Object]".
+  if (typeof value !== 'string') return value;
+  const trimmed = value.trim();
+  return trimmed === '' ? null : trimmed;
+};
+
 // GET all songs for logged-in user
 const getAllSongs = async (req, res, next) => {
   try {
@@ -109,9 +124,16 @@ const createSong = async (req, res, next) => {
 
     const { title, bpm, durationSeconds, key, capo, notes, instrument, artist, album, language, genre, pitchStandard, instrumentTuning, technique, instrumentLinks, instrumentDifficulty, myInstrumentUid, lastPlayed, streamingLinks, timeSignature, mode } = req.body || {};
 
-    if (!title) {
+    const normalizedTitle = normalizeText(title);
+
+    // Trim before the required check so a whitespace-only title is a 400, not a
+    // song stored with a stray-space title (title is NOT NULL).
+    if (!normalizedTitle) {
       return next(createError(400, 'Title is required'));
     }
+
+    const normalizedArtist = normalizeText(artist);
+    const normalizedAlbum = normalizeText(album);
 
     const normalizedCapo = normalizeCapo(capo);
 
@@ -121,7 +143,7 @@ const createSong = async (req, res, next) => {
 
     const song = await Song.create({
       userUid: userId,
-      title,
+      title: normalizedTitle,
       bpm: bpm !== undefined ? bpm : null,
       durationSeconds: normalizedDuration !== undefined ? normalizedDuration : null,
       key,
@@ -131,8 +153,8 @@ const createSong = async (req, res, next) => {
       instrumentLinks,
       instrumentDifficulty,
       instrumentTuning,
-      artist,
-      album,
+      artist: normalizedArtist !== undefined ? normalizedArtist : null,
+      album: normalizedAlbum !== undefined ? normalizedAlbum : null,
       language: normalizedLanguage !== undefined ? normalizedLanguage : null,
       genre,
       pitchStandard,
@@ -170,6 +192,10 @@ const updateSong = async (req, res, next) => {
 
     const { title, bpm, durationSeconds, key, capo, notes, instrument, artist, album, language, genre, pitchStandard, instrumentTuning, technique, instrumentLinks, instrumentDifficulty, myInstrumentUid, lastPlayed, streamingLinks, timeSignature, mode } = req.body || {};
 
+    const normalizedTitle = normalizeText(title);
+    const normalizedArtist = normalizeText(artist);
+    const normalizedAlbum = normalizeText(album);
+
     const normalizedCapo = normalizeCapo(capo);
 
     const normalizedDuration = normalizeDurationSeconds(durationSeconds);
@@ -177,15 +203,18 @@ const updateSong = async (req, res, next) => {
     const normalizedLanguage = normalizeLanguage(language);
 
     await song.update({
-      title: title || song.title,
+      // normalizeText -> undefined (absent) / null (whitespace-only) / trimmed
+      // string. `||` keeps the existing title for both undefined and null,
+      // preserving the old `title || song.title` semantics on the trimmed value.
+      title: normalizedTitle || song.title,
       bpm: bpm !== undefined ? bpm : song.bpm,
       durationSeconds: normalizedDuration !== undefined ? normalizedDuration : song.durationSeconds,
       key: key !== undefined ? key : song.key,
       capo: normalizedCapo !== undefined ? normalizedCapo : song.capo,
       notes: notes !== undefined ? notes : song.notes,
       instrument: instrument !== undefined ? instrument : song.instrument,
-      artist: artist !== undefined ? artist : song.artist,
-      album: album !== undefined ? album : song.album,
+      artist: normalizedArtist !== undefined ? normalizedArtist : song.artist,
+      album: normalizedAlbum !== undefined ? normalizedAlbum : song.album,
       language: normalizedLanguage !== undefined ? normalizedLanguage : song.language,
       genre: genre !== undefined ? genre : song.genre,
       pitchStandard: pitchStandard !== undefined ? pitchStandard : song.pitchStandard,

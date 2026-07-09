@@ -15,6 +15,9 @@ epic14:
 epic15:
   source: 'issu deferred-work (A5 signal UX rate-limit, rétro Epic 7) + résidu 7-13 rattaché — cadrage verrouillé 2026-07-05'
   added: 2026-07-05
+epic16:
+  source: 'issu deferred-work § À brainstormer (bug prod trim artiste + quick-win tuning basse) — cadré 2026-07-09 ; auto-création SongForm volontairement EXCLUE (epic dédiée après brainstorm)'
+  added: 2026-07-09
 ---
 
 # musician-tools - Epic Breakdown
@@ -206,6 +209,9 @@ Rendre l'app pleinement utilisable au téléphone (NFR3) : favicon produit, head
 
 ### Epic 15: Signal UX rate-limit + anti-oracle (issu deferred-work, A5 + 7-13)
 Un user légitime rate-limité voit un message **clair et traduit** (« too many attempts ») au lieu du `Too Many Requests` brut confondu avec une erreur d'identifiants ; et la **latence de resend/forgot-password est égalisée** pour fermer l'oracle de timing résiduel — sans affaiblir l'anti-bruteforce ni rouvrir d'oracle d'énumération. Stories : 15.1 signal UX 429, 15.2 égalisation latence (backlog). **Couvre :** NFR-S1 (rate-limit) + NFR-S4 (anti-énumération). _Détail § Epic 15 ci-dessous._
+
+### Epic 16: Fix prod doublons artiste + confort tunings (issu deferred-work § À brainstormer)
+Deux items indépendants sortis de la revue deferred-work : un **vrai bug prod** — les champs `artist`/`album`/`title` sont stockés verbatim sans `.trim()`, donc « michael jackson » vs « michael jackson　» créent deux artistes distincts dans les suggestions/filtres (fix saisie + migration one-off de nettoyage) — et un **quick-win** — ajouter le tuning « Half-step down » manquant pour la basse (4 et 5 cordes). Stories : 16.1 trim + migration cleanup, 16.2 tuning basse demi-ton (backlog). _L'auto-création SongForm (retrait du bouton `Add`) est **volontairement exclue** : design-avant-code, epic dédiée après brainstorm — cf. deferred-work § À brainstormer. Détail § Epic 16 ci-dessous._
 
 **Dépendances :** E1 → E2 → (E3 ∥ E4). Les epics 3 et 4 sont indépendants l'un de l'autre. E6 dépend d'E4 (pont Mark as Played). E5 est transverse ; E9 (confort UI, post-rétro) est autonome et se solde avant E7 ; E7 (compte + sécurité, hors-PRD) est autonome — ne dépend d'aucun épic PRD et n'en bloque aucun. E10–E15 (confort/dette/sécu post-rétro) sont de même autonomes, sans dépendance inter-epics, en exécution légère (E15 s'adosse à l'auth durcie d'E7 mais ne dépend d'aucun autre épic). Les NFR1-NFR6 et NFR-S1-S4 transverses s'appliquent aux critères d'acceptation des stories concernées.
 
@@ -1291,3 +1297,47 @@ So that le timing ne distingue plus les cas malgré un corps de réponse déjà 
 **Then** la même égalisation de latence est appliquée
 
 **And** les corps de réponse restent **uniformes** (`CHECK_YOUR_INBOX` / générique — **zéro régression NFR-S4**) ; suite back verte ; **un test** documente l'approche (structurel : l'envoi n'est pas awaité avant `res.json`, ou l'est sur toutes les branches). `[backend/controllers/usercontroller.js resendVerificationPublic ~260-279 + forgotPassword ~300-313]`
+
+## Epic 16: Fix prod doublons artiste + confort tunings
+
+_Ajouté 2026-07-09 — issu de la revue `deferred-work.md` (§ À brainstormer) : un bug prod signalé par northwood (2026-07-05) + un quick-win tuning. Epic **fourre-tout léger** (2 items indépendants, sans lien fonctionnel), exécution **légère**. L'auto-création SongForm relevée dans la même passe est **volontairement exclue** (design-avant-code → epic dédiée après brainstorm)._
+
+**Objectif :** solder le **bug de doublons d'artistes en prod** (saisie non trimmée) — saisie **et** données existantes — et combler un **tuning basse manquant**. Aucun FR/NFR du PRD ; confort + hygiène de données.
+
+**Découpage :** 2 stories **totalement indépendantes**, livrables séparément. Ordre recommandé 16.1 (le bug prod d'abord) → 16.2 (quick-win). ⚠️ 16.1 embarque une **migration** → part en prod, idempotente et testée en local avant merge (project-context § migrations).
+
+### Story 16.1: Trim artiste/album/titre + migration de nettoyage des doublons
+
+As a musicien qui saisit ses chansons,
+I want que les espaces parasites en début/fin de nom d'artiste (ou album/titre) soient ignorés,
+So that « michael jackson » et « michael jackson　» ne créent plus deux artistes distincts dans mes suggestions et mes filtres.
+
+**Contexte :** `artist`/`album`/`title` sont stockés **verbatim** depuis `req.body` (`songcontroller.js` createSong ~110-134 / updateSong ~171-187), contrairement à `language`/`instrumentType` qui passent par un helper de trim. Un espace final suffit à créer un « distinct » supplémentaire (l'artiste est une string libre par chanson — pas de FK, trimmer suffit à collapser).
+
+**Acceptance Criteria:**
+
+**Given** la création ou la mise à jour d'une chanson (volet **saisie**)
+**When** `artist`, `album` ou `title` arrivent avec des espaces en début/fin
+**Then** ils sont **trimmés côté serveur** avant persistance (miroir du traitement `language`) ; une valeur qui n'est plus qu'espaces est traitée comme les autres champs vides (chaîne vide / `null` selon la convention existante du champ) ; `title` reste requis après trim (un titre tout-espaces → même 400 que titre vide)
+
+**Given** les données **déjà en prod** (volet **données existantes**)
+**When** la migration de nettoyage s'exécute
+**Then** une migration **idempotente** one-off collapse les doublons déjà présents : `UPDATE "Songs" SET artist = TRIM(artist) WHERE artist <> TRIM(artist)` (idem `album`, `title`) ; relançable sans effet de bord (le `WHERE` la rend no-op au 2e passage) ; testée en local (`make migrate`) avant tout merge
+
+**And** UI/commentaires en anglais ; pattern contrôleur inchangé (ownership/scoping) ; suite back verte (le trim `artist`/`album`/`title` couvert par un test create/update) ; **zéro** merge FK — l'artiste restant une string libre, trimmer suffit. `[backend/controllers/songcontroller.js createSong ~110-134 / updateSong ~171-187, nouvelle migration backend/migrations/]`
+
+### Story 16.2: Tuning basse « Half-step down » (4 et 5 cordes)
+
+As a bassiste qui accorde un demi-ton plus bas,
+I want pouvoir sélectionner le tuning `EbAbDbGb` (et `BbEbAbDbGb` en 5 cordes) sur mes chansons,
+So that j'aie la parité avec la guitare (qui a déjà son demi-ton) et que mon accordage réel soit renseignable.
+
+**Contexte :** `instrumentTuningsMap.Bass` n'expose aujourd'hui que EADG / BEADG / BEADGC / DADG ; la guitare a déjà `EbAbDbGbBbEb (Half-step down)`. Pur ajout d'options d'affichage dans une liste curée — **aucun impact modèle, aucune migration** (`instrumentTuning` est une string libre).
+
+**Acceptance Criteria:**
+
+**Given** le sélecteur de tuning d'une chanson en **Bass**
+**When** j'ouvre la liste des accordages
+**Then** deux entrées « Half-step down » sont disponibles : `{ value: 'EbAbDbGb', label: 'EbAbDbGb (Half-step down 4-string)' }` et `{ value: 'BbEbAbDbGb', label: 'BbEbAbDbGb (Half-step down 5-string)' }`, placées de façon cohérente avec l'ordre existant du bloc Bass
+
+**And** libellés en anglais, alignés sur le style des entrées existantes ; aucun autre instrument touché ; aucune migration ni changement de modèle ; suites vertes (typecheck front inclus). `[src/constants/instrumentTypes.ts bloc Bass ~45-51]`

@@ -1,5 +1,5 @@
 # generated: 2026-06-07
-# last_updated: 2026-06-21
+# last_updated: 2026-07-09
 # project: musician-tools
 # project_key: NOKEY
 # tracking_system: file-system
@@ -35,7 +35,7 @@
 # - Dev moves story to 'review', then runs code-review (fresh context, different LLM recommended)
 
 generated: 2026-06-07
-last_updated: 2026-07-05  # Epic 14 mergé main (v1.9.0) + rétro faite ; Epic 15 (signal UX rate-limit + anti-oracle) cadré et ajouté en backlog (epics.md § Epic 15) ; décision : rétro systématique désormais ; Epic 15 démarré → 15-1 done (review 3 couches OK, patch P1 appliqué, front 327✓) ; 15-2 done — fire-and-forget anti-timing sur resend+forgot, review 3 couches OK (patch P1 hygiène spy ; 2 résidus tranchés-clos, 0 deferred), back 255✓ ; EPIC 15 COMPLET (15-1+15-2 done) + rétro faite (epic-15-retro-2026-07-05.md) ; QA device 15.1 passée (amber light+dark OK) → gate levé, merge main débloqué
+last_updated: 2026-07-09  # Epic 15 basculé done (mergé main v1.10.0) ; Epic 16 « fix prod doublons artiste + confort tunings » cadré (create-epics 2026-07-09) → 16-1 trim+migration + 16-2 tuning basse en backlog ; auto-création SongForm EXCLUE (design-avant-code, epic dédiée) ; Epic 16 démarré → 16-1 create-story → dev-story → code review 3 couches (1 décision align trim JS/SQL + 2 patches appliqués, 1 defer) → 16-1 DONE (back 261✓ front 327✓ lint✓). Reste 16-2 tuning basse. --- Historique : Epic 14 mergé main (v1.9.0) + rétro faite ; Epic 15 (signal UX rate-limit + anti-oracle) cadré et ajouté en backlog (epics.md § Epic 15) ; décision : rétro systématique désormais ; Epic 15 démarré → 15-1 done (review 3 couches OK, patch P1 appliqué, front 327✓) ; 15-2 done — fire-and-forget anti-timing sur resend+forgot, review 3 couches OK (patch P1 hygiène spy ; 2 résidus tranchés-clos, 0 deferred), back 255✓ ; EPIC 15 COMPLET (15-1+15-2 done) + rétro faite (epic-15-retro-2026-07-05.md) ; QA device 15.1 passée (amber light+dark OK) → gate levé, merge main débloqué
 project: musician-tools
 project_key: NOKEY
 tracking_system: file-system
@@ -151,7 +151,14 @@ development_status:
 
   # Epic 15: Signal UX rate-limit + anti-oracle (issu deferred-work A5 + résidu 7-13 rattaché ; cadrage verrouillé 2026-07-05 ; détail epics.md § Epic 15)
   # 2 stories indépendantes ; sécu-sensible, exécution légère ; invariant transverse = detail-free (aucun Retry-After/fenêtre exposé). Ordre reco 15-1 (front) puis 15-2 (back), parallèle possible.
-  epic-15: in-progress
+  epic-15: done    # 2/2 stories done + rétro faite ; mergé main v1.10.0
   15-1-signal-ux-rate-limit: done          # front ; détecter le 429 par response.status (pas body.message) + message traduit distinct sur login/resend/forgot/change-pwd/change-email ; detail-free ; couvre NFR-S1
   15-2-neutraliser-oracle-timing: done     # back ; égaliser la latence de resendVerificationPublic + forgotPassword (7-13 rattaché) ; corps de réponse uniformes préservés ; couvre NFR-S4
   epic-15-retrospective: done    # 2026-07-05 — epic-15-retro-2026-07-05.md ; leçons : énumérer toutes les surfaces d'un endpoint au create-story (trou VerifyEmailBanner) + « résidu clos » ≠ deferred ; QA device 15.1 passée (amber light+dark OK) → gate levé, merge main débloqué (amber light/dark sur 5 points)
+
+  # Epic 16: Fix prod doublons artiste + confort tunings (issu deferred-work § À brainstormer ; cadré 2026-07-09)
+  # 2 stories indépendantes ; ordre reco 16-1 (bug prod d'abord) → 16-2 (quick-win). L'auto-création SongForm EXCLUE (design-avant-code → epic dédiée après brainstorm).
+  epic-16: in-progress
+  16-1-trim-artiste-migration-cleanup: done     # back ; trim title/artist/album (helper normalizeText) + migration 20260709000000 (btrim NBSP/tab, NULLIF artist/album) ; review 3 couches OK (9/9 ACs, 1 décision + 2 patches appliqués : align JS/SQL trim, garde non-string, tests ; 1 defer titre-vide pré-existant) ; back 261✓ front 327✓ lint✓ ; ⚠️ migration part en prod au merge
+  16-2-tuning-basse-demi-ton: backlog              # front ; ajouter EbAbDbGb (4c) + BbEbAbDbGb (5c) « Half-step down » au bloc Bass ; quick-win, aucun modèle/migration
+  epic-16-retrospective: optional
