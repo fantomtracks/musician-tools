@@ -1,4 +1,5 @@
 const { Song, SongPlay, PracticeSession, SessionItem, Instrument, sequelize } = require('../models');
+const { Op, fn, col, where: whereFn } = require('sequelize');
 const createError = require('http-errors');
 const logger = require('../logger');
 const { fetchSongMetadata } = require('../services/songMetadataService');
@@ -71,6 +72,37 @@ const normalizeText = (value) => {
   return trimmed === '' ? null : trimmed;
 };
 
+// Story 17.1: look up the user's existing song that collides with (title, artist)
+// on the SAME folded key as the unique index — lower(title) + COALESCE(lower(artist), '').
+// Used to enrich the 409 body so the front (17.2) can point at the existing song.
+// Scoped to userUid -> no cross-user existence oracle. title/artist passed in are
+// already trimmed (normalizeText). excludeUid skips the row being edited (update).
+function findExistingByTitleArtist(userUid, title, artist, excludeUid) {
+  const foldedTitle = whereFn(fn('lower', col('title')), String(title).toLowerCase());
+  const foldedArtist = whereFn(
+    fn('coalesce', fn('lower', col('artist')), ''),
+    artist ? String(artist).toLowerCase() : ''
+  );
+  const and = [{ userUid }, foldedTitle, foldedArtist];
+  if (excludeUid) and.push({ uid: { [Op.ne]: excludeUid } });
+  return Song.findOne({ where: { [Op.and]: and } });
+}
+
+// Story 17.1: map a unique-constraint violation (23505 -> SequelizeUniqueConstraintError,
+// from the functional index songs_user_uid_title_artist_ci) to a typed 409 the front
+// can parse, best-effort attaching the existing song. Never throws (a failed lookup
+// still yields the 409 with song: null). Returns true if it handled the error.
+async function respondDuplicateSong(res, error, userUid, title, artist, excludeUid) {
+  if (!error || error.name !== 'SequelizeUniqueConstraintError') return false;
+  const existing = await findExistingByTitleArtist(userUid, title, artist, excludeUid).catch(() => null);
+  res.status(409).json({
+    error: 'duplicate_song',
+    message: 'A song with this title and artist already exists',
+    song: existing,
+  });
+  return true;
+}
+
 // GET all songs for logged-in user
 const getAllSongs = async (req, res, next) => {
   try {
@@ -116,6 +148,9 @@ const getSong = async (req, res, next) => {
 
 // POST create new song
 const createSong = async (req, res, next) => {
+  // Hoisted so the catch can map a duplicate-key error to a typed 409 (story 17.1).
+  let normalizedTitle;
+  let normalizedArtist;
   try {
     const userId = req.session.user;
     if (!userId) {
@@ -124,7 +159,7 @@ const createSong = async (req, res, next) => {
 
     const { title, bpm, durationSeconds, key, capo, notes, instrument, artist, album, language, genre, pitchStandard, instrumentTuning, technique, instrumentLinks, instrumentDifficulty, myInstrumentUid, lastPlayed, streamingLinks, timeSignature, mode } = req.body || {};
 
-    const normalizedTitle = normalizeText(title);
+    normalizedTitle = normalizeText(title);
 
     // Trim before the required check so a whitespace-only title is a 400, not a
     // song stored with a stray-space title (title is NOT NULL).
@@ -132,7 +167,7 @@ const createSong = async (req, res, next) => {
       return next(createError(400, 'Title is required'));
     }
 
-    const normalizedArtist = normalizeText(artist);
+    normalizedArtist = normalizeText(artist);
     const normalizedAlbum = normalizeText(album);
 
     const normalizedCapo = normalizeCapo(capo);
@@ -168,6 +203,10 @@ const createSong = async (req, res, next) => {
 
     res.status(201).json(song);
   } catch (error) {
+    // Story 17.1: a duplicate (title, artist) for this user -> typed 409, not 500.
+    if (await respondDuplicateSong(res, error, req.session.user, normalizedTitle, normalizedArtist).catch(() => false)) {
+      return;
+    }
     logger.error('Error creating song:', error);
     next(createError(500, 'Error creating song'));
   }
@@ -175,8 +214,15 @@ const createSong = async (req, res, next) => {
 
 // PUT update song
 const updateSong = async (req, res, next) => {
+  // Hoisted so the catch can map a duplicate-key error to a typed 409 (story 17.1),
+  // using the values that WOULD have been persisted (trimmed, with the existing
+  // song as fallback when a field is absent from the payload).
+  let song;
+  let normalizedTitle;
+  let normalizedArtist;
+  let userId;
   try {
-    const userId = req.session.user;
+    userId = req.session.user;
     if (!userId) {
       return next(createError(401, 'Unauthorized'));
     }
@@ -185,15 +231,15 @@ const updateSong = async (req, res, next) => {
     if (!isUuid(req.params.uid)) {
       return next(createError(404, 'Song not found'));
     }
-    const song = await Song.findOne({ where: { uid: req.params.uid, userUid: userId } });
+    song = await Song.findOne({ where: { uid: req.params.uid, userUid: userId } });
     if (!song) {
       return next(createError(404, 'Song not found'));
     }
 
     const { title, bpm, durationSeconds, key, capo, notes, instrument, artist, album, language, genre, pitchStandard, instrumentTuning, technique, instrumentLinks, instrumentDifficulty, myInstrumentUid, lastPlayed, streamingLinks, timeSignature, mode } = req.body || {};
 
-    const normalizedTitle = normalizeText(title);
-    const normalizedArtist = normalizeText(artist);
+    normalizedTitle = normalizeText(title);
+    normalizedArtist = normalizeText(artist);
     const normalizedAlbum = normalizeText(album);
 
     const normalizedCapo = normalizeCapo(capo);
@@ -231,6 +277,17 @@ const updateSong = async (req, res, next) => {
 
     res.json(song);
   } catch (error) {
+    // Story 17.1: an edit that collides with another of the user's songs on
+    // (title, artist) -> typed 409, not 500. The effective values mirror the
+    // update payload (trimmed, existing song as fallback), excluding this row.
+    const effectiveTitle = normalizedTitle || (song && song.title);
+    const effectiveArtist = normalizedArtist !== undefined ? normalizedArtist : (song && song.artist);
+    if (
+      effectiveTitle &&
+      (await respondDuplicateSong(res, error, userId, effectiveTitle, effectiveArtist, req.params.uid).catch(() => false))
+    ) {
+      return;
+    }
     logger.error('Error updating song:', error);
     next(createError(500, 'Error updating song'));
   }

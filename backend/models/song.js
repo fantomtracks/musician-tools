@@ -18,6 +18,11 @@ module.exports = (sequelize, DataTypes) => {
       },
       onDelete: 'CASCADE'
     },
+    // Story 17.1: per-user uniqueness on (user_uid, lower(title), COALESCE(lower(artist), ''))
+    // is enforced by a FUNCTIONAL unique index created in migration
+    // 20260710000000-songs-title-artist-ci-unique. It is not expressible via the
+    // Sequelize `indexes` DSL, so it is intentionally NOT declared here — sync()
+    // must not try to create or drop it. See the controller for the 23505 -> 409 mapping.
     title: {
       type: DataTypes.STRING,
       allowNull: false
