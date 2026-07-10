@@ -60,10 +60,10 @@ Trois tables référencent `Songs.uid` (vérifié dans les modèles). Pour chaqu
 
 ### Task 0 — Interroger la prod : compter les doublons exacts résiduels (AC 1)
 
-- [ ] ⏳ **PENDING northwood (pré-merge)** — Exécuter en **read-only** sur la prod (Fly Postgres) la query de comptage (l'agent dev n'a pas d'accès prod → ce geste est le tien avant le merge sur `main`) :
+- [x] **Comptage prod fait (2026-07-10, sur le dump prod `musician_tools_prod_20260710_094639.dump` restauré dans une base jetable)** : **81 chansons, 0 groupe de doublons** `(user_uid, lower(title), COALESCE(lower(artist),''))` → **0 ligne à fusionner/supprimer**. Le volet merge FK de la migration est donc un **no-op prouvé sur l'état prod actuel** : en prod, la migration se contente de **poser l'index unique** (aucune suppression). Query exécutée :
   ```sql
   SELECT user_uid, lower(title) AS t, COALESCE(lower(artist), '') AS a, count(*) AS n
-  FROM "Songs" GROUP BY 1, 2, 3 HAVING count(*) > 1 ORDER BY n DESC;
+  FROM "Songs" GROUP BY 1, 2, 3 HAVING count(*) > 1 ORDER BY n DESC;  -- (0 rows)
   ```
 - [x] **Approche merge décidée + rendue sûre pour tout volume** : le bloc merge de la migration est **set-based défensif** — correct que la prod ait **0** doublon (no-op prouvé : la migration a tourné sur les vraies données dev sans rien collapser) ou **N** (validé en local sur un scénario seedé : casse-diff + artiste NULL, avec FK sur les perdants dont le cas dédup PlaylistSongs). Le résultat prod ne change pas le code, seulement la confiance → geste laissé à northwood ci-dessus.
 - [x] ⚠️ **Aucun moteur de merge générique/runtime** (endpoint, service) : une migration one-off idempotente suffit (décision northwood).
@@ -172,14 +172,11 @@ Trois tables référencent `Songs.uid` (vérifié dans les modèles). Pour chaqu
 
 claude-opus-4-8[1m] (create-story + dev-story workflow)
 
-### Résultat du cadrage prod (Task 0)
+### Résultat du cadrage prod (Task 0) — ✅ FAIT (2026-07-10)
 
-- ⏳ **Query de comptage prod NON exécutée par l'agent dev** (pas d'accès prod). **À lancer par northwood en read-only AVANT le merge sur `main`** :
-  ```sql
-  SELECT user_uid, lower(title) AS t, COALESCE(lower(artist), '') AS a, count(*) AS n
-  FROM "Songs" GROUP BY 1, 2, 3 HAVING count(*) > 1 ORDER BY n DESC;
-  ```
-- **Le code ne dépend pas du résultat** : le merge est **set-based défensif**, correct pour 0 comme pour N doublons (les deux cas validés en local, cf. Debug Log). Le comptage prod est une **vérification de confiance** (attendu : 0 ou une poignée, à l'échelle beta mono-user post-16.1), pas un préalable au code.
+- **Comptage exécuté sur le dump prod du jour** (`backups/musician_tools_prod_20260710_094639.dump`, restauré dans une base `postgres:17` jetable — zéro contact prod supplémentaire au-delà du backup) : **81 chansons, 0 groupe de doublons exact** `(user_uid, lower(title), COALESCE(lower(artist),''))`.
+- **Conséquence : en prod, la migration ne supprime rien** — le merge FK est un no-op prouvé, seule la création de l'index unique s'applique. Le risque « migration destructive » est sans objet pour ce déploiement.
+- **Le code ne dépendait de toute façon pas du résultat** : le merge est set-based défensif, correct pour 0 comme pour N (les deux validés en local, cf. Debug Log). Le comptage confirme le cas **0**.
 
 ### Debug Log References
 
