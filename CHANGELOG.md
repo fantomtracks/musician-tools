@@ -12,6 +12,11 @@ project adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+## [1.12.0] — 2026-07-10
+
+### Changed
+- **No more duplicate songs** — your library now rejects a second song with the same title and artist (case-insensitive), even across two devices at once. Any exact duplicates already in your library are merged, keeping their practice history and playlist membership.
+
 ## [1.11.0] — 2026-07-09
 
 ### Fixed

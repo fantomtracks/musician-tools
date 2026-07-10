@@ -18,6 +18,9 @@ epic15:
 epic16:
   source: 'issu deferred-work § À brainstormer (bug prod trim artiste + quick-win tuning basse) — cadré 2026-07-09 ; auto-création SongForm volontairement EXCLUE (epic dédiée après brainstorm)'
   added: 2026-07-09
+epic17:
+  source: 'issu brainstorm 2026-07-10 (auto-création fiche chanson, exclue d''Epic 16) — synthèse brainstorming-session-2026-07-10-0810.md ; décisions ouvertes tranchées northwood 2026-07-10 (casse-insensible, interroger prod avant merge FK, blocage doublon symétrique durcit 13.1)'
+  added: 2026-07-10
 ---
 
 # musician-tools - Epic Breakdown
@@ -213,7 +216,10 @@ Un user légitime rate-limité voit un message **clair et traduit** (« too many
 ### Epic 16: Fix prod doublons artiste + confort tunings (issu deferred-work § À brainstormer)
 Deux items indépendants sortis de la revue deferred-work : un **vrai bug prod** — les champs `artist`/`album`/`title` sont stockés verbatim sans `.trim()`, donc « michael jackson » vs « michael jackson　» créent deux artistes distincts dans les suggestions/filtres (fix saisie + migration one-off de nettoyage) — et un **quick-win** — ajouter le tuning « Half-step down » manquant pour la basse (4 et 5 cordes). Stories : 16.1 trim + migration cleanup, 16.2 tuning basse demi-ton (backlog). _L'auto-création SongForm (retrait du bouton `Add`) est **volontairement exclue** : design-avant-code, epic dédiée après brainstorm — cf. deferred-work § À brainstormer. Détail § Epic 16 ci-dessous._
 
-**Dépendances :** E1 → E2 → (E3 ∥ E4). Les epics 3 et 4 sont indépendants l'un de l'autre. E6 dépend d'E4 (pont Mark as Played). E5 est transverse ; E9 (confort UI, post-rétro) est autonome et se solde avant E7 ; E7 (compte + sécurité, hors-PRD) est autonome — ne dépend d'aucun épic PRD et n'en bloque aucun. E10–E15 (confort/dette/sécu post-rétro) sont de même autonomes, sans dépendance inter-epics, en exécution légère (E15 s'adosse à l'auth durcie d'E7 mais ne dépend d'aucun autre épic). Les NFR1-NFR6 et NFR-S1-S4 transverses s'appliquent aux critères d'acceptation des stories concernées.
+### Epic 17: Auto-création fiche chanson + unicité serveur (issu brainstorm 2026-07-10)
+L'auto-création exclue d'Epic 16, cadrée après brainstorm (First Principles + Reverse Brainstorming, 8 décisions verrouillées). Le **titre devient l'identité** (artiste facultatif) : on retire le bouton `Add` interne du `SongForm` et la chanson **naît au débounce** (calque 13.1) au lieu d'un submit explicite ; garde-fous anti-chanson-vide (régimes Seuil 1), bascule `add→edit` invisible + verrou in-flight. En parallèle, une **politique doublon unique dans toute l'app** : clé **(titre + artiste)** casse-insensible, **blocage symétrique création + édition** (durcit 13.1 : « bloque » au lieu de « prévient mais sauve »), adossée à une **garde serveur** (index unique + 409, mirror 10.1). Stories : 17.1 unicité chanson serveur (merge FK ciblé + index unique + 409), 17.2 auto-création front + blocage doublon symétrique (backlog). ⚠️ 17.1 **rouvre le merge FK** esquivé par 16.1 → interroger la prod d'abord. **Ferme** l'item 🧊 course find-or-create chansons. _Détail § Epic 17 ci-dessous._
+
+**Dépendances :** E1 → E2 → (E3 ∥ E4). Les epics 3 et 4 sont indépendants l'un de l'autre. E6 dépend d'E4 (pont Mark as Played). E5 est transverse ; E9 (confort UI, post-rétro) est autonome et se solde avant E7 ; E7 (compte + sécurité, hors-PRD) est autonome — ne dépend d'aucun épic PRD et n'en bloque aucun. E10–E17 (confort/dette/sécu post-rétro) sont de même autonomes, sans dépendance inter-epics, en exécution légère (E15 s'adosse à l'auth durcie d'E7 mais ne dépend d'aucun autre épic). **Intra-E17 :** 17.2 (front) dépend de 17.1 (garde serveur + 409) ; ordre imposé 17.1 → 17.2. E17 durcit rétroactivement la politique doublon posée par 13.1 (édition) mais ne dépend d'aucun autre épic. Les NFR1-NFR6 et NFR-S1-S4 transverses s'appliquent aux critères d'acceptation des stories concernées.
 
 ## Epic 1: Ma bibliothèque de sujets de travail
 
@@ -1341,3 +1347,81 @@ So that j'aie la parité avec la guitare (qui a déjà son demi-ton) et que mon 
 **Then** deux entrées « Half-step down » sont disponibles : `{ value: 'EbAbDbGb', label: 'EbAbDbGb (Half-step down 4-string)' }` et `{ value: 'BbEbAbDbGb', label: 'BbEbAbDbGb (Half-step down 5-string)' }`, placées de façon cohérente avec l'ordre existant du bloc Bass
 
 **And** libellés en anglais, alignés sur le style des entrées existantes ; aucun autre instrument touché ; aucune migration ni changement de modèle ; suites vertes (typecheck front inclus). `[src/constants/instrumentTypes.ts bloc Bass ~45-51]`
+
+## Epic 17: Auto-création fiche chanson + unicité serveur
+
+_Ajouté 2026-07-10 — issu du brainstorm `brainstorming-session-2026-07-10-0810.md` (First Principles Thinking + Reverse Brainstorming, 14 idées → 8 décisions verrouillées + découpage 2 stories). C'est l'auto-création **volontairement exclue** d'Epic 16 (design-avant-code) : le brainstorm a été tenu, l'epic dédiée est ici. Mirror de l'Epic 13 (auto-save 13.1) côté méthode et de l'Epic 10 côté découpage (back d'abord, puis front). Aucun FR/NFR du PRD ; confort + cohérence UX + hygiène de données._
+
+**Décisions ouvertes du brainstorm tranchées par northwood (2026-07-10) :**
+1. **Clé doublon casse-insensible** — index sur `lower(title)` + `COALESCE(lower(artist), '')` (cohérent 7.12/10.1). Accents laissés de côté.
+2. **Merge FK résiduel : interroger la prod d'abord** — compter les doublons exacts post-16.1 en prod AVANT de coder, puis **merge ciblé** (pas de moteur générique surdimensionné).
+3. **Blocage doublon symétrique** — on **durcit 13.1** : sur collision (titre+artiste), aucune persistance ni en création ni en édition (« bloque » remplace « prévient mais sauve »). Une seule règle doublon dans toute l'app.
+
+**Objectif :** faire de la **création** de chanson une expérience **sans bouton**, cohérente avec l'édition auto-save (13.1) : le titre EST l'identité, la chanson naît au débounce, artiste facultatif. Et adosser cette identité à une **garantie serveur d'unicité** (titre + artiste) qui remplace la protection cosmétique actuelle par une garde structurelle (index unique + 409), fermant la course find-or-create multi-appareils pour les chansons.
+
+**Découpage :** 2 stories, **ordre imposé** 17.1 (back, prérequis) → 17.2 (front). ⚠️ 17.1 embarque une **migration** (merge FK + index unique) → part en prod, idempotente et testée en local avant merge (project-context § migrations). ⚠️ 17.2 **révise une story shippée (13.1)** : la politique doublon en édition passe de « prévient mais sauve » à « bloque » — AC dédiée.
+
+**Périmètre à ne pas cacher (dette assumée) :**
+- 🔁 **Revisite 13.1 (shippée)** : blocage doublon désormais aussi en édition. Mettre à jour la décision du 30/06 dans `deferred-work.md`.
+- 🔓 **Merge FK rouvert** : 16.1 l'avait volontairement esquivé (l'artiste étant une string libre, le trim suffisait sans merge). L'index unique l'impose pour les doublons **exacts** résiduels → interroger la prod avant de dimensionner (décision 2 ci-dessus).
+- 🧊 **Ferme un item glaçon** : la course find-or-create chansons devient couverte côté serveur.
+
+### Story 17.1: Unicité chanson serveur — merge FK ciblé + index unique + 409
+
+As a musicien qui gère sa songlist,
+I want que le serveur garantisse qu'une même chanson (même titre + même artiste) ne puisse pas exister en double dans ma collection,
+So that mes suggestions, filtres et statistiques ne soient jamais pollués par des doublons — y compris en cas de saisie concurrente sur deux appareils.
+
+**Contexte :** aujourd'hui rien n'empêche structurellement deux `Songs` `(userUid, title, artist)` identiques (protection seulement côté client, best-effort). Mirror de l'unicité playlist (10.1) et de l'unicité topic casse/accent (7.12). Un index unique ne peut être posé **que si la base est déjà dédoublonnée** → prérequis migration de merge. 16.1 a trimmé (collapsé les quasi-doublons d'espaces) mais a **volontairement esquivé le merge FK** des doublons exacts ; cette story le rouvre. `SongPlays` (FK `songUid`, pas de `userUid` propre — ownership via le Song parent) et les liens playlists (`PlaylistSongs` ou équivalent) du doublon supprimé doivent être **réassignés** vers la ligne gardée avant suppression, sinon perte d'historique de pratique / de playlist.
+
+**Acceptance Criteria:**
+
+**Given** l'état des données prod post-16.1 (volet **cadrage préalable**)
+**When** on dimensionne le merge
+**Then** on **interroge d'abord la prod** pour compter les doublons exacts `(userUid, lower(title), COALESCE(lower(artist),''))` restants ; le résultat est **consigné** (commentaire de migration ou note de story) et **conditionne** l'approche : merge **ciblé** si volume faible, jamais un moteur générique surdimensionné (décision northwood 2026-07-10)
+
+**Given** des doublons exacts résiduels en base (volet **merge FK**)
+**When** la migration de dédoublonnage s'exécute
+**Then** pour chaque groupe de doublons `(userUid, lower(title), COALESCE(lower(artist),''))`, une ligne **gardée** est choisie de façon déterministe (ex. plus ancienne `createdAt`, sinon plus petit `uid`) ; **tous les `SongPlays.songUid`** des doublons sont réassignés vers la gardée ; **tous les liens playlists** des doublons sont réassignés vers la gardée (en dédoublonnant les liens qui collisionneraient) ; puis les lignes doublons sont **supprimées** ; **aucune perte** d'historique de pratique ni d'appartenance playlist
+
+**Given** une base dédoublonnée (volet **garde structurelle**)
+**When** la migration pose la contrainte
+**Then** un **index unique** est créé sur `(user_uid, lower(title), COALESCE(lower(artist), ''))` — casse-insensible, `COALESCE('')` pour gérer l'artiste `NULL` (deux sans-artiste collisionnent) ; **idempotent** (garde `describeTable`/`showIndex` avant création, pattern project-context) ; testé en local (`make migrate`) avant tout merge
+
+**Given** une tentative de create/update qui violerait l'unicité (volet **API**)
+**When** le contrôleur persiste et Postgres lève l'erreur d'unicité (`23505`)
+**Then** l'erreur est mappée en **409** avec un **corps typé** (ex. `{ error: 'duplicate_song' }`) exploitable par le front — mirror du mapping 10.1/7.12 ; le pattern contrôleur (scoping `userUid`, ownership par `where` → 404) reste inchangé ; le 409 ne fuit aucune info d'un autre utilisateur (l'unicité est scopée `userUid`)
+
+**And** UI/commentaires en anglais ; suite back verte, avec un test qui **mocke `Song.create`/`update`** pour couvrir le mapping `23505 → 409` (le folding réel n'est validé que par la migration locale — même limite assumée que 7.12) ; migration idempotente et relançable sans effet de bord. `[backend/controllers/songcontroller.js createSong/updateSong, nouvelle migration backend/migrations/, backend/__tests__/songcontroller.test.js]`
+
+### Story 17.2: Auto-création front (sans bouton) + blocage doublon symétrique
+
+As a musicien qui ajoute une chanson,
+I want que ma chanson se crée toute seule dès que je lui donne un titre, sans bouton à cliquer,
+So that la création soit aussi fluide que l'édition (auto-save) et que je ne perde jamais de saisie ni ne crée de chanson vide par accident.
+
+**Contexte :** l'auto-save 13.1 est **édition-only** (debounce + flush au blur, `lastPlayed` exclu, statut « Saving/Saved », sticky Back) ; la **création** garde encore un bouton `Add` explicite (`SongForm.tsx` bas de form, mode `add` = submit qui crée). Retirer `Add` tel quel **casse la création** → il faut étendre l'auto-save/auto-création au mode `add`. Le point d'entrée « Add song » de la songlist reste (il ouvre un form vierge) ; seul le **bouton de validation interne** disparaît. S'adosse à la garde serveur 17.1 (409 typé) pour la politique doublon. `[src/components/SongForm.tsx bas de form mode add, src/pages/Songs.tsx flux create/onSubmit]`
+
+**Acceptance Criteria:**
+
+**Given** un formulaire de création vierge (mode `add`) (volet **déclencheur & bascule**)
+**When** je saisis un titre non vide (trimmé) et que la frappe se stabilise (**débounce ~800ms**, calque 13.1)
+**Then** la chanson est **créée** côté serveur ; la transition `add → edit` est **invisible** — l'UID créé est récupéré, l'URL/state basculent en douce (zéro rechargement), la pastille passe à « Saved », l'auto-save 13.1 prend le relais pour les frappes suivantes ; le **bouton `Add` interne a disparu**
+
+**Given** une création déjà en vol (CREATE réseau lent) (volet **verrou in-flight**)
+**When** un nouveau débounce se déclenche avant la réponse
+**Then** on ne tire **pas** un 2ᵉ CREATE : la frappe est empilée et rejouée en **UPDATE** une fois l'UID connu (miroir `savingRef`/`creatingPlaylistRef` de 13.1/10.2) — aucune double-création
+
+**Given** un titre vidé après coup (volet **anti-chanson-vide, régimes Seuil 1**)
+**When** je quitte / navigue hors de la fiche
+**Then** si la chanson n'a **rien d'autre que le titre effacé** (aucun autre champ rempli, aucune pratique, aucune playlist → « frais », Seuil 1) → **nettoyage silencieux** (rien de persisté / suppression du brouillon sans alerte) ; sinon (chanson à valeur) → **popup « ⚠️ ta chanson n'a plus de titre — Supprimer / Continuer »** ; la popup ne se déclenche **qu'à la sortie/navigation** (pas au changement de champ interne : titre vide = état transitoire toléré) ; « Continuer à éditer » ferme la popup et **re-vérifie au prochain essai de sortie** (événementiel, aucun minuteur)
+
+**Given** un CREATE qui échoue (réseau / 500) (volet **résilience**)
+**When** la requête n'aboutit pas
+**Then** la donnée **vit côté client**, statut « **Not saved — retrying** », le **prochain débounce réessaie** ; aucune saisie perdue ; quitter en plein CREATE parti = la chanson **naît quand même** (quitter = garder, pas d'annulation d'un CREATE en vol)
+
+**Given** une saisie qui collisionne avec une chanson existante — **création OU édition** (volet **blocage doublon symétrique**)
+**When** la clé **(titre + artiste)** casse-insensible entre en collision (deux sans-artiste = doublon ; même titre + artistes différents = deux entrées légitimes) et le serveur répond **409** (17.1)
+**Then** **aucune persistance** — ni création, ni update ; bannière « **not saved — already exists** » ; l'invariant est **bloquer = refuser d'écrire, jamais supprimer/corrompre** (la chanson garde sa dernière valeur valide) ; le blocage **force la résolution** (rien ne se persiste tant que non différencié, y compris éditer un champ d'un doublon legacy) mais **n'enferme pas** dans la page (titre non vide → pas de popup titre-vide → on peut toujours quitter) ; débloqué dès qu'on différencie titre ou artiste
+
+**And** ⚠️ **révise 13.1 (shippée)** : la politique doublon en **édition** passe de « prévient mais sauve » à « bloque » — cette AC est le durcissement assumé ; UI/messages en anglais ; réutiliser les patterns existants (statut Saving/Saved 13.1, `ConfirmDialog` pour la popup titre-vide, toasts/bannières manuels — pas de lib) ; suite front verte (tests du débounce-create, du verrou in-flight, des deux régimes Seuil 1, du blocage 409 en création ET édition) ; mettre à jour la décision 13.1 du 30/06 dans `deferred-work.md`. `[src/components/SongForm.tsx, src/pages/Songs.tsx, src/services/songService.ts]`

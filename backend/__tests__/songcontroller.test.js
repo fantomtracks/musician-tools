@@ -29,6 +29,7 @@ jest.mock('../models', () => {
 });
 
 const { Song, SongPlay, PracticeSession, SessionItem, Instrument } = require('../models');
+const { Op } = require('sequelize'); // real package (not mocked) — used to assert lookup WHERE clauses
 const controller = require('../controllers/songcontroller');
 
 // A played song the user owns, with a server-side title for the FR4 label snapshot
@@ -226,6 +227,105 @@ describe('songcontroller', () => {
       await controller.createSong({ session: { user: 'user-1' }, body: { title: 0 } }, mockRes(), next);
       expect(next.mock.calls[0][0].status).toBe(400);
       expect(Song.create).not.toHaveBeenCalled();
+    });
+  });
+
+  describe('17.1 — duplicate (title, artist) → typed 409', () => {
+    const SONG_UID = '55555555-5555-4555-8555-555555555555';
+    function uniqueError() {
+      return Object.assign(new Error('duplicate key value violates unique constraint'), {
+        name: 'SequelizeUniqueConstraintError',
+      });
+    }
+
+    test('createSong maps a unique-constraint violation to 409 with the existing song', async () => {
+      const existing = { uid: 'existing-uid', userUid: 'user-1', title: 'Yesterday', artist: 'The Beatles' };
+      Song.create.mockRejectedValueOnce(uniqueError());
+      Song.findOne.mockResolvedValueOnce(existing); // best-effort lookup for the 409 body
+      const res = mockRes();
+      const next = mockNext();
+
+      await controller.createSong(
+        { session: { user: 'user-1' }, body: { title: 'Yesterday', artist: 'The Beatles' } },
+        res,
+        next,
+      );
+
+      expect(res.status).toHaveBeenCalledWith(409);
+      expect(res.json).toHaveBeenCalledWith({
+        error: 'duplicate_song',
+        message: 'A song with this title and artist already exists',
+        song: existing,
+      });
+      expect(next).not.toHaveBeenCalled(); // not routed to the 500 handler
+
+      // Prove the lookup is scoped to the user, folds title+artist, and (on create)
+      // excludes NO row — 3 AND clauses: { userUid }, lower(title), COALESCE(lower(artist),'').
+      const lookup = Song.findOne.mock.calls[0][0].where[Op.and];
+      expect(lookup).toEqual(expect.arrayContaining([{ userUid: 'user-1' }]));
+      expect(lookup.some((c) => c && c.uid)).toBe(false); // no Op.ne exclusion on create
+      expect(lookup).toHaveLength(3); // userUid + folded title + folded artist
+    });
+
+    test('createSong 409 still returns (song: null) when the lookup fails', async () => {
+      Song.create.mockRejectedValueOnce(uniqueError());
+      Song.findOne.mockRejectedValueOnce(new Error('lookup boom'));
+      const res = mockRes();
+      const next = mockNext();
+
+      await controller.createSong(
+        { session: { user: 'user-1' }, body: { title: 'Yesterday' } },
+        res,
+        next,
+      );
+
+      expect(res.status).toHaveBeenCalledWith(409);
+      expect(res.json).toHaveBeenCalledWith(expect.objectContaining({ error: 'duplicate_song', song: null }));
+      expect(next).not.toHaveBeenCalled();
+    });
+
+    test('updateSong maps a unique-constraint violation to 409, excluding the edited row', async () => {
+      const existing = { uid: 'other-uid', userUid: 'user-1', title: 'Yesterday', artist: 'The Beatles' };
+      const update = jest.fn().mockRejectedValueOnce(uniqueError());
+      Song.findOne
+        .mockResolvedValueOnce({ uid: SONG_UID, userUid: 'user-1', title: 'Old', artist: 'old', update }) // fetch
+        .mockResolvedValueOnce(existing); // helper lookup
+      const res = mockRes();
+      const next = mockNext();
+
+      await controller.updateSong(
+        { params: { uid: SONG_UID }, session: { user: 'user-1' }, body: { title: 'Yesterday', artist: 'The Beatles' } },
+        res,
+        next,
+      );
+
+      expect(res.status).toHaveBeenCalledWith(409);
+      expect(res.json).toHaveBeenCalledWith({
+        error: 'duplicate_song',
+        message: 'A song with this title and artist already exists',
+        song: existing,
+      });
+      expect(next).not.toHaveBeenCalled();
+
+      // Prove the lookup (2nd findOne — after the row fetch) scopes to the user AND
+      // excludes the edited row via Op.ne — 4 AND clauses incl. { uid: { [Op.ne] } }.
+      const lookup = Song.findOne.mock.calls[1][0].where[Op.and];
+      expect(lookup).toEqual(expect.arrayContaining([{ userUid: 'user-1' }]));
+      const uidClause = lookup.find((c) => c && c.uid);
+      expect(uidClause).toBeDefined();
+      expect(uidClause.uid[Op.ne]).toBe(SONG_UID); // edited row is excluded
+      expect(lookup).toHaveLength(4); // userUid + folded title + folded artist + uid exclusion
+    });
+
+    test('a non-unique error is still a 500 (createSong)', async () => {
+      Song.create.mockRejectedValueOnce(new Error('some other db error'));
+      const res = mockRes();
+      const next = mockNext();
+
+      await controller.createSong({ session: { user: 'user-1' }, body: { title: 'Whatever' } }, res, next);
+
+      expect(res.status).not.toHaveBeenCalledWith(409);
+      expect(next.mock.calls[0][0].status).toBe(500);
     });
   });
 
