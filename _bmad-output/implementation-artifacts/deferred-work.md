@@ -64,6 +64,13 @@ _Les 4 stories UI/confort (filtres Songlist, refacto SessionHistoryCard, chanson
 ### 🐛 Navigation clavier comboboxes — ✅ RÉSOLU (2026-06-28, mergé en prod v1.8.0, ex-branche `fix/songform-combobox-keyboard`)
 > Diagnostic affiné : les champs réellement cassés étaient **Genre, Languages et le Playlist picker** (aucun `onKeyDown` → flèches mortes + Entrée soumettait le form) ; artiste/album avaient déjà la nav clavier. Au-delà du bug initial, mise à niveau **des 6 comboboxes** sur un util partagé : nav clavier (flèches + Entrée sélectionne sans soumettre + Échap), scroll-into-view de l'option active, **état actif unifié souris/clavier** (un seul surlignage), **ARIA combobox éditable** (`aria-activedescendant`/`role`/`aria-selected`), options **hors tab-order** (`tabIndex=-1`) et **Tab ferme la liste net**. 286 tests front verts. [src/utils/comboboxKeyboard.ts, SongForm.tsx, Songs.tsx, MySessionsPage.tsx]
 
+## Deferred from: code review of story-18.1 (2026-07-11)
+
+> Review 3 couches. Acceptance Auditor 4/4 ACs, 0 violation. Edge Case Hunter (accès projet) : migration fidèle, 7 frontières confirmées équivalentes, aucun bug. 1 patch (commentaires) appliqué, 2 defer :
+
+- **18-1 — Le data-router installe une error boundary par défaut (non brandée)** : une erreur de rendu d'une page routée affiche désormais la page d'erreur générique de react-router (« Unexpected Application Error! », non stylée, remplace le chrome) là où `<BrowserRouter>` laissait un écran blanc. **Amélioration de facto** mais changement vs « zéro comportement » et non-brandé. Candidat : un `errorElement` brandé sur la route racine (nouveau périmètre — l'app n'avait aucune UI d'erreur avant ; à faire en 18.2 ou suite). 🧊 **Gardé-avec-raison** (non bloquant, plutôt une amélioration). [`src/router.tsx` route racine]
+- **18-1 — Wiring data-router + gate loading + ancêtre LeaveGuardProvider non couverts par un test** : `createMemoryRouter`/`RouterProvider` exigent les primitives Fetch (`Request`) absentes de jsdom → le smoke test passe par `useRoutes` (arbre de routes seulement) et mocke `RootLayout`. Le code de prod est **vérifié correct** par la review. Un vrai test du data-router demanderait un polyfill Fetch (nouvelle dép). 🧊 **Gardé-avec-raison** — couvert par tsc + QA manuelle ; à revisiter si on ajoute un polyfill Fetch au socle de test. [`src/__tests__/router.test.tsx`]
+
 ## Deferred from: code review of story-17.2 (2026-07-11)
 
 > Review 3 couches. Acceptance Auditor : tous les volets OK. 1 HIGH + 3 patches appliqués ; Edge Case Hunter a réfuté 2 « High » du Blind (faux positifs). 2 defer :

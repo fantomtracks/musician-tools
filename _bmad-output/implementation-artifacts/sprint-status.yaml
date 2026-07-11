@@ -173,7 +173,7 @@ development_status:
 
   # Epic 18: Fiche chanson = vraie route (migration data-router) — issu rétro Epic 17 + QA 17.2 ; cadré ADR architecture-song-route-2026-07-11.md (détail epics.md § Epic 18)
   # Ordre IMPOSÉ 18-1 (migration data-router pure) → 18-2 (route-ify + swap guard). Dé-risque : 18-1 = infra sans changement de comportement. 18-2 révise le guard shippé en 17.2 (v1.13.0).
-  epic-18: backlog
-  18-1-migration-data-router: backlog   # infra ; BrowserRouter → createBrowserRouter/RouterProvider + RequireAuth + layout route ; AUCUN changement de comportement, toutes routes à l'identique ; fiche chanson reste page-state ; guard 17.2 reste
-  18-2-route-ify-fiche-chanson-useblocker: backlog   # front ; /songs/new + /songs/:uid (editingUid dérivé URL) + auto-création navigate(replace) + SUPPRIME guard maison 17.2 → useBlocker (ferme refresh + back-button) + 404 scopé deep-link. Réutilise isFreshSong/popup/beforeunload de 17.2
+  epic-18: in-progress
+  18-1-migration-data-router: done   # infra ; BrowserRouter → createBrowserRouter/RouterProvider + RootLayout(Outlet)+RequireAuth+GuestOnly ; AUCUN changement de comportement, 13 routes à l'identique ; fiche chanson reste page-state ; guard 17.2 reste ; HomePage reste exporté (HomePage.test)
+  18-2-route-ify-fiche-chanson-useblocker: ready-for-dev   # front ; /songs/new + /songs/:uid (editingUid/page dérivés URL) + auto-création navigate(replace) + SUPPRIME guard maison 17.2 (LeaveGuard* supprimés, Header→Link, SessionHistoryCard→/songs/:uid, App sans provider) → useBlocker (back-button) + 404 scopé. Réutilise isFreshSong/popup/beforeunload 17.2. ⚠️ commiter 18.1 d'abord (editingUid dérivé URL) + auto-création navigate(replace) + SUPPRIME guard maison 17.2 → useBlocker (ferme refresh + back-button) + 404 scopé deep-link. Réutilise isFreshSong/popup/beforeunload de 17.2
   epic-18-retrospective: optional
