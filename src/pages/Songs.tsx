@@ -77,6 +77,11 @@ function Songs() {
   // Story 18.2: deep-link to /songs/:uid with an unknown/foreign uid → getSong 404
   // (scoped, story 7.5) → "Song not found" screen.
   const [notFound, setNotFound] = useState(false);
+  // True only once the edit form actually represents its /songs/:uid target (record
+  // built or fetch resolved) — NOT while a deep-link is still loading and NOT on a 404.
+  // Gates the empty-title guards so an unbuilt/not-found form is never mistaken for a
+  // fresh titleless draft and silently deleted (code-review 18.2, HIGH).
+  const [formReady, setFormReady] = useState(false);
   // True when the edit form was opened by following the "already exists" link
   // from the add form — drives the "reset your filters" hint, since a song
   // reached that way is typically hidden from the list by a filter.
@@ -289,6 +294,13 @@ function Songs() {
   // undefined = nothing). Lets the load effect skip rebuilding the form when the URL
   // already matches it — e.g. right after an auto-create, so live typing isn't clobbered.
   const loadedFormUidRef = useRef<string | null | undefined>(undefined);
+  // Live pathname + mount flag, read by the in-flight-create guard so it decides
+  // "did the user leave /songs/new?" against the CURRENT location, not a value frozen
+  // in the closure when the debounce fired (code-review 18.2).
+  const pathnameRef = useRef(location.pathname);
+  pathnameRef.current = location.pathname;
+  const isMountedRef = useRef(true);
+  useEffect(() => () => { isMountedRef.current = false; }, []);
 
   // Single source of truth: the count drives both the boolean and the mobile "Filters · N" badge.
   const activeFilterCount = countActiveFilters({
@@ -728,13 +740,14 @@ function Songs() {
     setCameFromDuplicate(fromDuplicate);
     setError(null);
     setNotFound(false);
+    setFormReady(true); // the form now represents a real, loaded editing target
   };
 
   // Story 18.2 — the open target is driven by the URL. Build the form when it changes,
   // UNLESS the form already represents it (loadedFormUidRef) — so an auto-create
   // navigate('/songs/:uid') doesn't reload & clobber the just-typed form.
   useEffect(() => {
-    if (page === 'list') { loadedFormUidRef.current = undefined; setNotFound(false); return; }
+    if (page === 'list') { loadedFormUidRef.current = undefined; setNotFound(false); setFormReady(false); return; }
     if (isNewSongRoute) {
       if (loadedFormUidRef.current !== '__new__') {
         setForm(initialSong);
@@ -744,6 +757,7 @@ function Songs() {
         setMetadataSource(null);
         setCameFromDuplicate(false);
         setNotFound(false);
+        setFormReady(false); // add draft, no editing session yet (editingUid === null)
         conflictKeyRef.current = null;
         loadedFormUidRef.current = '__new__';
       }
@@ -759,14 +773,19 @@ function Songs() {
       return;
     }
     // Not in the loaded list → deep-link. Mark as loaded up-front so a later `songs`
-    // change doesn't re-fetch (and clobber a 404). Fetch it; scoped 404 (7.5) → not found.
+    // change doesn't re-fetch (and clobber a 404). The form isn't ready until this
+    // resolves, so the empty-title guards stay disarmed meanwhile (no spurious delete).
+    // If the effect is torn down BEFORE resolving (StrictMode double-invoke, uid change),
+    // roll the marker back so the re-run actually refetches instead of skipping forever.
     loadedFormUidRef.current = editingUid;
-    let cancelled = false;
+    setFormReady(false);
     setNotFound(false);
+    let cancelled = false;
+    let settled = false;
     songService.getSong(editingUid as string)
-      .then(song => { if (!cancelled) buildFormFromSong(song, false); })
-      .catch(() => { if (!cancelled) setNotFound(true); });
-    return () => { cancelled = true; };
+      .then(song => { if (!cancelled) { settled = true; buildFormFromSong(song, false); } })
+      .catch(() => { if (!cancelled) { settled = true; setNotFound(true); } });
+    return () => { cancelled = true; if (!settled) loadedFormUidRef.current = undefined; };
     // buildFormFromSong is stable enough; deps cover the URL target + the songs list.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [page, isNewSongRoute, editingUid, songs, location.state]);
@@ -941,9 +960,11 @@ function Songs() {
         // later keystroke flows through the same edit-mode path below.
         const created = await songService.createSong(payload as CreateSongDTO);
         setSongs(prev => (prev.some(s => s.uid === created.uid) ? prev : [created, ...prev]));
-        if (location.pathname !== '/songs/new') {
+        if (!isMountedRef.current || pathnameRef.current !== '/songs/new') {
           // The user left /songs/new while this create was in flight (quitter = garder):
-          // keep the created song in the list, but DON'T yank them back to it.
+          // keep the created song in the list, but DON'T yank them back to it. Checked
+          // against the LIVE location/mount (refs), not the frozen closure value — else
+          // leaving via a header link / browser Back would drag them into the new song.
           return true;
         }
         // Invisible add->edit transition via the URL: seed the baseline + mark the form
@@ -951,6 +972,7 @@ function Songs() {
         // reloading (no clobber of live typing), then replace /songs/new → /songs/:uid.
         setEditBaselineJson(snapshot);
         loadedFormUidRef.current = created.uid;
+        setFormReady(true); // now a real editing session (empty-title guards may arm)
         setPlaylistFilter(''); // parity with the old create flow: keep the new song visible
         navigate('/songs/' + created.uid, { replace: true });
       } else {
@@ -1066,6 +1088,7 @@ function Songs() {
     ({ currentLocation, nextLocation }) =>
       page === 'form' &&
       editingUid !== null &&
+      formReady && // only a genuinely loaded edit session — never a loading/404 form
       !form.title?.trim() &&
       currentLocation.pathname !== nextLocation.pathname,
   );
@@ -1086,16 +1109,22 @@ function Songs() {
   // Story 17.2 — the one exit useBlocker can't intercept (browser refresh / tab close)
   // gets the native beforeunload prompt while a titleless draft is open.
   useEffect(() => {
-    if (editingUid === null || form.title?.trim()) return;
+    if (editingUid === null || !formReady || form.title?.trim()) return;
     const handler = (e: BeforeUnloadEvent) => { e.preventDefault(); e.returnValue = ''; };
     window.addEventListener('beforeunload', handler);
     return () => window.removeEventListener('beforeunload', handler);
-  }, [editingUid, form.title]);
+  }, [editingUid, formReady, form.title]);
 
   // Story 18.2: leave the form via the URL. Flush a pending (non-empty) edit first;
   // the empty-title case is handled by useBlocker (fires on this navigation).
   const backToList = async (): Promise<void> => {
-    await flushAutoSave();
+    const ok = await flushAutoSave();
+    // A genuine save FAILURE toasts. A `false` from an in-flight create/save (savingRef
+    // held) isn't a failure — that op is still resolving on its own.
+    if (!ok && !savingRef.current) {
+      setToastMessage('Some changes could not be saved');
+      setTimeout(() => setToastMessage(null), 2500);
+    }
     navigate('/songs');
   };
 

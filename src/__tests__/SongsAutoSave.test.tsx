@@ -242,4 +242,26 @@ describe('Songs — routes & deep-links (story 18.2)', () => {
     expect((screen.getByLabelText('Title') as HTMLInputElement).value).toBe('');
     expect(screen.getByRole('button', { name: /back to songlist/i })).toBeInTheDocument();
   });
+
+  // Code-review 18.2 (HIGH): an unbuilt or not-found form (empty title, editingUid from
+  // the URL) must NOT be mistaken for a fresh titleless draft and silently deleted.
+  test('leaving the "Song not found" screen does not delete the foreign/unknown song', async () => {
+    getSong.mockRejectedValueOnce(new Error('not found'));
+    renderSongs('/songs/ghost');
+    await screen.findByText(/song not found/i); // wait for the 404 screen (not the loading flash)
+    fireEvent.click(screen.getByRole('button', { name: /back to songlist/i }));
+    await waitFor(() => expect(screen.queryByText(/song not found/i)).not.toBeInTheDocument());
+    expect(deleteSong).not.toHaveBeenCalled(); // no mutating request for a song that isn't yours
+  });
+
+  test('leaving a deep-link form while it is still loading does not delete the song', async () => {
+    let resolveGet!: (v: unknown) => void;
+    getSong.mockImplementationOnce(() => new Promise(res => { resolveGet = res; }));
+    renderSongs('/songs/real-1');
+    // Form shell is up (Back bar) while getSong is still in flight, title empty.
+    fireEvent.click(await screen.findByRole('button', { name: /back to songlist/i }));
+    // The fetch resolves after we've left — must NOT trigger a delete of the real song.
+    resolveGet({ uid: 'real-1', title: 'Real', artist: '', instrument: [] });
+    await waitFor(() => expect(deleteSong).not.toHaveBeenCalled());
+  });
 });
