@@ -1,5 +1,7 @@
 function Footer() {
-  const appVersion = '1.1.0';
+  // From package.json via Vite's define (vite.config.ts). The typeof guard keeps
+  // it safe under Jest, where the build-time constant isn't defined.
+  const appVersion = typeof __APP_VERSION__ !== 'undefined' ? __APP_VERSION__ : 'dev';
 
   return (
     <footer className="bg-gradient-to-t from-gray-900 to-gray-800 dark:from-gray-950 dark:to-gray-900 text-white border-t border-gray-700 dark:border-gray-800">

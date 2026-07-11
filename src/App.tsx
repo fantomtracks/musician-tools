@@ -15,6 +15,7 @@ import ResetPasswordPage from './pages/ResetPasswordPage';
 import Header from './components/Header';
 import VerifyEmailBanner from './components/VerifyEmailBanner';
 import Footer from './components/Footer';
+import { LeaveGuardProvider } from './contexts/LeaveGuardProvider';
 
 export function HomePage() {
   const { isAuthenticated, user } = useAuth();
@@ -69,6 +70,7 @@ function App() {
   }
 
   return (
+    <LeaveGuardProvider>
     <div className="flex flex-col min-h-screen bg-gradient-to-br from-gray-50 via-blue-50 to-purple-50 dark:from-gray-900 dark:via-gray-800 dark:to-gray-950">
       <Header />
       <VerifyEmailBanner />
@@ -117,6 +119,7 @@ function App() {
       </main>
       <Footer />
     </div>
+    </LeaveGuardProvider>
   );
 }
 

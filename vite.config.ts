@@ -1,9 +1,17 @@
 // @ts-nocheck
 import { defineConfig } from 'vite'
 import react from '@vitejs/plugin-react'
+import { createRequire } from 'module'
+
+// Single source of truth for the app version shown in the footer: package.json,
+// injected at build time as __APP_VERSION__ (see src/vite-env.d.ts).
+const pkg = createRequire(import.meta.url)('./package.json')
 
 // https://vite.dev/config/
 export default defineConfig({
+  define: {
+    __APP_VERSION__: JSON.stringify(pkg.version),
+  },
   plugins: [react()],
   server: {
     port: 5173,

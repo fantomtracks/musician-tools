@@ -168,5 +168,5 @@ development_status:
   # Ordre IMPOSÉ 17-1 (back, prérequis) → 17-2 (front). ⚠️ 17-1 migration (merge FK + index unique) part en prod ; interroger la prod d'abord (compter doublons exacts post-16.1) avant de dimensionner le merge.
   epic-17: in-progress
   17-1-unicite-chanson-serveur: done   # back ; interroger prod (count doublons exacts) → merge FK ciblé (SongPlays.songUid + PlaylistSongs.song_uid[dédup] + SessionItems.song_uid) → index unique (user_uid, lower(title), COALESCE(lower(artist),'')) → 409 typé. Mirror 10.1/7.12. ⚠️ migration part en prod
-  17-2-auto-creation-front-blocage-doublon: backlog   # front ; retirer bouton Add → auto-création au débounce + verrou in-flight + bascule add→edit invisible → popup titre-vide (régimes Seuil 1) → blocage doublon symétrique (durcit 13.1) + « Not saved — retrying ». Mirror 13.1
+  17-2-auto-creation-front-blocage-doublon: done   # front ; retirer bouton Add → auto-création au débounce (1200ms, calque 13.1) + verrou in-flight + bascule add→edit invisible → popup titre-vide (Seuil 1 : fresh=DELETE silencieux) + BLOCAGE NAV GLOBAL → blocage doublon symétrique TOTAL (SongConflictError 409, durcit 13.1) + « Not saved — retrying ». Décisions northwood 2026-07-10 : nav-block global + delete-silent fresh. Mirror 13.1/10.2
   epic-17-retrospective: optional
