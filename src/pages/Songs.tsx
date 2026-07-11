@@ -300,7 +300,14 @@ function Songs() {
   const pathnameRef = useRef(location.pathname);
   pathnameRef.current = location.pathname;
   const isMountedRef = useRef(true);
-  useEffect(() => () => { isMountedRef.current = false; }, []);
+  // Set true in SETUP (not just default) so StrictMode's mount→unmount→mount in dev —
+  // whose cleanup flips it false — leaves it true after the re-mount. Otherwise the
+  // in-flight-create guard reads a permanently-false mount flag and skips the
+  // add→edit navigate, stranding the form in add mode (self-duplicate on every title).
+  useEffect(() => {
+    isMountedRef.current = true;
+    return () => { isMountedRef.current = false; };
+  }, []);
 
   // Single source of truth: the count drives both the boolean and the mobile "Filters · N" badge.
   const activeFilterCount = countActiveFilters({

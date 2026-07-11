@@ -1,3 +1,4 @@
+import { StrictMode } from 'react';
 import { render } from '@testing-library/react';
 import { createMemoryRouter, RouterProvider } from 'react-router-dom';
 import Songs from '../pages/Songs';
@@ -6,7 +7,10 @@ import Songs from '../pages/Songs';
 // inside a DATA router (createMemoryRouter), not <MemoryRouter>, with the same 3 song
 // routes as production. The custom jest environment (jest.jsdom.env.cjs) provides the
 // Fetch primitives createMemoryRouter needs.
-export function renderSongs(initialPath = '/songs') {
+//
+// `strict` wraps in <StrictMode> to reproduce dev's mount→unmount→mount double-invoke,
+// which surfaces mount-flag / effect-cleanup bugs the single-pass test render hides.
+export function renderSongs(initialPath = '/songs', { strict = false } = {}) {
   const router = createMemoryRouter(
     [
       { path: '/songs', element: <Songs /> },
@@ -15,5 +19,6 @@ export function renderSongs(initialPath = '/songs') {
     ],
     { initialEntries: [initialPath] },
   );
-  return { ...render(<RouterProvider router={router} />), router };
+  const tree = <RouterProvider router={router} />;
+  return { ...render(strict ? <StrictMode>{tree}</StrictMode> : tree), router };
 }

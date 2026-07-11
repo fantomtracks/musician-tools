@@ -115,6 +115,23 @@ describe('Songs — auto-create at debounce (story 17.2)', () => {
     await screen.findByText(/saved/i);
   });
 
+  test('under StrictMode, auto-create still switches to edit — no self-duplicate on any title', async () => {
+    // Regression (manual QA): StrictMode's mount→unmount→mount flipped isMountedRef to
+    // false permanently, so the add→edit navigate was skipped, the form stayed in add
+    // mode, and the just-created song matched ITSELF → "already exists" for every title.
+    createSong.mockResolvedValueOnce({ uid: 'strict-1', title: 'Zzz Unique', artist: '', instrument: [] });
+    renderSongs('/songs/new', { strict: true });
+    fireEvent.change(await screen.findByLabelText('Title'), { target: { value: 'Zzz Unique' } });
+    await waitFor(() => expect(createSong).toHaveBeenCalledTimes(1), { timeout: 2500 });
+    await screen.findByText(/saved/i);
+    // The created song must not be flagged as a duplicate of itself...
+    expect(screen.queryByText(/already exists/i)).not.toBeInTheDocument();
+    // ...and editing another field must UPDATE it, not fire a second CREATE.
+    fireEvent.change(screen.getByLabelText('Artist'), { target: { value: 'Band' } });
+    await waitFor(() => expect(updateSong).toHaveBeenCalledWith('strict-1', expect.anything()), { timeout: 2500 });
+    expect(createSong).toHaveBeenCalledTimes(1);
+  });
+
   test('an empty title never creates a song', async () => {
     await openAddForm();
     fireEvent.change(screen.getByLabelText('Title'), { target: { value: '   ' } }); // whitespace only
