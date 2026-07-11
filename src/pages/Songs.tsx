@@ -308,6 +308,10 @@ function Songs() {
     isMountedRef.current = true;
     return () => { isMountedRef.current = false; };
   }, []);
+  // True while a DELIBERATE delete-then-navigate is in progress, so the empty-title
+  // useBlocker doesn't fire a second "no title" popup on top of the delete (the leave
+  // is intentional — the song is being removed). Read live in the blocker predicate.
+  const deletingRef = useRef(false);
 
   // Single source of truth: the count drives both the boolean and the mobile "Filters · N" badge.
   const activeFilterCount = countActiveFilters({
@@ -754,7 +758,7 @@ function Songs() {
   // UNLESS the form already represents it (loadedFormUidRef) — so an auto-create
   // navigate('/songs/:uid') doesn't reload & clobber the just-typed form.
   useEffect(() => {
-    if (page === 'list') { loadedFormUidRef.current = undefined; setNotFound(false); setFormReady(false); return; }
+    if (page === 'list') { loadedFormUidRef.current = undefined; setNotFound(false); setFormReady(false); deletingRef.current = false; return; }
     if (isNewSongRoute) {
       if (loadedFormUidRef.current !== '__new__') {
         setForm(initialSong);
@@ -1096,6 +1100,7 @@ function Songs() {
       page === 'form' &&
       editingUid !== null &&
       formReady && // only a genuinely loaded edit session — never a loading/404 form
+      !deletingRef.current && // a deliberate delete-then-navigate isn't a guarded leave
       !form.title?.trim() &&
       currentLocation.pathname !== nextLocation.pathname,
   );
@@ -1509,7 +1514,10 @@ function Songs() {
       setDeleteMode(null);
       
       // Story 18.2: if we're editing the deleted song, go back to the list route.
+      // Flag the leave as a deliberate delete so the empty-title blocker (the song's
+      // title may be blank) doesn't pop a second "no title" dialog over this navigation.
       if (editingUid === uidToDelete) {
+        deletingRef.current = true;
         navigate('/songs');
       }
     } catch (err) {

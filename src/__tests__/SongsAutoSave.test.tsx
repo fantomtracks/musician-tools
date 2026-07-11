@@ -231,6 +231,25 @@ describe('Songs — empty-title Seuil 1 on leave (story 17.2)', () => {
     fireEvent.click(within(dialog).getByRole('button', { name: /^delete$/i }));
     await waitFor(() => expect(deleteSong).toHaveBeenCalledWith('song-a'));
   });
+
+  // Manual QA regression (StrictMode-only): deleting an empty-titled song via the trash
+  // button navigated to the list, and that navigate re-tripped the empty-title useBlocker
+  // → a SECOND "no title" popup stacked on top of the delete confirm. Only reproduces
+  // under StrictMode's double-invoke, so this test must run strict.
+  test('deleting an empty-titled song via the trash button does not stack a "no title" popup', async () => {
+    renderSongs('/songs', { strict: true });
+    fireEvent.click(await screen.findByText('Alpha')); // edit song-a
+    fireEvent.change(await screen.findByLabelText('Title'), { target: { value: '' } });
+    // The form's own Delete button (no dialog open yet) → delete-confirm dialog.
+    fireEvent.click(screen.getByRole('button', { name: /^delete$/i }));
+    await screen.findByText(/are you sure you want to delete this song/i);
+    fireEvent.click(within(screen.getByRole('dialog')).getByRole('button', { name: /^delete$/i }));
+    await waitFor(() => expect(deleteSong).toHaveBeenCalledWith('song-a'));
+    // After a deliberate delete we must LAND ON THE LIST — the navigate must not be
+    // re-tripped by the empty-title guard into a second "no title" popup on the form.
+    await screen.findByRole('button', { name: /add a song/i });
+    expect(screen.queryByText(/no title anymore/i)).not.toBeInTheDocument();
+  });
 });
 
 describe('Songs — routes & deep-links (story 18.2)', () => {
