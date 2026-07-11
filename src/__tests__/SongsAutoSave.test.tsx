@@ -31,12 +31,20 @@ import { playlistService } from '../services/playlistService';
 const updateSong = songService.updateSong as jest.Mock;
 const createSong = songService.createSong as jest.Mock;
 const deleteSong = songService.deleteSong as jest.Mock;
+const getAllSongs = songService.getAllSongs as jest.Mock;
 
+const DEFAULT_SONGS = [
+  { uid: 'song-a', title: 'Alpha', artist: 'A', instrument: ['Guitar'] },
+  { uid: 'song-b', title: 'Beta', artist: 'A', instrument: ['Guitar'] },
+];
 
 beforeEach(() => {
   localStorage.clear();
   jest.clearAllMocks();
   updateSong.mockResolvedValue({ uid: 'song-a', title: 'Alpha', artist: 'A', instrument: ['Guitar'] });
+  // clearAllMocks wipes call data but not implementations — restore the default list so a
+  // test that overrides getAllSongs (persistent mockResolvedValue) can't leak into the next.
+  getAllSongs.mockResolvedValue(DEFAULT_SONGS);
 });
 
 describe('Songs — auto-save (story 13.1)', () => {
@@ -207,6 +215,25 @@ describe('Songs — empty-title Seuil 1 on leave (story 17.2)', () => {
 
     await waitFor(() => expect(deleteSong).toHaveBeenCalledWith('new-3'));
     expect(screen.queryByText(/no title anymore/i)).not.toBeInTheDocument(); // silent, no popup
+  });
+
+  test('a server-loaded song with no content is still "fresh" — emptying its title deletes silently', async () => {
+    // Regression (manual QA): a form rebuilt from a real server record carries
+    // uid/userUid/timestamps and null (not '') for empty text; the old exact-JSON
+    // freshness check tripped on those and wrongly popped the "no title" dialog.
+    const serverDraft = {
+      uid: 'draft-1', title: 'Draft', artist: null, album: null, bpm: null, key: '',
+      notes: '', instrument: null, instrumentDifficulty: {}, instrumentTuning: {},
+      streamingLinks: null, instrumentLinks: null, myInstrumentUid: null, lastPlayed: null,
+      pitchStandard: 440, createdAt: '2026-07-11T00:00:00.000Z', updatedAt: '2026-07-11T00:00:00.000Z',
+    };
+    getAllSongs.mockResolvedValue([serverDraft]);
+    renderSongs();
+    fireEvent.click(await screen.findByText('Draft'));
+    fireEvent.change(await screen.findByLabelText('Title'), { target: { value: '' } });
+    fireEvent.click(screen.getByRole('button', { name: /back to songlist/i }));
+    await waitFor(() => expect(deleteSong).toHaveBeenCalledWith('draft-1')); // silent delete
+    expect(screen.queryByText(/no title anymore/i)).not.toBeInTheDocument(); // no popup
   });
 
   test('emptying the title of a song with value shows the popup (not silent)', async () => {

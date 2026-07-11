@@ -1066,11 +1066,32 @@ function Songs() {
   // Story 17.2 — Seuil 1: a song is "fresh" if the only thing that ever happened to
   // it is the (now-emptied) title — no other field filled, no practice, no playlist.
   // Such a draft is deleted silently on leave; anything with value gets the popup.
+  // Empty for the purpose of "did the user fill this?": null / undefined / '' /
+  // empty array / empty object all count as no content. Lets a form rebuilt from a
+  // server record (null vs '', {} vs missing) still read as untouched.
+  const isEmptyValue = (v: unknown): boolean =>
+    v === null || v === undefined || v === '' ||
+    (Array.isArray(v) && v.length === 0) ||
+    (typeof v === 'object' && v !== null && !Array.isArray(v) && Object.keys(v).length === 0);
+
   const isFreshSong = (): boolean => {
     if (editingUid === null) return false;
-    const bareForm = JSON.stringify({ ...form, title: '' });
-    const bareInitial = JSON.stringify({ ...initialSong, title: '' });
-    if (bareForm !== bareInitial) return false;
+    // Seuil 1 (17.2): "fresh" = the only thing that ever happened is the (now-emptied)
+    // title — no other CONTENT field filled, no practice, no playlist. Compare content
+    // only: the form may have been rebuilt from the server record, which carries
+    // uid/userUid/timestamps and null-vs-'' quirks that an exact JSON compare would trip on.
+    const f = form as Record<string, unknown>;
+    const contentFilled =
+      !isEmptyValue(f.bpm) || !isEmptyValue(f.durationSeconds) || !isEmptyValue(f.key) ||
+      !isEmptyValue(f.capo) || !isEmptyValue(f.notes) || !isEmptyValue(f.instrument) ||
+      !isEmptyValue(f.instrumentDifficulty) || !isEmptyValue(f.instrumentTuning) ||
+      !isEmptyValue(f.artist) || !isEmptyValue(f.album) || !isEmptyValue(f.language) ||
+      !isEmptyValue(f.genre) || !isEmptyValue(f.technique) || !isEmptyValue(f.timeSignature) ||
+      !isEmptyValue(f.mode) || !isEmptyValue(f.streamingLinks) || !isEmptyValue(f.instrumentLinks) ||
+      !isEmptyValue(f.myInstrumentUid) ||
+      // pitchStandard has a non-empty default (440); only a deviation counts as filled.
+      (!isEmptyValue(f.pitchStandard) && f.pitchStandard !== 440);
+    if (contentFilled) return false;
     if (editingSongPlays.length > 0) return false; // has practice history
     const record = songs.find(s => s.uid === editingUid);
     if (record?.lastPlayed) return false;
