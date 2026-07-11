@@ -18,8 +18,7 @@ export function SessionEntryLine({ item, artist }: { item: SessionItem; artist?:
     <li className="text-sm text-gray-700 dark:text-gray-300 pl-3 border-l-2 border-gray-200 dark:border-gray-700 break-words">
       {item.songUid ? (
         <Link
-          to="/songs"
-          state={{ editUid: item.songUid }}
+          to={`/songs/${item.songUid}`}
           className="hover:text-brand-600 dark:hover:text-brand-400 hover:underline"
         >
           {label}

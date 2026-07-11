@@ -1,21 +1,8 @@
-import { Link, Navigate, Route, Routes } from 'react-router-dom';
+import { Link, Outlet } from 'react-router-dom';
 import { useAuth } from './contexts/AuthContext';
-import Songs from './pages/Songs';
-import LoginPage from './pages/LoginPage';
-import RegisterPage from './pages/RegisterPage';
-import MyInstrumentsPage from './pages/MyInstrumentsPage';
-import MyPlaylistsPage from './pages/MyPlaylistsPage';
-import MyTopicsPage from './pages/MyTopicsPage';
-import MySessionsPage from './pages/MySessionsPage';
-import MyHeatmapPage from './pages/MyHeatmapPage';
-import ProfilePage from './pages/ProfilePage';
-import VerifyEmailPage from './pages/VerifyEmailPage';
-import ForgotPasswordPage from './pages/ForgotPasswordPage';
-import ResetPasswordPage from './pages/ResetPasswordPage';
 import Header from './components/Header';
 import VerifyEmailBanner from './components/VerifyEmailBanner';
 import Footer from './components/Footer';
-import { LeaveGuardProvider } from './contexts/LeaveGuardProvider';
 
 export function HomePage() {
   const { isAuthenticated, user } = useAuth();
@@ -58,8 +45,13 @@ export function HomePage() {
   );
 }
 
-function App() {
-  const { isAuthenticated, loading } = useAuth();
+// Story 18.1 — root layout element of the data-router: the app chrome
+// (header / verify-email banner / footer) around the routed page rendered in the
+// <Outlet/>. It waits for the auth context to settle before rendering, exactly as
+// the old <App> did. (Story 18.2 removed the custom LeaveGuardProvider — leaving the
+// song form is now handled by useBlocker inside the Songs route.)
+export function RootLayout() {
+  const { loading } = useAuth();
 
   if (loading) {
     return (
@@ -70,57 +62,13 @@ function App() {
   }
 
   return (
-    <LeaveGuardProvider>
     <div className="flex flex-col min-h-screen bg-gradient-to-br from-gray-50 via-blue-50 to-purple-50 dark:from-gray-900 dark:via-gray-800 dark:to-gray-950">
       <Header />
       <VerifyEmailBanner />
       <main className="flex-1 flex flex-col">
-        <Routes>
-          <Route path="/" element={<HomePage />} />
-          <Route
-            path="/songs"
-            element={isAuthenticated ? <Songs /> : <Navigate to="/login" replace />}
-          />
-          <Route
-            path="/my-instruments"
-            element={isAuthenticated ? <MyInstrumentsPage /> : <Navigate to="/login" replace />}
-          />
-          <Route
-            path="/my-playlists"
-            element={isAuthenticated ? <MyPlaylistsPage /> : <Navigate to="/login" replace />}
-          />
-          <Route
-            path="/my-topics"
-            element={isAuthenticated ? <MyTopicsPage /> : <Navigate to="/login" replace />}
-          />
-          <Route
-            path="/my-sessions"
-            element={isAuthenticated ? <MySessionsPage /> : <Navigate to="/login" replace />}
-          />
-          <Route
-            path="/my-heatmap"
-            element={isAuthenticated ? <MyHeatmapPage /> : <Navigate to="/login" replace />}
-          />
-          <Route
-            path="/profile"
-            element={isAuthenticated ? <ProfilePage /> : <Navigate to="/login" replace />}
-          />
-          {/* Public — reached from the email link, possibly while signed out (story 7.9/7.10) */}
-          <Route path="/verify-email" element={<VerifyEmailPage />} />
-          <Route path="/forgot-password" element={<ForgotPasswordPage />} />
-          <Route path="/reset-password" element={<ResetPasswordPage />} />
-          <Route path="/login" element={!isAuthenticated ? <LoginPage /> : <Navigate to="/songs" replace />} />
-          <Route
-            path="/register"
-            element={!isAuthenticated ? <RegisterPage /> : <Navigate to="/songs" replace />}
-          />
-          <Route path="*" element={<Navigate to="/" replace />} />
-        </Routes>
+        <Outlet />
       </main>
       <Footer />
     </div>
-    </LeaveGuardProvider>
   );
 }
-
-export default App;

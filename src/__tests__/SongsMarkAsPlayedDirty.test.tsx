@@ -1,6 +1,5 @@
-import { render, screen, fireEvent, waitFor } from '@testing-library/react';
-import { MemoryRouter } from 'react-router-dom';
-import Songs from '../pages/Songs';
+import { screen, fireEvent, waitFor } from '@testing-library/react';
+import { renderSongs } from '../test/renderSongs';
 
 // One guitar song with no duration yet — the case northwood hit: type a
 // duration, click "Mark as played" before saving.
@@ -34,13 +33,6 @@ jest.mock('../services/playlistService', () => ({
 import { songService } from '../services/songService';
 import { songPlayService } from '../services/songPlayService';
 
-function renderSongs() {
-  return render(
-    <MemoryRouter future={{ v7_startTransition: true, v7_relativeSplatPath: true }}>
-      <Songs />
-    </MemoryRouter>
-  );
-}
 
 async function openEditAndTypeDuration() {
   fireEvent.click(await screen.findByText('Alpha')); // row click opens the edit form

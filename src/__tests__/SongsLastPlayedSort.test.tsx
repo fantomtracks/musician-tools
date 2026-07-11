@@ -1,6 +1,5 @@
-import { render, screen, fireEvent, waitFor, within } from '@testing-library/react';
-import { MemoryRouter } from 'react-router-dom';
-import Songs from '../pages/Songs';
+import { screen, fireEvent, waitFor, within } from '@testing-library/react';
+import { renderSongs } from '../test/renderSongs';
 
 // Two guitar songs whose most recent guitar play differs by a day
 const SONGS = [
@@ -41,13 +40,6 @@ jest.mock('../services/playlistService', () => ({
   playlistService: { getAllPlaylists: jest.fn().mockResolvedValue([]) },
 }));
 
-function renderSongs() {
-  return render(
-    <MemoryRouter future={{ v7_startTransition: true, v7_relativeSplatPath: true }}>
-      <Songs />
-    </MemoryRouter>
-  );
-}
 
 function rowTitlesInOrder(): string[] {
   const rows = screen.getAllByRole('row').slice(1); // drop the header row

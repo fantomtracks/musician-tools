@@ -1,7 +1,7 @@
 {
   "name": "musician-tools",
   "private": true,
-  "version": "1.13.0",
+  "version": "1.14.0",
   "type": "module",
   "scripts": {
     "dev": "vite",
@@ -43,7 +43,7 @@
   },
   "jest": {
     "preset": "ts-jest",
-    "testEnvironment": "jsdom",
+    "testEnvironment": "<rootDir>/jest.jsdom.env.cjs",
     "roots": [
       "<rootDir>/src"
     ],

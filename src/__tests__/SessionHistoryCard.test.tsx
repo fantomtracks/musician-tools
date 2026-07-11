@@ -24,7 +24,7 @@ test('a song entry links to its edit form; a topic entry stays plain text', () =
   ]));
 
   const songLink = screen.getByRole('link', { name: 'Sweet Child' });
-  expect(songLink).toHaveAttribute('href', '/songs');
+  expect(songLink).toHaveAttribute('href', '/songs/song-1'); // story 18.2: deep-link to the song route
 
   // The topic entry is plain text, never a link.
   expect(screen.queryByRole('link', { name: 'Pentatonic scale' })).not.toBeInTheDocument();
@@ -39,5 +39,5 @@ test('the whole "Artist - Title" is a single link to the song edit form', () => 
 
   // Artist and title are both inside one link (navigation is by songUid, not the title).
   const link = screen.getByRole('link', { name: "Guns N' Roses - Sweet Child" });
-  expect(link).toHaveAttribute('href', '/songs');
+  expect(link).toHaveAttribute('href', '/songs/song-1'); // story 18.2: deep-link to the song route
 });

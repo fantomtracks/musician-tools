@@ -1,14 +1,12 @@
-import { useNavigate } from 'react-router-dom';
+import { Link, useNavigate } from 'react-router-dom';
 import { useAuth } from '../contexts/AuthContext';
 import { useEffect, useRef, useState } from 'react';
-import { useLeaveGuard } from '../contexts/LeaveGuardContext';
-import { GuardedLink } from '../contexts/LeaveGuardProvider';
 
 // Single source of truth for the main nav links, mapped for both the desktop bar
 // and the mobile menu. Account items (Profile, Sign out) live in the account
 // dropdown on desktop / the account section of the mobile menu, not here.
-const navLinks: { to: string; label: string; state?: { resetToList: boolean } }[] = [
-  { to: '/songs', label: 'Songlist', state: { resetToList: true } },
+const navLinks: { to: string; label: string }[] = [
+  { to: '/songs', label: 'Songlist' },
   { to: '/my-heatmap', label: 'Heatmap' },
   { to: '/my-sessions', label: 'Sessions' },
   { to: '/my-playlists', label: 'Playlists' },
@@ -19,7 +17,6 @@ const navLinks: { to: string; label: string; state?: { resetToList: boolean } }[
 function Header() {
   const { isAuthenticated, logout } = useAuth();
   const navigate = useNavigate();
-  const { attemptLeave } = useLeaveGuard();
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
   const [accountMenuOpen, setAccountMenuOpen] = useState(false);
   const accountMenuRef = useRef<HTMLDivElement>(null);
@@ -104,7 +101,7 @@ function Header() {
                 <span className="text-lg">{mobileMenuOpen ? '✕' : '☰'}</span>
               </button>
             )}
-            <GuardedLink to="/" className="flex items-center gap-2 group">
+            <Link to="/" className="flex items-center gap-2 group">
               <div className="w-8 h-8 rounded-lg bg-gradient-to-br from-brand-500 to-purple-600 flex items-center justify-center">
                 <span className="text-white font-bold text-lg">♪</span>
               </div>
@@ -113,19 +110,18 @@ function Header() {
               <h1 className="text-xl font-bold text-gradient hidden min-[360px]:block whitespace-nowrap">
                 Musician Tools
               </h1>
-            </GuardedLink>
+            </Link>
 
             {/* Navigation (desktop ≥ lg) — flush left, with breathing room after the title */}
             <nav className="hidden lg:flex items-center gap-8 ml-10">
               {isAuthenticated && navLinks.map(link => (
-                <GuardedLink
+                <Link
                   key={link.to}
                   to={link.to}
-                  state={link.state}
                   className="text-gray-700 hover:text-brand-600 font-medium transition-colors dark:text-gray-300 dark:hover:text-brand-400"
                 >
                   {link.label}
-                </GuardedLink>
+                </Link>
               ))}
             </nav>
           </div>
@@ -165,18 +161,18 @@ function Header() {
                     role="menu"
                     className="absolute right-0 mt-2 w-44 rounded-lg border border-gray-200 bg-white shadow-lg py-1 dark:border-gray-700 dark:bg-gray-800 z-50"
                   >
-                    <GuardedLink
+                    <Link
                       to="/profile"
                       role="menuitem"
                       onClick={() => setAccountMenuOpen(false)}
                       className="block px-4 py-2 text-sm text-gray-700 hover:bg-gray-100 hover:text-brand-600 transition-colors dark:text-gray-300 dark:hover:bg-gray-700 dark:hover:text-brand-400"
                     >
                       Profile
-                    </GuardedLink>
+                    </Link>
                     <button
                       type="button"
                       role="menuitem"
-                      onClick={() => { setAccountMenuOpen(false); attemptLeave(() => { void handleLogout(); }); }}
+                      onClick={() => { setAccountMenuOpen(false); handleLogout(); }}
                       className="block w-full text-left px-4 py-2 text-sm text-gray-700 hover:bg-gray-100 hover:text-brand-600 transition-colors dark:text-gray-300 dark:hover:bg-gray-700 dark:hover:text-brand-400"
                     >
                       Sign out
@@ -194,29 +190,28 @@ function Header() {
         <nav id="mobile-nav" className="lg:hidden border-t border-gray-200 dark:border-gray-700">
           <div className="max-w-7xl mx-auto px-2 sm:px-4 py-2 flex flex-col">
             {navLinks.map(link => (
-              <GuardedLink
+              <Link
                 key={link.to}
                 to={link.to}
-                state={link.state}
                 onClick={() => setMobileMenuOpen(false)}
                 className="rounded-lg px-3 py-3 text-gray-700 hover:bg-gray-100 hover:text-brand-600 font-medium transition-colors dark:text-gray-300 dark:hover:bg-gray-700 dark:hover:text-brand-400"
               >
                 {link.label}
-              </GuardedLink>
+              </Link>
             ))}
             {/* Account section (Profile + Sign out) — on mobile these live in the
                 menu since the desktop account dropdown is hidden below lg. */}
             <div className="mt-1 pt-1 border-t border-gray-200 dark:border-gray-700">
-              <GuardedLink
+              <Link
                 to="/profile"
                 onClick={() => setMobileMenuOpen(false)}
                 className="block rounded-lg px-3 py-3 text-gray-700 hover:bg-gray-100 hover:text-brand-600 font-medium transition-colors dark:text-gray-300 dark:hover:bg-gray-700 dark:hover:text-brand-400"
               >
                 Profile
-              </GuardedLink>
+              </Link>
               <button
                 type="button"
-                onClick={() => { setMobileMenuOpen(false); attemptLeave(() => { void handleLogout(); }); }}
+                onClick={() => { setMobileMenuOpen(false); handleLogout(); }}
                 className="w-full rounded-lg px-3 py-3 text-left text-gray-700 hover:bg-gray-100 hover:text-brand-600 font-medium transition-colors dark:text-gray-300 dark:hover:bg-gray-700 dark:hover:text-brand-400"
               >
                 Sign out
