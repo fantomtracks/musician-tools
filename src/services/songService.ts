@@ -29,6 +29,19 @@ export type Song = {
 export type CreateSongDTO = Omit<Song, 'uid' | 'createdAt' | 'updatedAt'>;
 export type UpdateSongDTO = Partial<CreateSongDTO>;
 
+// Thrown on a 409 from create/update (story 17.1's case-insensitive
+// (user_uid, lower(title), COALESCE(lower(artist),'')) unique index). Carries the
+// canonical existing song so callers can block the write and point at it. Mirror
+// of PlaylistConflictError. Detected by response.status — never by the body text.
+export class SongConflictError extends Error {
+  existingSong?: Song;
+  constructor(existingSong?: Song) {
+    super('Song already exists');
+    this.name = 'SongConflictError';
+    this.existingSong = existingSong;
+  }
+}
+
 const API_BASE = '/api';
 
 export const songService = {
@@ -64,6 +77,10 @@ export const songService = {
       body: JSON.stringify(song),
       credentials: 'include'
     });
+    if (response.status === 409) {
+      const body = await response.json().catch(() => ({} as { song?: Song }));
+      throw new SongConflictError(body.song ?? undefined);
+    }
     if (!response.ok) {
       throw new Error('Failed to create song');
     }
@@ -80,6 +97,10 @@ export const songService = {
       body: JSON.stringify(song),
       credentials: 'include'
     });
+    if (response.status === 409) {
+      const body = await response.json().catch(() => ({} as { song?: Song }));
+      throw new SongConflictError(body.song ?? undefined);
+    }
     if (!response.ok) {
       throw new Error('Failed to update song');
     }

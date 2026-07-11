@@ -2,7 +2,7 @@ import { useEffect, useMemo, useRef, useState } from 'react';
 import { useLocation, useNavigate } from 'react-router-dom';
 import { SongForm } from '../components/SongForm';
 import SongsList from '../components/SongsList';
-import { songService, type CreateSongDTO, type UpdateSongDTO, type Song } from '../services/songService';
+import { songService, SongConflictError, type CreateSongDTO, type UpdateSongDTO, type Song } from '../services/songService';
 import { instrumentService, type Instrument } from '../services/instrumentService';
 import { songPlayService, type SongPlay } from '../services/songPlayService';
 import { playlistService, PlaylistConflictError, type Playlist } from '../services/playlistService';
@@ -12,6 +12,7 @@ import { applySongFilters, countActiveFilters, NO_INSTRUMENT } from '../utils/so
 import { handleComboKeyDown, useScrollHighlightIntoView, comboboxInputAria, comboboxOptionAria } from '../utils/comboboxKeyboard';
 import { findDuplicateSong } from '../utils/songDuplicate';
 import { formatLocalDate } from '../utils/heatmap';
+import { useLeaveGuard } from '../contexts/LeaveGuardContext';
 
 const initialSong: CreateSongDTO = {
   title: '',
@@ -49,7 +50,9 @@ function Songs() {
   // redundant auto-saves (compared form-to-form, so it's stable). null = not editing.
   const [editBaselineJson, setEditBaselineJson] = useState<string | null>(null);
   // Story 13.1: ambient auto-save status shown next to the title while editing.
-  const [saveStatus, setSaveStatus] = useState<'idle' | 'saving' | 'saved' | 'error'>('idle');
+  // Story 17.2: 'conflict' = a duplicate (title+artist) blocked the write (client
+  // guard or a server 409) — distinct from 'error' (a retryable network/500 failure).
+  const [saveStatus, setSaveStatus] = useState<'idle' | 'saving' | 'saved' | 'error' | 'conflict'>('idle');
   // Local clock time (HH:MM) of the last successful save — reassurance that it landed.
   const [lastSavedAt, setLastSavedAt] = useState<string | null>(null);
   // Removed unused sortByLastPlayed
@@ -84,6 +87,10 @@ function Songs() {
   const [bulkPlaylistSelection, setBulkPlaylistSelection] = useState<Set<string>>(new Set());
   const [toastMessage, setToastMessage] = useState<string | null>(null);
   const [deleteDialogOpen, setDeleteDialogOpen] = useState(false);
+  // Story 17.2: popup shown when leaving a song whose title was emptied AND it has
+  // value (other fields / practice / playlist). A "fresh" titleless draft is deleted
+  // silently instead (Seuil 1).
+  const [emptyTitleDialogOpen, setEmptyTitleDialogOpen] = useState(false);
   const [deleteMode, setDeleteMode] = useState<'single' | 'multiple' | null>(null);
   const [deleteUid, setDeleteUid] = useState<string | null>(null);
   const [metadataLoading, setMetadataLoading] = useState(false);
@@ -266,6 +273,7 @@ function Songs() {
   
   const location = useLocation();
   const navigate = useNavigate();
+  const { registerLeaveGuard } = useLeaveGuard();
 
   // Single source of truth: the count drives both the boolean and the mobile "Filters · N" badge.
   const activeFilterCount = countActiveFilters({
@@ -346,6 +354,7 @@ function Songs() {
       // Story 13.1: this switches to the list without unmounting, so flush any
       // pending auto-save here too (the unmount-flush effect won't fire).
       void flushOnUnmountRef.current();
+      formActiveRef.current = false; // in-flight create resolving now keeps the song, no re-arm (17.2)
       setPage('list');
       setEditingUid(null);
       setEditBaselineJson(null);
@@ -809,18 +818,47 @@ function Songs() {
     }
   };
 
-  // Story 13.1 — Auto-save: persist the edited song WITHOUT leaving the screen.
-  // While a live duplicate is active, the identity fields (title/artist) are
-  // FROZEN (excluded from the payload → the server keeps their previous value),
-  // so every OTHER field keeps auto-saving (decision 🅰️). Returns true on success.
-  // In-flight guard + a shared debounce timer (in a ref) so flush / Mark / rapid
-  // edits can't overlap or leave a pending save uncancelled.
+  // Story 13.1 + 17.2 — Auto-persist the current form WITHOUT leaving the screen.
+  // ADD mode (editingUid === null) auto-CREATES at the debounce; EDIT mode
+  // auto-UPDATES. The same in-flight guard (savingRef) + shared debounce timer
+  // (saveTimerRef) cover both, so a create and an update can never overlap and a
+  // pending save is always cancellable.
+  //   • Empty (trimmed) title  -> never persisted (a titleless form is not a song).
+  //   • Duplicate (title+artist, client guard OR server 409) -> BLOCKED entirely,
+  //     no create and no partial update (17.2 hardens 13.1, which used to freeze
+  //     identity but save the rest). status 'conflict' + the SongForm banner tell
+  //     the user nothing was written.
+  //   • `lastPlayed` is server-managed -> never sent (HIGH from 13.1).
   const savingRef = useRef(false);
   const saveTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  // Story 17.2: true while the form panel is open. A create that resolves AFTER the
+  // user left (in-flight create + leave) must keep the song but NOT re-arm editing.
+  const formActiveRef = useRef(false);
+  // Story 17.2: the folded (title|artist) key that last hit a server 409. Suppresses
+  // re-firing a create on every keystroke when the 409 body carried no existing song
+  // (so the client-side liveDuplicate guard couldn't pick it up). Cleared implicitly
+  // by comparing against the current key — a differentiated title/artist no longer matches.
+  const conflictKeyRef = useRef<string | null>(null);
+  const foldedTitleArtistKey = (): string =>
+    `${(form.title || '').trim().toLowerCase()}|${(form.artist || '').trim().toLowerCase()}`;
 
   const autoSaveSong = async (): Promise<boolean> => {
-    if (editingUid === null) return false;
-    if (savingRef.current) return false; // a save is already in flight
+    if (savingRef.current) return false; // a create/update is already in flight
+    // Never persist a titleless form — an empty title is a transient state; the
+    // cleanup (delete / popup) happens on exit, not here. Clear the stale "Saved ✓"
+    // so the pill doesn't claim the emptied title was persisted.
+    if (!form.title?.trim()) {
+      setSaveStatus('idle');
+      return false;
+    }
+    // Symmetric duplicate block (17.2): refuse to write on collision. Never delete
+    // or corrupt — the song keeps its last valid value; the banner + status show it.
+    // A server 409 with no echoed song lands here on the next attempt via conflictKeyRef.
+    if (liveDuplicate || conflictKeyRef.current === foldedTitleArtistKey()) {
+      setSaveStatus('conflict');
+      return false;
+    }
+    const uid = editingUid;
     const payload: UpdateSongDTO = {
       ...form,
       instrument: form.instrument && form.instrument.length > 0 ? form.instrument : null,
@@ -830,40 +868,55 @@ function Songs() {
       instrumentDifficulty: form.instrumentDifficulty || {},
       instrumentTuning: form.instrumentTuning || {},
     };
-    // `lastPlayed` is server-managed (set by Mark as Played), never edited in the
-    // form — never send it, or the auto-save would clobber a fresh play.
     delete payload.lastPlayed;
-    const frozen = !!liveDuplicate;
-    if (frozen) {
-      // 🅰️: freeze the identity fields while a duplicate is shown; the rest saves.
-      delete payload.title;
-      delete payload.artist;
-    }
     const snapshot = JSON.stringify(form);
     savingRef.current = true;
     const startedAt = Date.now();
     try {
       setSaveStatus('saving');
-      const updatedSong = await songService.updateSong(editingUid, payload);
-      setSongs(prev => prev.map(song => (song.uid === editingUid ? updatedSong : song)));
-      setEditBaselineJson(snapshot); // the form is now the saved state
-      // Keep "Saving…" perceptible even on an instant (local) save, so every save
-      // produces a visible Saving→Saved transition. On a slow server it just stays
-      // until the response, which already shows progress.
+      if (uid === null) {
+        // Auto-create, then the INVISIBLE add->edit transition: inject the song,
+        // flip to edit mode, seed the baseline. The panel stays, no reload — every
+        // later keystroke flows through the same edit-mode path below.
+        const created = await songService.createSong(payload as CreateSongDTO);
+        setSongs(prev => (prev.some(s => s.uid === created.uid) ? prev : [created, ...prev]));
+        if (!formActiveRef.current) {
+          // The user left while this create was in flight (quitter = garder): keep
+          // the created song in the list, but DON'T re-arm editing on the list page
+          // (that would strand editingUid and, worse, make the next nav delete it).
+          return true;
+        }
+        setEditingUid(created.uid);
+        setEditBaselineJson(snapshot);
+        setPlaylistFilter(''); // parity with the old create flow: keep the new song visible
+      } else {
+        const updatedSong = await songService.updateSong(uid, payload);
+        setSongs(prev => prev.map(song => (song.uid === uid ? updatedSong : song)));
+        setEditBaselineJson(snapshot);
+      }
+      // Keep "Saving…" perceptible even on an instant (local) save.
       const elapsed = Date.now() - startedAt;
       if (elapsed < 500) await new Promise(res => setTimeout(res, 500 - elapsed));
-      // Don't claim "Saved ✓" while the title is frozen — the duplicate warning is
-      // the real signal that the identity wasn't persisted.
-      if (frozen) {
-        setSaveStatus('idle');
-      } else {
-        setLastSavedAt(new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }));
-        setSaveStatus('saved');
-      }
+      setLastSavedAt(new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }));
+      setSaveStatus('saved');
       return true;
     } catch (err) {
+      // Server-authoritative duplicate (stale client list raced the unique index):
+      // block, reconcile the local list so the client guard now sees it too, and
+      // surface the conflict — retrying wouldn't help until the user differentiates.
+      if (err instanceof SongConflictError) {
+        const existing = err.existingSong;
+        if (existing) {
+          setSongs(prev => (prev.some(s => s.uid === existing.uid) ? prev : [existing, ...prev]));
+        }
+        // Remember this collision so we don't re-fire a create/update on every
+        // keystroke — even when the 409 body carried no song to reconcile locally.
+        conflictKeyRef.current = foldedTitleArtistKey();
+        setSaveStatus('conflict');
+        return false;
+      }
       console.error(err);
-      setSaveStatus('error'); // ⚠️ Not saved — surfaced ambiently, retried on the next edit
+      setSaveStatus('error'); // ⚠️ Not saved — retrying — retried on the next edit
       return false;
     } finally {
       savingRef.current = false;
@@ -874,21 +927,34 @@ function Songs() {
   const autoSaveRef = useRef(autoSaveSong);
   autoSaveRef.current = autoSaveSong;
 
-  // Debounced auto-save (~1.2 s). The timer lives in a ref so flush can cancel it.
+  // Debounced auto-persist (~1.2 s). Add mode CREATES once there's a non-empty
+  // title; edit mode UPDATES once the form diverges from the baseline. The timer
+  // lives in a ref so flush can cancel it.
   useEffect(() => {
-    if (editingUid === null) return;
-    if (editBaselineJson !== null && JSON.stringify(form) === editBaselineJson) return;
+    if (editingUid === null) {
+      // Add mode: nothing to create until the user gives it a (trimmed) title.
+      if (!form.title?.trim()) return;
+    } else {
+      if (editBaselineJson !== null && JSON.stringify(form) === editBaselineJson) return;
+    }
     if (saveTimerRef.current) clearTimeout(saveTimerRef.current);
     saveTimerRef.current = setTimeout(() => { void autoSaveRef.current(); }, 1200);
     return () => { if (saveTimerRef.current) { clearTimeout(saveTimerRef.current); saveTimerRef.current = null; } };
   }, [form, editingUid, editBaselineJson]);
 
-  // Flush a pending auto-save (Back / Cancel / Enter / Mark / unmount). Cancels the
-  // debounce timer first so it can't fire a second, overlapping save. Returns false
-  // only when a save was attempted and FAILED.
+  // Flush a pending auto-save (Back / Enter / Mark / navigation / unmount). Cancels
+  // the debounce timer first so it can't fire a second, overlapping save. Returns
+  // false only when a save was attempted and FAILED.
   const flushAutoSave = async (): Promise<boolean> => {
     if (saveTimerRef.current) { clearTimeout(saveTimerRef.current); saveTimerRef.current = null; }
-    if (editingUid !== null && editBaselineJson !== null && JSON.stringify(form) !== editBaselineJson) {
+    if (editingUid === null) {
+      // Add mode: flush a pending create if there's a titled, non-empty draft.
+      if (form.title?.trim() && JSON.stringify(form) !== JSON.stringify(initialSong)) {
+        return autoSaveRef.current();
+      }
+      return true;
+    }
+    if (editBaselineJson !== null && JSON.stringify(form) !== editBaselineJson) {
       return autoSaveRef.current();
     }
     return true;
@@ -900,9 +966,9 @@ function Songs() {
   flushOnUnmountRef.current = flushAutoSave;
   useEffect(() => () => { void flushOnUnmountRef.current(); }, []);
 
-  // Story 13.1: leave the edit screen explicitly (sticky "Back to songlist" / Cancel).
-  const backToList = async (): Promise<void> => {
-    const ok = await flushAutoSave();
+  // Reset the form panel back to the list (shared by every leave path).
+  const returnToList = (): void => {
+    formActiveRef.current = false; // an in-flight create resolving now keeps the song but won't re-arm editing
     setEditingUid(null);
     setForm(initialSong);
     setEditBaselineJson(null);
@@ -910,7 +976,87 @@ function Songs() {
     setCameFromDuplicate(false);
     setSaveStatus('idle');
     setPage('list');
-    if (!ok) {
+  };
+
+  // Story 17.2 — Seuil 1: a song is "fresh" if the only thing that ever happened to
+  // it is the (now-emptied) title — no other field filled, no practice, no playlist.
+  // Such a draft is deleted silently on leave; anything with value gets the popup.
+  const isFreshSong = (): boolean => {
+    if (editingUid === null) return false;
+    const bareForm = JSON.stringify({ ...form, title: '' });
+    const bareInitial = JSON.stringify({ ...initialSong, title: '' });
+    if (bareForm !== bareInitial) return false;
+    if (editingSongPlays.length > 0) return false; // has practice history
+    const record = songs.find(s => s.uid === editingUid);
+    if (record?.lastPlayed) return false;
+    if (playlists.some(pl => pl.songUids?.includes(editingUid))) return false; // in a playlist
+    return true;
+  };
+
+  // Delete the song currently open in the form (its title was emptied). Best-effort:
+  // a failed delete still lets the user leave — the song keeps its last server value.
+  const deleteEditingSong = async (): Promise<void> => {
+    const uid = editingUid;
+    if (uid === null) return;
+    try {
+      await songService.deleteSong(uid);
+      setSongs(prev => prev.filter(s => s.uid !== uid));
+    } catch (err) {
+      console.error(err);
+    }
+  };
+
+  // Story 17.2 — the single leave gate consulted by EVERY exit (Back button, header
+  // links via the LeaveGuard context, unmount). If the open song has an empty title:
+  // fresh → delete it silently then leave; has-value → open the popup and defer the
+  // navigation (`proceed`) until the user picks Delete or Continue. Otherwise leave now.
+  const pendingLeaveRef = useRef<(() => void) | null>(null);
+  const attemptLeave = (proceed: () => void): void => {
+    if (editingUid !== null && !form.title?.trim()) {
+      if (isFreshSong()) {
+        void deleteEditingSong().then(proceed);
+      } else {
+        pendingLeaveRef.current = proceed;
+        setEmptyTitleDialogOpen(true);
+      }
+      return;
+    }
+    proceed();
+  };
+
+  // Story 17.2 — register the leave gate app-wide so EVERY in-app navigation (header
+  // links, logo, profile, logout — all GuardedLink / attemptLeave) consults it, not
+  // just the Back button. Registered while mounted; a stable delegate reads the
+  // latest attemptLeave via a ref so the closure never goes stale.
+  const attemptLeaveRef = useRef(attemptLeave);
+  attemptLeaveRef.current = attemptLeave;
+  useEffect(() => {
+    registerLeaveGuard((proceed) => attemptLeaveRef.current(proceed));
+    return () => registerLeaveGuard(null);
+  }, [registerLeaveGuard]);
+
+  // Story 17.2 — the one exit the guard can't intercept (browser refresh / tab close)
+  // gets the native beforeunload prompt while a titleless draft is open.
+  useEffect(() => {
+    if (editingUid === null || form.title?.trim()) return;
+    const handler = (e: BeforeUnloadEvent) => { e.preventDefault(); e.returnValue = ''; };
+    window.addEventListener('beforeunload', handler);
+    return () => window.removeEventListener('beforeunload', handler);
+  }, [editingUid, form.title]);
+
+  // Story 13.1 + 17.2: leave the form explicitly (sticky "Back to songlist"). An
+  // empty-title draft goes through the leave gate (delete / popup); otherwise flush
+  // any pending auto-save then return to the list.
+  const backToList = async (): Promise<void> => {
+    if (editingUid !== null && !form.title?.trim()) {
+      attemptLeave(returnToList);
+      return;
+    }
+    const ok = await flushAutoSave();
+    returnToList();
+    // Only a genuine save FAILURE toasts. A `false` from an in-flight create/save
+    // (savingRef held) isn't a failure — that op is still resolving on its own.
+    if (!ok && !savingRef.current) {
       setToastMessage('Some changes could not be saved');
       setTimeout(() => setToastMessage(null), 2500);
     }
@@ -1246,6 +1392,8 @@ function Songs() {
     setEditBaselineJson(JSON.stringify(builtForm));
     setSaveStatus('idle');
     setLastSavedAt(null);
+    conflictKeyRef.current = null; // 17.2: fresh edit session, no stale conflict key
+    formActiveRef.current = true;
     setMetadataSource(null);
     setCameFromDuplicate(fromDuplicate);
     setError(null);
@@ -1288,61 +1436,10 @@ function Songs() {
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-
-    // Story 13.1: in EDIT mode there is no Save button — pressing Enter just
-    // flushes the pending auto-save and STAYS on the song (no redirect).
-    if (editingUid !== null) {
-      await flushAutoSave();
-      return;
-    }
-
-    // CREATE mode (explicit "Add"): validation + duplicate guard + redirect to list.
-    const payload: CreateSongDTO = {
-      ...form,
-      instrument: form.instrument && form.instrument.length > 0 ? form.instrument : null,
-      technique: form.technique && form.technique.length > 0 ? form.technique : [],
-      genre: form.genre && form.genre.length > 0 ? form.genre : [],
-      myInstrumentUid: form.myInstrumentUid ? form.myInstrumentUid : undefined,
-      instrumentDifficulty: form.instrumentDifficulty || {},
-      instrumentTuning: form.instrumentTuning || {},
-    };
-
-    try {
-      setLoading(true);
-      setError(null);
-
-      if (liveDuplicate) {
-        setError('This song already exists in your songlist.');
-        setLoading(false);
-        return;
-      }
-
-      const newSong = await songService.createSong(payload);
-
-      // Add new song to selected playlists
-      await Promise.all(
-        playlists.map(async playlist => {
-          const shouldHaveSong = selectedPlaylistUids.has(playlist.uid);
-          if (shouldHaveSong) {
-            const nextSongUids = [...(playlist.songUids || []), newSong.uid];
-            await playlistService.updatePlaylist(playlist.uid, { songUids: nextSongUids });
-          }
-        })
-      );
-
-      // Reset playlist filter so the new song is visible
-      setPlaylistFilter('');
-
-      setForm(initialSong);
-      setMetadataSource(null);
-      setCameFromDuplicate(false);
-      setPage('list');
-    } catch (err) {
-      setError('Error while saving');
-      console.error(err);
-    } finally {
-      setLoading(false);
-    }
+    // Story 17.2: there is no more Add/Save button — pressing Enter just flushes the
+    // pending auto-save (CREATE in add mode, UPDATE in edit mode) and STAYS on the
+    // song (no redirect). The debounce would have persisted it anyway.
+    await flushAutoSave();
   };
 
   // handleEdit supprimé (non utilisé)
@@ -1684,6 +1781,28 @@ function Songs() {
         }}
       />
 
+      {/* Story 17.2: leaving a valued song whose title was emptied. Delete removes
+          it; Continue editing keeps you on the form (re-checked on the next exit). */}
+      <ConfirmDialog
+        isOpen={emptyTitleDialogOpen}
+        title="This song has no title"
+        message="Your song has no title anymore. Delete it, or continue editing to give it one?"
+        confirmText="Delete"
+        cancelText="Continue editing"
+        isDangerous
+        onConfirm={async () => {
+          setEmptyTitleDialogOpen(false);
+          const proceed = pendingLeaveRef.current;
+          pendingLeaveRef.current = null;
+          await deleteEditingSong();
+          if (proceed) proceed();
+        }}
+        onCancel={() => {
+          setEmptyTitleDialogOpen(false);
+          pendingLeaveRef.current = null; // stay on the form; re-checked on next exit
+        }}
+      />
+
       {error && (
         <div className="mx-4 my-4 rounded-md border border-red-300 bg-red-50 text-red-700 p-3 flex items-center justify-between">
           <span>{error}</span>
@@ -1805,6 +1924,13 @@ function Songs() {
           onAddNew={() => {
             setForm(initialSong);
             setEditingUid(null);
+            // Story 17.2: arm a clean add-mode auto-create session — no stale
+            // baseline/status/conflict from a previous edit leaking onto the blank form.
+            setEditBaselineJson(null);
+            setSaveStatus('idle');
+            setLastSavedAt(null);
+            conflictKeyRef.current = null;
+            formActiveRef.current = true;
             setMetadataSource(null);
             setCameFromDuplicate(false);
             setPage('form');
@@ -1827,7 +1953,7 @@ function Songs() {
             >
               <span aria-hidden="true">←</span> Back to songlist
             </button>
-            {editingUid && (
+            {(editingUid || saveStatus !== 'idle') && (
               <span className="text-xs font-medium" role="status" aria-live="polite">
                 {saveStatus === 'saving' && (
                   <span className="inline-flex items-center gap-1.5 text-gray-500 dark:text-gray-400">
@@ -1842,7 +1968,10 @@ function Songs() {
                   </span>
                 )}
                 {saveStatus === 'error' && (
-                  <span className="text-red-600 dark:text-red-400">⚠️ Not saved — retry</span>
+                  <span className="text-red-600 dark:text-red-400">⚠️ Not saved — retrying</span>
+                )}
+                {saveStatus === 'conflict' && (
+                  <span className="text-amber-600 dark:text-amber-400">⚠️ Not saved — already exists</span>
                 )}
               </span>
             )}
@@ -1873,7 +2002,6 @@ function Songs() {
             onSetInstrumentLinksForInstrument={setInstrumentLinksForInstrument}
             onSetStreamingLinks={setStreamingLinks}
             onSubmit={handleSubmit}
-            onCancel={() => { void backToList(); }}
             duplicate={liveDuplicate}
             onEditDuplicate={liveDuplicate ? () => openSongForEdit(liveDuplicate, editingUid === null) : undefined}
             onDelete={editingUid ? () => handleDelete(editingUid) : undefined}

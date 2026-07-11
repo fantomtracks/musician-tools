@@ -26,7 +26,6 @@ type SongFormProps = {
   onSetInstrumentLinksForInstrument?: (instrumentType: string, links: Array<{ label?: string; url: string }>) => void;
   onSetStreamingLinks?: (links: Array<{ label: string; url: string }>) => void;
   onSubmit: (e: React.FormEvent) => void;
-  onCancel: () => void;
   onDelete?: () => void;
   onMarkAsPlayedNow?: (instrumentType: string) => void;
   songPlays?: SongPlay[];
@@ -111,7 +110,7 @@ const getAvailableTechniques = (instrumentType: string) => {
 };
 
 export function SongForm(props: SongFormProps) {
-  const { mode, form, loading, onChange, onSetDurationSeconds, onChangeInstruments, onSetTechniques, onToggleGenre, onToggleLanguage, onSetInstrumentDifficulty, onSetMyInstrumentUid, onSetInstrumentTuning, onToggleTechnique, onSetInstrumentLinksForInstrument, onSetStreamingLinks, onSubmit, onCancel, onDelete, onMarkAsPlayedNow, songPlays, formatLastPlayed, myInstruments, playlistSlot, suggestedAlbums = [], suggestedArtists = [], metadataLoading = false, metadataSource = null, onAutoFillMetadata, duplicate = null, onEditDuplicate } = props;
+  const { mode, form, loading, onChange, onSetDurationSeconds, onChangeInstruments, onSetTechniques, onToggleGenre, onToggleLanguage, onSetInstrumentDifficulty, onSetMyInstrumentUid, onSetInstrumentTuning, onToggleTechnique, onSetInstrumentLinksForInstrument, onSetStreamingLinks, onSubmit, onDelete, onMarkAsPlayedNow, songPlays, formatLastPlayed, myInstruments, playlistSlot, suggestedAlbums = [], suggestedArtists = [], metadataLoading = false, metadataSource = null, onAutoFillMetadata, duplicate = null, onEditDuplicate } = props;
   const currentInstruments = useMemo(() => Array.isArray(form.instrument) ? form.instrument : (form.instrument ? [form.instrument] : []), [form.instrument]);
   const currentTechniques = useMemo(() => Array.isArray(form.technique) ? form.technique : [], [form.technique]);
   const currentGenres = Array.isArray(form.genre) ? form.genre : (form.genre ? [form.genre] : []);
@@ -830,27 +829,10 @@ export function SongForm(props: SongFormProps) {
             </button>
           )}
         </div>
-        {/* Story 13.1: edit mode auto-saves — no Save/Cancel here; the sticky
-            "Back to songlist" header handles leaving. Create keeps explicit Add. */}
-        {mode === 'add' && (
-          <div className="flex items-center gap-2">
-            <button
-              type="button"
-              className="inline-flex items-center rounded-md bg-gray-100 dark:bg-gray-700 text-gray-800 dark:text-gray-100 px-3 py-2 hover:bg-gray-200 dark:hover:bg-gray-600 disabled:opacity-50"
-              onClick={onCancel}
-              disabled={loading}
-            >
-              Cancel
-            </button>
-            <button
-              type="submit"
-              className="inline-flex items-center rounded-md bg-brand-500 text-white px-3 py-2 hover:bg-brand-600 disabled:opacity-50"
-              disabled={loading}
-            >
-              {loading ? 'Loading...' : 'Add'}
-            </button>
-          </div>
-        )}
+        {/* Story 13.1 + 17.2: both add and edit auto-save — no Save/Cancel/Add
+            button here; the sticky "Back to songlist" header handles leaving. In
+            add mode the song is created at the debounce, then the panel switches
+            to edit mode invisibly. */}
       </div>
     </form>
   );

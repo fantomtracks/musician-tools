@@ -40,7 +40,6 @@ function renderForm(overrides: Partial<CreateSongDTO> = {}, extraProps: Partial<
       onSetMyInstrumentUid={jest.fn()}
       onToggleTechnique={jest.fn()}
       onSubmit={onSubmit}
-      onCancel={jest.fn()}
       suggestedAlbums={extraProps.suggestedAlbums || ['Revolver']}
       suggestedArtists={extraProps.suggestedArtists || ['The Beatles']}
     />
@@ -172,7 +171,6 @@ function renderWithCallbacks() {
       onSetMyInstrumentUid={jest.fn()}
       onToggleTechnique={jest.fn()}
       onSubmit={onSubmit}
-      onCancel={jest.fn()}
       suggestedAlbums={[]}
       suggestedArtists={[]}
     />,
