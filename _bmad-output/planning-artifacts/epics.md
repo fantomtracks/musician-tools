@@ -21,6 +21,9 @@ epic16:
 epic17:
   source: 'issu brainstorm 2026-07-10 (auto-création fiche chanson, exclue d''Epic 16) — synthèse brainstorming-session-2026-07-10-0810.md ; décisions ouvertes tranchées northwood 2026-07-10 (casse-insensible, interroger prod avant merge FK, blocage doublon symétrique durcit 13.1)'
   added: 2026-07-10
+epic18:
+  source: 'issu rétro Epic 17 + QA 17.2 (fiche chanson = état local, pas une route) — cadré en ADR architecture-song-route-2026-07-11.md (décision northwood : migrer vers data-router). Ferme 3 items nav (refresh, back-button, guard maison 17.2). Découpage tranché : 2 stories (migration pure → route-ify + swap guard).'
+  added: 2026-07-11
 ---
 
 # musician-tools - Epic Breakdown
@@ -219,7 +222,10 @@ Deux items indépendants sortis de la revue deferred-work : un **vrai bug prod**
 ### Epic 17: Auto-création fiche chanson + unicité serveur (issu brainstorm 2026-07-10)
 L'auto-création exclue d'Epic 16, cadrée après brainstorm (First Principles + Reverse Brainstorming, 8 décisions verrouillées). Le **titre devient l'identité** (artiste facultatif) : on retire le bouton `Add` interne du `SongForm` et la chanson **naît au débounce** (calque 13.1) au lieu d'un submit explicite ; garde-fous anti-chanson-vide (régimes Seuil 1), bascule `add→edit` invisible + verrou in-flight. En parallèle, une **politique doublon unique dans toute l'app** : clé **(titre + artiste)** casse-insensible, **blocage symétrique création + édition** (durcit 13.1 : « bloque » au lieu de « prévient mais sauve »), adossée à une **garde serveur** (index unique + 409, mirror 10.1). Stories : 17.1 unicité chanson serveur (merge FK ciblé + index unique + 409), 17.2 auto-création front + blocage doublon symétrique (backlog). ⚠️ 17.1 **rouvre le merge FK** esquivé par 16.1 → interroger la prod d'abord. **Ferme** l'item 🧊 course find-or-create chansons. _Détail § Epic 17 ci-dessous._
 
-**Dépendances :** E1 → E2 → (E3 ∥ E4). Les epics 3 et 4 sont indépendants l'un de l'autre. E6 dépend d'E4 (pont Mark as Played). E5 est transverse ; E9 (confort UI, post-rétro) est autonome et se solde avant E7 ; E7 (compte + sécurité, hors-PRD) est autonome — ne dépend d'aucun épic PRD et n'en bloque aucun. E10–E17 (confort/dette/sécu post-rétro) sont de même autonomes, sans dépendance inter-epics, en exécution légère (E15 s'adosse à l'auth durcie d'E7 mais ne dépend d'aucun autre épic). **Intra-E17 :** 17.2 (front) dépend de 17.1 (garde serveur + 409) ; ordre imposé 17.1 → 17.2. E17 durcit rétroactivement la politique doublon posée par 13.1 (édition) mais ne dépend d'aucun autre épic. Les NFR1-NFR6 et NFR-S1-S4 transverses s'appliquent aux critères d'acceptation des stories concernées.
+### Epic 18: Fiche chanson = vraie route (migration data-router)
+Issu de la rétro Epic 17 + QA 17.2 : la fiche chanson est un **état local** (`page:'form'` + `editingUid`), pas une route → 3 symptômes de même racine (refresh sur une chanson → songlist ; back-button navigateur non gardé ; `useBlocker` indispo → guard de nav **maison** construit en 17.2). Cadré en **ADR** (`architecture-song-route-2026-07-11.md`, décision northwood) : **migrer `<BrowserRouter>` → `createBrowserRouter`/`<RouterProvider>` (data-router)** et **router-ifier le form** (`/songs`, `/songs/new`, `/songs/:uid`). Débloque `useBlocker` qui **remplace intégralement** le guard maison → **dette nette réduite**. Stories : 18.1 migration data-router **pure** (aucun changement de comportement, toutes routes à l'identique), 18.2 route-ify le form + swap guard→`useBlocker` (ferme refresh + back-button + 404 scopé deep-link). ⚠️ **Révise du code shippé** (guard 17.2, v1.13.0) : le remplacement `useBlocker` doit préserver l'UX validée en QA 17.2. _Détail § Epic 18 ci-dessous._
+
+**Dépendances :** E1 → E2 → (E3 ∥ E4). Les epics 3 et 4 sont indépendants l'un de l'autre. E6 dépend d'E4 (pont Mark as Played). E5 est transverse ; E9 (confort UI, post-rétro) est autonome et se solde avant E7 ; E7 (compte + sécurité, hors-PRD) est autonome — ne dépend d'aucun épic PRD et n'en bloque aucun. E10–E17 (confort/dette/sécu post-rétro) sont de même autonomes, sans dépendance inter-epics, en exécution légère (E15 s'adosse à l'auth durcie d'E7 mais ne dépend d'aucun autre épic). **Intra-E17 :** 17.2 (front) dépend de 17.1 (garde serveur + 409) ; ordre imposé 17.1 → 17.2. E17 durcit rétroactivement la politique doublon posée par 13.1 (édition) mais ne dépend d'aucun autre épic. **Intra-E18 :** 18.2 (route-ify + swap guard) dépend de 18.1 (migration data-router) ; ordre imposé 18.1 → 18.2. E18 révise rétroactivement le guard de nav livré par 17.2 (le supprime au profit de `useBlocker`) mais ne dépend d'aucun autre épic. Les NFR1-NFR6 et NFR-S1-S4 transverses s'appliquent aux critères d'acceptation des stories concernées.
 
 ## Epic 1: Ma bibliothèque de sujets de travail
 
@@ -1425,3 +1431,70 @@ So that la création soit aussi fluide que l'édition (auto-save) et que je ne p
 **Then** **aucune persistance** — ni création, ni update ; bannière « **not saved — already exists** » ; l'invariant est **bloquer = refuser d'écrire, jamais supprimer/corrompre** (la chanson garde sa dernière valeur valide) ; le blocage **force la résolution** (rien ne se persiste tant que non différencié, y compris éditer un champ d'un doublon legacy) mais **n'enferme pas** dans la page (titre non vide → pas de popup titre-vide → on peut toujours quitter) ; débloqué dès qu'on différencie titre ou artiste
 
 **And** ⚠️ **révise 13.1 (shippée)** : la politique doublon en **édition** passe de « prévient mais sauve » à « bloque » — cette AC est le durcissement assumé ; UI/messages en anglais ; réutiliser les patterns existants (statut Saving/Saved 13.1, `ConfirmDialog` pour la popup titre-vide, toasts/bannières manuels — pas de lib) ; suite front verte (tests du débounce-create, du verrou in-flight, des deux régimes Seuil 1, du blocage 409 en création ET édition) ; mettre à jour la décision 13.1 du 30/06 dans `deferred-work.md`. `[src/components/SongForm.tsx, src/pages/Songs.tsx, src/services/songService.ts]`
+
+## Epic 18: Fiche chanson = vraie route (migration data-router)
+
+_Ajouté 2026-07-11 — issu de la **rétro Epic 17** (leçon #1 : dette « form = état local, pas une route » remontée 3× dans le même epic) + QA 17.2 (refresh signalé northwood). Cadré en **ADR** `_bmad-output/planning-artifacts/architecture-song-route-2026-07-11.md` (cadrage archi 2026-07-11, décision northwood : migrer vers data-router). Epic **dette technique / archi** : réduire la dette du socle (supprimer le guard maison 17.2) tout en fermant 3 symptômes UX._
+
+**Objectif :** faire de la fiche chanson une **vraie route** (`/songs/:uid`) en migrant le socle routing vers le **data-router** react-router (`createBrowserRouter`/`<RouterProvider>`), ce qui débloque **`useBlocker`**. Ferme d'un coup : **refresh sur une chanson → reste sur la chanson** ; **back-button navigateur gardé** ; et **supprime le guard de navigation maison** (`LeaveGuardContext`/`Provider`/`GuardedLink`) construit en 17.2 → dette nette réduite. Aucun FR/NFR du PRD ; archi + confort + hygiène de dette.
+
+**Découpage :** 2 stories, **ordre imposé** 18.1 (migration infra) → 18.2 (route-ify + swap guard), pour **dé-risquer** la refonte de la racine routing. ⚠️ 18.2 **révise du code shippé** (le guard 17.2, en prod v1.13.0) : `useBlocker` doit préserver l'UX validée en QA 17.2 (popup titre-vide, fresh-delete silencieux, symétrie du blocage doublon).
+
+**Décisions verrouillées (ADR 2026-07-11) :**
+1. **Migrer vers data-router** (`createBrowserRouter` + `<RouterProvider>`, `future` flags conservés) — pas de refonte du modèle d'auth (**pas de loaders** ; wrapper `<RequireAuth>`, `AuthProvider` reste au-dessus du router).
+2. **Routes** : `/songs` (liste) · `/songs/new` (ajout, form vierge) · `/songs/:uid` (édition). `editingUid`/`page` **dérivés de l'URL** (`useParams`).
+3. **Guard** : **supprimer** `LeaveGuardContext.ts` + `LeaveGuardProvider.tsx` + `GuardedLink` (Header → `<Link>` simples) + le `LeaveGuardProvider` d'`App` ; **remplacer** par `useBlocker`, en **réutilisant** `isFreshSong`/`deleteEditingSong`/`ConfirmDialog` de 17.2. `beforeunload` conservé.
+4. **Auto-création** : `navigate('/songs/' + newUid, { replace: true })` (bascule invisible, zéro spam d'historique).
+5. **Deep-link** : `/songs/:uid` inconnu/pas-à-moi → 404 scopé (invariant 7.5, pas d'oracle) → écran « Song not found » + retour liste.
+
+### Story 18.1: Migration vers le data-router (infra pure, zéro changement de comportement)
+
+As a mainteneur du socle,
+I want migrer le routing de `<BrowserRouter>` vers `createBrowserRouter`/`<RouterProvider>` sans rien changer au comportement,
+So that `useBlocker` devienne disponible pour la story suivante, en ayant prouvé d'abord que la bascule d'infra ne casse aucune route.
+
+**Contexte :** `src/main.tsx` = `<BrowserRouter future={{…}}>` → `<AuthProvider>` → `<App>`. `src/App.tsx` = `<LeaveGuardProvider>` → div → `<Header/> <VerifyEmailBanner/> <main><Routes>…</Routes></main> <Footer/>`. Les routes protégées sont des éléments conditionnels `isAuthenticated ? <Page/> : <Navigate to="/login"/>`. `[src/main.tsx, src/App.tsx, éventuel src/components/RequireAuth.tsx NEW]`
+
+**Acceptance Criteria:**
+
+**Given** le socle routing actuel (`<BrowserRouter>`)
+**When** on migre vers le data-router
+**Then** `main.tsx` rend `<RouterProvider router={router}/>` avec un `createBrowserRouter([...])` (les mêmes `future` flags `v7_startTransition`/`v7_relativeSplatPath` conservés) ; `AuthProvider` reste **au-dessus** de `RouterProvider` (l'auth reste un contexte client, `useAuth` dispo dans tous les éléments de route) ; **aucun loader/action** react-router n'est introduit
+
+**Given** le layout et toutes les routes existantes
+**When** on définit l'arbre de routes du data-router
+**Then** le layout racine (Header / VerifyEmailBanner / `<main><Outlet/></main>` / Footer) devient l'**élément d'une route layout** ; les routes protégées passent par un wrapper **`<RequireAuth>`** (`isAuthenticated ? <Outlet/> : <Navigate to="/login" replace/>`) ; **toutes** les routes existantes sont reproduites **à l'identique** (`/`, `/songs`, `/my-instruments`, `/my-playlists`, `/my-topics`, `/my-sessions`, `/my-heatmap`, `/profile`, `/verify-email`, `/forgot-password`, `/reset-password`, `/login`, `/register`, `*`) avec les **mêmes** redirections (`/login`↔`/songs` selon auth, `*`→`/`)
+
+**Given** la fiche chanson
+**When** la migration 18.1 est livrée
+**Then** elle **reste** en `page`-state local (pas encore route-ifiée — c'est 18.2) ; le **guard maison 17.2 reste en place** cette story ; **aucun changement de comportement UX** observable (mêmes URLs, mêmes flux, refresh se comporte comme avant)
+
+**And** aucune régression : suites front + back vertes, tsc + lint clean ; les tests qui rendent des pages via `<MemoryRouter>` adaptés au besoin (ou `createMemoryRouter`) sans changer ce qu'ils vérifient ; ⚠️ vérifier `AuthProvider × RouterProvider` (loading, redirections) et le double-invoke StrictMode. UI/commentaires en anglais. `[src/main.tsx, src/App.tsx, src/components/RequireAuth.tsx (NEW), tests de routing]`
+
+### Story 18.2: Route-ify la fiche chanson + remplacer le guard maison par `useBlocker`
+
+As a musicien qui édite une chanson,
+I want que l'URL reflète la chanson ouverte (`/songs/:uid`),
+So that rafraîchir reste sur la chanson, le bouton back du navigateur soit géré, et l'app n'ait plus de guard de navigation maison à maintenir.
+
+**Contexte :** s'appuie sur le data-router de 18.1. `Songs.tsx` porte aujourd'hui `page:'list'|'form'` + `editingUid` en `useState`, et l'auto-save/auto-création/blocage doublon/Seuil 1 de 13.1+17.2. Le guard maison 17.2 (`LeaveGuardContext`/`Provider`/`GuardedLink` + enregistrement `attemptLeave`) est à retirer. `[src/pages/Songs.tsx, src/components/Header.tsx, DELETE src/contexts/LeaveGuardContext.ts + LeaveGuardProvider.tsx, src/services/songService.ts (getSong déjà là)]`
+
+**Acceptance Criteria:**
+
+**Given** les routes `/songs` / `/songs/new` / `/songs/:uid` (volet **route-ify**)
+**When** on navigue
+**Then** `editingUid` et le mode (liste/add/edit) sont **dérivés de l'URL** (`useParams`) et non plus d'un `useState` : `/songs` → liste ; `/songs/new` → add (`editingUid = null`) ; `/songs/:uid` → édition (charge la chanson depuis `songs` en mémoire ou `getSong(uid)`) ; **refresh sur `/songs/:uid` reste sur la chanson** ; toute la machinerie 13.1/17.2 (auto-save débounce, verrou in-flight, `editBaselineJson`, blocage doublon symétrique, Seuil 1) est **conservée** — seul le transport (état local → URL) change
+
+**Given** l'auto-création (volet **bascule invisible**)
+**When** on saisit un titre sur `/songs/new` et que la chanson naît au débounce
+**Then** `navigate('/songs/' + newUid, { replace: true })` bascule vers l'édition — **zéro rechargement**, **zéro entrée d'historique** parasite (le `replace` remplace `/songs/new`) ; le verrou in-flight `savingRef` (17.2) prévient toujours la double-création
+
+**Given** un titre vidé sur une chanson à valeur (volet **guard → `useBlocker`**)
+**When** l'utilisateur tente de quitter — **y compris le bouton back du navigateur / popstate**
+**Then** un **`useBlocker`** intercepte : réutilise `isFreshSong`/`deleteEditingSong`/`ConfirmDialog` de 17.2 — fresh → DELETE silencieux + `blocker.proceed()` ; à valeur → popup « This song has no title » (Delete → delete + `proceed()` ; Continue editing → `blocker.reset()`) ; le **guard maison de 17.2 est SUPPRIMÉ** (`LeaveGuardContext.ts` + `LeaveGuardProvider.tsx` **supprimés**, `Header` revient à des `<Link>` simples, `App` sans `LeaveGuardProvider`) ; `beforeunload` (refresh/fermeture d'onglet) **conservé**
+
+**Given** un deep-link `/songs/:uid` inconnu ou appartenant à un autre user (volet **404 scopé**)
+**When** la page tente de charger la chanson
+**Then** `getSong` renvoie **404 scopé** (invariant 7.5 : « pas à toi » indistinguable de « n'existe pas ») → écran **« Song not found »** + lien retour `/songs` ; aucun oracle d'existence
+
+**And** ⚠️ **révise le guard livré en 17.2 (prod v1.13.0)** : le comportement UX (popup titre-vide, fresh-delete silencieux, symétrie du blocage doublon) doit être **préservé à l'identique** — validé par la QA nav app-wide (comme 17.2) ; UI/messages en anglais ; suites vertes (tests route/param, deep-link 404, `useBlocker` popup fresh vs à-valeur, auto-création `navigate(replace)`) ; tsc + lint clean ; mettre à jour `deferred-work.md` (les 2 defer nav de 17.2 → **fermés**). `[src/pages/Songs.tsx, src/components/Header.tsx, DELETE src/contexts/LeaveGuardContext.ts + src/contexts/LeaveGuardProvider.tsx]`
