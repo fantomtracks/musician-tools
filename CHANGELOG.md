@@ -12,6 +12,12 @@ project adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+## [1.13.0] — 2026-07-11
+
+### Changed
+- **Adding a song is now effortless** — no more "Add" button: give your song a title and it saves itself as you type, exactly like editing does. If you change your mind and clear the title, a brand-new blank song is discarded automatically; one you've already filled in asks before leaving.
+- **Duplicates are blocked, not half-saved** — typing a title + artist that already exists no longer saves anything; you get a clear "already exists" note until you make it distinct (in both adding and editing).
+
 ## [1.12.0] — 2026-07-10
 
 ### Changed
