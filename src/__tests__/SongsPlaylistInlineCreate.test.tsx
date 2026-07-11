@@ -1,6 +1,5 @@
-import { render, screen, fireEvent, waitFor, act } from '@testing-library/react';
-import { MemoryRouter } from 'react-router-dom';
-import Songs from '../pages/Songs';
+import { screen, fireEvent, waitFor, act } from '@testing-library/react';
+import { renderSongs } from '../test/renderSongs';
 
 // Let pending promises + effects settle (the editing-data effect re-seeds the
 // playlist selection behind an async getPlays — we must observe the SETTLED DOM,
@@ -62,13 +61,6 @@ const mockedPlaylistService = playlistService as jest.Mocked<typeof playlistServ
 
 const PLACEHOLDER = 'Search, select or create a playlist';
 
-function renderSongs() {
-  return render(
-    <MemoryRouter future={{ v7_startTransition: true, v7_relativeSplatPath: true }}>
-      <Songs />
-    </MemoryRouter>
-  );
-}
 
 // Open the edit form for the only song and focus the playlist picker input.
 async function openPickerAndType(text: string) {

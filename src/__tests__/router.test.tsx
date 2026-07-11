@@ -70,6 +70,19 @@ describe('router — data-router route tree (story 18.1)', () => {
     expect(screen.getByText('SONGS')).toBeInTheDocument();
   });
 
+  test.each(['/songs/new', '/songs/abc-123'])(
+    'the song form route %s renders Songs when signed in (story 18.2)',
+    (path) => {
+      renderAt(path, true);
+      expect(screen.getByText('SONGS')).toBeInTheDocument();
+    },
+  );
+
+  test('the song form routes are guarded (redirect to /login signed out)', () => {
+    renderAt('/songs/new', false);
+    expect(screen.getByText('LOGIN')).toBeInTheDocument();
+  });
+
   test.each(['/my-instruments', '/my-playlists', '/my-topics', '/my-sessions', '/my-heatmap', '/profile'])(
     'protected route %s redirects to /login when signed out',
     (path) => {

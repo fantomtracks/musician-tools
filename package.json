@@ -43,7 +43,7 @@
   },
   "jest": {
     "preset": "ts-jest",
-    "testEnvironment": "jsdom",
+    "testEnvironment": "<rootDir>/jest.jsdom.env.cjs",
     "roots": [
       "<rootDir>/src"
     ],

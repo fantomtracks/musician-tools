@@ -1,6 +1,5 @@
-import { render, screen, fireEvent, waitFor } from '@testing-library/react';
-import { MemoryRouter } from 'react-router-dom';
-import Songs from '../pages/Songs';
+import { screen, fireEvent, waitFor } from '@testing-library/react';
+import { renderSongs } from '../test/renderSongs';
 
 jest.mock('../services/songService', () => ({
   songService: {
@@ -39,11 +38,7 @@ describe('Songs sidebar persistence', () => {
   test('restores collapsed state from localStorage and persists expand', async () => {
     localStorage.setItem('songsSidebarExpanded', 'false');
 
-    render(
-      <MemoryRouter future={{ v7_startTransition: true, v7_relativeSplatPath: true }}>
-        <Songs />
-      </MemoryRouter>
-    );
+    renderSongs();
 
     // Collapsed (desktop rail): the "Expand sidebar" » control is rendered.
     // NB: since 14.3 the full filter content is always in the DOM (CSS-gated by

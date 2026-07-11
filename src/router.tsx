@@ -32,7 +32,12 @@ export const routes: RouteObject[] = [
         {
           element: <RequireAuth />,
           children: [
+            // Story 18.2: the song form is a real route now — /songs (list),
+            // /songs/new (add), /songs/:uid (edit). All render <Songs/>, which reads
+            // useParams to pick the mode.
             { path: 'songs', element: <Songs /> },
+            { path: 'songs/new', element: <Songs /> },
+            { path: 'songs/:uid', element: <Songs /> },
             { path: 'my-instruments', element: <MyInstrumentsPage /> },
             { path: 'my-playlists', element: <MyPlaylistsPage /> },
             { path: 'my-topics', element: <MyTopicsPage /> },

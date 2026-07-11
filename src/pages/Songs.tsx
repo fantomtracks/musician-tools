@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
-import { useLocation, useNavigate } from 'react-router-dom';
+import { useBlocker, useLocation, useNavigate, useParams } from 'react-router-dom';
 import { SongForm } from '../components/SongForm';
 import SongsList from '../components/SongsList';
 import { songService, SongConflictError, type CreateSongDTO, type UpdateSongDTO, type Song } from '../services/songService';
@@ -12,7 +12,6 @@ import { applySongFilters, countActiveFilters, NO_INSTRUMENT } from '../utils/so
 import { handleComboKeyDown, useScrollHighlightIntoView, comboboxInputAria, comboboxOptionAria } from '../utils/comboboxKeyboard';
 import { findDuplicateSong } from '../utils/songDuplicate';
 import { formatLocalDate } from '../utils/heatmap';
-import { useLeaveGuard } from '../contexts/LeaveGuardContext';
 
 const initialSong: CreateSongDTO = {
   title: '',
@@ -45,7 +44,10 @@ function Songs() {
 
   const [songs, setSongs] = useState<Song[]>([]);
   const [form, setForm] = useState<CreateSongDTO>(initialSong);
-  const [editingUid, setEditingUid] = useState<string | null>(null);
+  // Story 18.2: editingUid + the list/form mode are DERIVED from the URL (see the
+  // useParams block below), not useState — /songs (list), /songs/new (add),
+  // /songs/:uid (edit). Refresh keeps the open song; the browser Back button is
+  // handled by useBlocker.
   // Story 13.1: serialization of the form as last loaded/saved, used to skip
   // redundant auto-saves (compared form-to-form, so it's stable). null = not editing.
   const [editBaselineJson, setEditBaselineJson] = useState<string | null>(null);
@@ -72,7 +74,9 @@ function Songs() {
     const saved = typeof window !== 'undefined' ? window.localStorage.getItem('songsGenreMatchMode') : null;
     return saved === 'any' ? 'any' : 'all';
   });
-  const [page, setPage] = useState<'list' | 'form'>('list');
+  // Story 18.2: deep-link to /songs/:uid with an unknown/foreign uid → getSong 404
+  // (scoped, story 7.5) → "Song not found" screen.
+  const [notFound, setNotFound] = useState(false);
   // True when the edit form was opened by following the "already exists" link
   // from the add form — drives the "reset your filters" hint, since a song
   // reached that way is typically hidden from the list by a filter.
@@ -273,7 +277,18 @@ function Songs() {
   
   const location = useLocation();
   const navigate = useNavigate();
-  const { registerLeaveGuard } = useLeaveGuard();
+  const params = useParams();
+
+  // Story 18.2 — mode derived from the URL. /songs → list ; /songs/new → add
+  // (editingUid null) ; /songs/:uid → edit. (react-router prefers the static
+  // 'songs/new' route over 'songs/:uid', so params.uid is never 'new'.)
+  const isNewSongRoute = location.pathname === '/songs/new';
+  const editingUid = params.uid ?? null;
+  const page: 'list' | 'form' = editingUid !== null || isNewSongRoute ? 'form' : 'list';
+  // Which song uid the `form` currently represents ('__new__' = the blank add draft,
+  // undefined = nothing). Lets the load effect skip rebuilding the form when the URL
+  // already matches it — e.g. right after an auto-create, so live typing isn't clobbered.
+  const loadedFormUidRef = useRef<string | null | undefined>(undefined);
 
   // Single source of truth: the count drives both the boolean and the mobile "Filters · N" badge.
   const activeFilterCount = countActiveFilters({
@@ -348,22 +363,9 @@ function Songs() {
     });
   };
 
-  // Reset to list view when clicking on Songs in header
-  useEffect(() => {
-    if (location.state?.resetToList) {
-      // Story 13.1: this switches to the list without unmounting, so flush any
-      // pending auto-save here too (the unmount-flush effect won't fire).
-      void flushOnUnmountRef.current();
-      formActiveRef.current = false; // in-flight create resolving now keeps the song, no re-arm (17.2)
-      setPage('list');
-      setEditingUid(null);
-      setEditBaselineJson(null);
-      setSaveStatus('idle');
-      // Clear the state to avoid triggering again
-      window.history.replaceState({}, document.title);
-    }
-  }, [location.state]);
-
+  // Story 18.2: the "Songs" header link now just navigates to /songs (the list route)
+  // — no more location.state resetToList mechanism. Leaving the form flushes via the
+  // unmount-flush effect + useBlocker; the URL is the source of truth.
 
 
   useEffect(() => {
@@ -707,6 +709,68 @@ function Songs() {
     } catch { /* ignore */ }
   }, [selectedSongs]);
 
+  // Story 18.2: build the form from a loaded Song (list click / deep-link fetch).
+  const buildFormFromSong = (song: Song, fromDuplicate: boolean): void => {
+    const builtForm: CreateSongDTO = {
+      ...song,
+      capo: normalizeCapoValue(song.capo),
+      instrument: Array.isArray(song.instrument) ? song.instrument : (song.instrument ? [song.instrument] : []),
+      technique: Array.isArray(song.technique) ? song.technique : [],
+      language: Array.isArray(song.language) ? song.language : (song.language ? [song.language] : []),
+      genre: Array.isArray(song.genre) ? song.genre : (song.genre ? [song.genre] : []),
+    };
+    setForm(builtForm);
+    setEditBaselineJson(JSON.stringify(builtForm));
+    setSaveStatus('idle');
+    setLastSavedAt(null);
+    conflictKeyRef.current = null;
+    setMetadataSource(null);
+    setCameFromDuplicate(fromDuplicate);
+    setError(null);
+    setNotFound(false);
+  };
+
+  // Story 18.2 — the open target is driven by the URL. Build the form when it changes,
+  // UNLESS the form already represents it (loadedFormUidRef) — so an auto-create
+  // navigate('/songs/:uid') doesn't reload & clobber the just-typed form.
+  useEffect(() => {
+    if (page === 'list') { loadedFormUidRef.current = undefined; setNotFound(false); return; }
+    if (isNewSongRoute) {
+      if (loadedFormUidRef.current !== '__new__') {
+        setForm(initialSong);
+        setEditBaselineJson(null);
+        setSaveStatus('idle');
+        setLastSavedAt(null);
+        setMetadataSource(null);
+        setCameFromDuplicate(false);
+        setNotFound(false);
+        conflictKeyRef.current = null;
+        loadedFormUidRef.current = '__new__';
+      }
+      return;
+    }
+    // /songs/:uid — edit. Skip if the form already matches (just created / already open).
+    if (loadedFormUidRef.current === editingUid) return;
+    const record = songs.find(s => s.uid === editingUid);
+    const fromDuplicate = !!(location.state as { fromDuplicate?: boolean } | null)?.fromDuplicate;
+    if (record) {
+      buildFormFromSong(record, fromDuplicate);
+      loadedFormUidRef.current = editingUid;
+      return;
+    }
+    // Not in the loaded list → deep-link. Mark as loaded up-front so a later `songs`
+    // change doesn't re-fetch (and clobber a 404). Fetch it; scoped 404 (7.5) → not found.
+    loadedFormUidRef.current = editingUid;
+    let cancelled = false;
+    setNotFound(false);
+    songService.getSong(editingUid as string)
+      .then(song => { if (!cancelled) buildFormFromSong(song, false); })
+      .catch(() => { if (!cancelled) setNotFound(true); });
+    return () => { cancelled = true; };
+    // buildFormFromSong is stable enough; deps cover the URL target + the songs list.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [page, isNewSongRoute, editingUid, songs, location.state]);
+
   // Load plays and playlists for song being edited
   useEffect(() => {
     if (!editingUid) {
@@ -831,9 +895,6 @@ function Songs() {
   //   • `lastPlayed` is server-managed -> never sent (HIGH from 13.1).
   const savingRef = useRef(false);
   const saveTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
-  // Story 17.2: true while the form panel is open. A create that resolves AFTER the
-  // user left (in-flight create + leave) must keep the song but NOT re-arm editing.
-  const formActiveRef = useRef(false);
   // Story 17.2: the folded (title|artist) key that last hit a server 409. Suppresses
   // re-firing a create on every keystroke when the 409 body carried no existing song
   // (so the client-side liveDuplicate guard couldn't pick it up). Cleared implicitly
@@ -880,15 +941,18 @@ function Songs() {
         // later keystroke flows through the same edit-mode path below.
         const created = await songService.createSong(payload as CreateSongDTO);
         setSongs(prev => (prev.some(s => s.uid === created.uid) ? prev : [created, ...prev]));
-        if (!formActiveRef.current) {
-          // The user left while this create was in flight (quitter = garder): keep
-          // the created song in the list, but DON'T re-arm editing on the list page
-          // (that would strand editingUid and, worse, make the next nav delete it).
+        if (location.pathname !== '/songs/new') {
+          // The user left /songs/new while this create was in flight (quitter = garder):
+          // keep the created song in the list, but DON'T yank them back to it.
           return true;
         }
-        setEditingUid(created.uid);
+        // Invisible add->edit transition via the URL: seed the baseline + mark the form
+        // as representing the new uid BEFORE navigating, so the build-form effect skips
+        // reloading (no clobber of live typing), then replace /songs/new → /songs/:uid.
         setEditBaselineJson(snapshot);
+        loadedFormUidRef.current = created.uid;
         setPlaylistFilter(''); // parity with the old create flow: keep the new song visible
+        navigate('/songs/' + created.uid, { replace: true });
       } else {
         const updatedSong = await songService.updateSong(uid, payload);
         setSongs(prev => prev.map(song => (song.uid === uid ? updatedSong : song)));
@@ -966,18 +1030,6 @@ function Songs() {
   flushOnUnmountRef.current = flushAutoSave;
   useEffect(() => () => { void flushOnUnmountRef.current(); }, []);
 
-  // Reset the form panel back to the list (shared by every leave path).
-  const returnToList = (): void => {
-    formActiveRef.current = false; // an in-flight create resolving now keeps the song but won't re-arm editing
-    setEditingUid(null);
-    setForm(initialSong);
-    setEditBaselineJson(null);
-    setMetadataSource(null);
-    setCameFromDuplicate(false);
-    setSaveStatus('idle');
-    setPage('list');
-  };
-
   // Story 17.2 — Seuil 1: a song is "fresh" if the only thing that ever happened to
   // it is the (now-emptied) title — no other field filled, no practice, no playlist.
   // Such a draft is deleted silently on leave; anything with value gets the popup.
@@ -1006,36 +1058,32 @@ function Songs() {
     }
   };
 
-  // Story 17.2 — the single leave gate consulted by EVERY exit (Back button, header
-  // links via the LeaveGuard context, unmount). If the open song has an empty title:
-  // fresh → delete it silently then leave; has-value → open the popup and defer the
-  // navigation (`proceed`) until the user picks Delete or Continue. Otherwise leave now.
-  const pendingLeaveRef = useRef<(() => void) | null>(null);
-  const attemptLeave = (proceed: () => void): void => {
-    if (editingUid !== null && !form.title?.trim()) {
-      if (isFreshSong()) {
-        void deleteEditingSong().then(proceed);
-      } else {
-        pendingLeaveRef.current = proceed;
-        setEmptyTitleDialogOpen(true);
-      }
-      return;
-    }
-    proceed();
-  };
+  // Story 18.2 — leaving a song whose title is empty is intercepted by useBlocker
+  // (data-router), which — unlike the removed 17.2 custom guard — ALSO catches the
+  // browser Back button / popstate. Block only when leaving the form (route change)
+  // with an editing song and an empty title.
+  const blocker = useBlocker(
+    ({ currentLocation, nextLocation }) =>
+      page === 'form' &&
+      editingUid !== null &&
+      !form.title?.trim() &&
+      currentLocation.pathname !== nextLocation.pathname,
+  );
 
-  // Story 17.2 — register the leave gate app-wide so EVERY in-app navigation (header
-  // links, logo, profile, logout — all GuardedLink / attemptLeave) consults it, not
-  // just the Back button. Registered while mounted; a stable delegate reads the
-  // latest attemptLeave via a ref so the closure never goes stale.
-  const attemptLeaveRef = useRef(attemptLeave);
-  attemptLeaveRef.current = attemptLeave;
   useEffect(() => {
-    registerLeaveGuard((proceed) => attemptLeaveRef.current(proceed));
-    return () => registerLeaveGuard(null);
-  }, [registerLeaveGuard]);
+    if (blocker.state !== 'blocked') return;
+    // Fresh titleless draft → delete it silently and let the navigation proceed;
+    // a song with value → ask before leaving (the ConfirmDialog resolves the blocker).
+    if (isFreshSong()) {
+      void deleteEditingSong().then(() => blocker.proceed());
+    } else {
+      setEmptyTitleDialogOpen(true);
+    }
+    // isFreshSong/deleteEditingSong read live state; re-run only on blocker transitions.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [blocker]);
 
-  // Story 17.2 — the one exit the guard can't intercept (browser refresh / tab close)
+  // Story 17.2 — the one exit useBlocker can't intercept (browser refresh / tab close)
   // gets the native beforeunload prompt while a titleless draft is open.
   useEffect(() => {
     if (editingUid === null || form.title?.trim()) return;
@@ -1044,22 +1092,11 @@ function Songs() {
     return () => window.removeEventListener('beforeunload', handler);
   }, [editingUid, form.title]);
 
-  // Story 13.1 + 17.2: leave the form explicitly (sticky "Back to songlist"). An
-  // empty-title draft goes through the leave gate (delete / popup); otherwise flush
-  // any pending auto-save then return to the list.
+  // Story 18.2: leave the form via the URL. Flush a pending (non-empty) edit first;
+  // the empty-title case is handled by useBlocker (fires on this navigation).
   const backToList = async (): Promise<void> => {
-    if (editingUid !== null && !form.title?.trim()) {
-      attemptLeave(returnToList);
-      return;
-    }
-    const ok = await flushAutoSave();
-    returnToList();
-    // Only a genuine save FAILURE toasts. A `false` from an in-flight create/save
-    // (savingRef held) isn't a failure — that op is still resolving on its own.
-    if (!ok && !savingRef.current) {
-      setToastMessage('Some changes could not be saved');
-      setTimeout(() => setToastMessage(null), 2500);
-    }
+    await flushAutoSave();
+    navigate('/songs');
   };
 
   // The actual mark — reads the song server-side, so the form must be saved
@@ -1376,44 +1413,11 @@ function Songs() {
   // Opens a song in the edit form. `fromDuplicate` is set when navigating here
   // from the add form's "already exists" link, so the edit screen can remind the
   // user their filters may be hiding it from the list.
+  // Story 18.2: open a song = navigate to its route; the build-form effect loads it.
+  // `fromDuplicate` (from the "already exists" link) rides in the router state.
   const openSongForEdit = (song: Song, fromDuplicate = false) => {
-    setEditingUid(song.uid);
-    const builtForm: CreateSongDTO = {
-      ...song,
-      capo: normalizeCapoValue(song.capo),
-      instrument: Array.isArray(song.instrument) ? song.instrument : (song.instrument ? [song.instrument] : []),
-      technique: Array.isArray(song.technique) ? song.technique : [],
-      language: Array.isArray(song.language) ? song.language : (song.language ? [song.language] : []),
-      genre: Array.isArray(song.genre) ? song.genre : (song.genre ? [song.genre] : []),
-    };
-    setForm(builtForm);
-    // Story 13.1: baseline = the just-loaded form, so auto-save only fires once
-    // the user actually changes something.
-    setEditBaselineJson(JSON.stringify(builtForm));
-    setSaveStatus('idle');
-    setLastSavedAt(null);
-    conflictKeyRef.current = null; // 17.2: fresh edit session, no stale conflict key
-    formActiveRef.current = true;
-    setMetadataSource(null);
-    setCameFromDuplicate(fromDuplicate);
-    setError(null);
-    setPage('form');
+    navigate(`/songs/${song.uid}`, fromDuplicate ? { state: { fromDuplicate: true } } : undefined);
   };
-
-  // Open a song's edit form when navigated here from the session history (story 9.4).
-  // Waits for songs to load, then clears the router state via navigate() — a raw
-  // history.replaceState would NOT update useLocation().state, so the effect would
-  // re-fire (and re-open the form, clobbering edits) on every later songs reload.
-  useEffect(() => {
-    const editUid = location.state?.editUid;
-    if (!editUid || songs.length === 0) return;
-    const song = songs.find(s => s.uid === editUid);
-    if (song) openSongForEdit(song);
-    navigate(location.pathname + location.search, { replace: true, state: null });
-    // openSongForEdit is recreated each render; the navigate() above clears the state
-    // so this runs once per navigation, hence it is omitted from the deps.
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [location.state, songs]);
 
   // Live "this song already exists" detection. Single source of truth: it drives
   // both the form warning AND the submit guard, so the two can never disagree.
@@ -1468,11 +1472,9 @@ function Songs() {
       setDeleteUid(null);
       setDeleteMode(null);
       
-      // If we're editing this song, return to list
+      // Story 18.2: if we're editing the deleted song, go back to the list route.
       if (editingUid === uidToDelete) {
-        setEditingUid(null);
-        setForm(initialSong);
-        setPage('list');
+        navigate('/songs');
       }
     } catch (err) {
       setError('Error while deleting');
@@ -1792,14 +1794,12 @@ function Songs() {
         isDangerous
         onConfirm={async () => {
           setEmptyTitleDialogOpen(false);
-          const proceed = pendingLeaveRef.current;
-          pendingLeaveRef.current = null;
           await deleteEditingSong();
-          if (proceed) proceed();
+          if (blocker.state === 'blocked') blocker.proceed(); // let the navigation through
         }}
         onCancel={() => {
           setEmptyTitleDialogOpen(false);
-          pendingLeaveRef.current = null; // stay on the form; re-checked on next exit
+          if (blocker.state === 'blocked') blocker.reset(); // stay on the form; re-checked next exit
         }}
       />
 
@@ -1822,7 +1822,16 @@ function Songs() {
         </div>
       )}
 
-      {page === 'list' ? (
+      {page === 'form' && notFound ? (
+        // Story 18.2: deep-link to an unknown/foreign song uid → scoped 404 (story 7.5).
+        <div className="max-w-3xl mx-auto px-4 sm:px-6 lg:px-8 py-16 text-center">
+          <h1 className="mb-3 text-2xl font-semibold text-gray-900 dark:text-gray-100">Song not found</h1>
+          <p className="mb-6 text-gray-600 dark:text-gray-300">This song doesn't exist, or it isn't in your songlist.</p>
+          <button type="button" className="btn-secondary" onClick={() => navigate('/songs')}>
+            <span aria-hidden="true">←</span> Back to songlist
+          </button>
+        </div>
+      ) : page === 'list' ? (
         <SongsList
           songs={songs}
           filteredSongs={filteredSongs}
@@ -1921,20 +1930,9 @@ function Songs() {
           handleDeleteSelected={handleDeleteSelected}
           clearAllFilters={clearAllFilters}
           onEdit={(song) => openSongForEdit(song)}
-          onAddNew={() => {
-            setForm(initialSong);
-            setEditingUid(null);
-            // Story 17.2: arm a clean add-mode auto-create session — no stale
-            // baseline/status/conflict from a previous edit leaking onto the blank form.
-            setEditBaselineJson(null);
-            setSaveStatus('idle');
-            setLastSavedAt(null);
-            conflictKeyRef.current = null;
-            formActiveRef.current = true;
-            setMetadataSource(null);
-            setCameFromDuplicate(false);
-            setPage('form');
-          }}
+          // Story 18.2: "Add a song" navigates to /songs/new; the build-form effect
+          // arms a clean blank add-mode session.
+          onAddNew={() => navigate('/songs/new')}
           getLastPlayedForSong={getLastPlayedForSong}
           formatLastPlayed={formatLastPlayed}
           SortHeader={SortHeader}

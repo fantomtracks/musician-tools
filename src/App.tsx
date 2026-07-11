@@ -3,7 +3,6 @@ import { useAuth } from './contexts/AuthContext';
 import Header from './components/Header';
 import VerifyEmailBanner from './components/VerifyEmailBanner';
 import Footer from './components/Footer';
-import { LeaveGuardProvider } from './contexts/LeaveGuardProvider';
 
 export function HomePage() {
   const { isAuthenticated, user } = useAuth();
@@ -49,8 +48,8 @@ export function HomePage() {
 // Story 18.1 — root layout element of the data-router: the app chrome
 // (header / verify-email banner / footer) around the routed page rendered in the
 // <Outlet/>. It waits for the auth context to settle before rendering, exactly as
-// the old <App> did. The LeaveGuardProvider stays here until story 18.2 removes the
-// custom navigation guard in favour of useBlocker.
+// the old <App> did. (Story 18.2 removed the custom LeaveGuardProvider — leaving the
+// song form is now handled by useBlocker inside the Songs route.)
 export function RootLayout() {
   const { loading } = useAuth();
 
@@ -63,15 +62,13 @@ export function RootLayout() {
   }
 
   return (
-    <LeaveGuardProvider>
-      <div className="flex flex-col min-h-screen bg-gradient-to-br from-gray-50 via-blue-50 to-purple-50 dark:from-gray-900 dark:via-gray-800 dark:to-gray-950">
-        <Header />
-        <VerifyEmailBanner />
-        <main className="flex-1 flex flex-col">
-          <Outlet />
-        </main>
-        <Footer />
-      </div>
-    </LeaveGuardProvider>
+    <div className="flex flex-col min-h-screen bg-gradient-to-br from-gray-50 via-blue-50 to-purple-50 dark:from-gray-900 dark:via-gray-800 dark:to-gray-950">
+      <Header />
+      <VerifyEmailBanner />
+      <main className="flex-1 flex flex-col">
+        <Outlet />
+      </main>
+      <Footer />
+    </div>
   );
 }

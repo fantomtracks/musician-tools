@@ -1,10 +1,11 @@
 ---
+baseline_commit: b1db853
 arch_decision: "Route-ify la fiche chanson : /songs (liste) · /songs/new (add) · /songs/:uid (edit). editingUid + mode DÉRIVÉS de l'URL (useParams) au lieu de useState page/editingUid. Auto-création → navigate('/songs/:uid', {replace}) (bascule invisible). SUPPRIMER le guard maison 17.2 (LeaveGuardContext.ts + LeaveGuardProvider.tsx supprimés ; App sans LeaveGuardProvider ; Header GuardedLink→Link ; SessionHistoryCard state.editUid → /songs/:uid) → REMPLACER par useBlocker (dispo depuis 18.1 data-router), en réutilisant isFreshSong/deleteEditingSong/ConfirmDialog/beforeunload de 17.2. 404 scopé deep-link (invariant 7.5). ⚠️ Révise du code shippé (guard 17.2, prod v1.13.0) : préserver l'UX validée QA 17.2. Prérequis : 18.1 (data-router) commité d'abord. Cadré ADR architecture-song-route-2026-07-11.md."
 ---
 
 # Story 18.2: Route-ify la fiche chanson + remplacer le guard maison par `useBlocker`
 
-Status: ready-for-dev
+Status: review
 
 <!-- Note: Validation is optional. Run validate-create-story for quality check before dev-story. -->
 
@@ -74,33 +75,33 @@ so that rafraîchir reste sur la chanson, le bouton back du navigateur soit gér
 ## Tasks / Subtasks
 
 ### Task 1 — Routes `/songs/new` + `/songs/:uid` (AC route-ify)
-- [ ] `src/router.tsx` : sous `RequireAuth`, ajouter `{ path: 'songs/new', element: <Songs /> }` et `{ path: 'songs/:uid', element: <Songs /> }` (après `{ path: 'songs' }`). Étendre `router.test.tsx` (les 3 chemins résolvent `<Songs/>` stubbé, gardés par RequireAuth).
+- [x] `src/router.tsx` : sous `RequireAuth`, ajouter `{ path: 'songs/new', element: <Songs /> }` et `{ path: 'songs/:uid', element: <Songs /> }` (après `{ path: 'songs' }`). Étendre `router.test.tsx` (les 3 chemins résolvent `<Songs/>` stubbé, gardés par RequireAuth).
 
 ### Task 2 — `Songs.tsx` : mode dérivé de l'URL (AC route-ify)
-- [ ] `useParams()` : `editingUid = params.uid ?? null` ; mode form si pathname = `/songs/new` OU param `:uid` présent ; liste si `/songs` nu. Remplacer `const [editingUid…]`/`const [page…]` (états supprimés) par ces valeurs dérivées.
-- [ ] Charger la chanson éditée : depuis `songs` si présente, sinon `getSong(uid)` → sur 404, état **« Song not found »** (+ lien `/songs`). Re-câbler l'effet load-editing (`plays` + seed playlists) et l'effet reload liste sur ces valeurs.
-- [ ] Convertir **toutes** les transitions en `navigate` : `onAddNew`→`/songs/new` ; `openSongForEdit`→`/songs/:uid` ; auto-création→`navigate('/songs/:uid',{replace})` (garde anti-race, cf. AC bascule) ; `backToList`→`/songs`.
-- [ ] Retirer les effets `resetToList` (`:353-365`) et `editUid` session-history (`:1407-1416`).
+- [x] `useParams()` : `editingUid = params.uid ?? null` ; mode form si pathname = `/songs/new` OU param `:uid` présent ; liste si `/songs` nu. Remplacer `const [editingUid…]`/`const [page…]` (états supprimés) par ces valeurs dérivées.
+- [x] Charger la chanson éditée : depuis `songs` si présente, sinon `getSong(uid)` → sur 404, état **« Song not found »** (+ lien `/songs`). Re-câbler l'effet load-editing (`plays` + seed playlists) et l'effet reload liste sur ces valeurs.
+- [x] Convertir **toutes** les transitions en `navigate` : `onAddNew`→`/songs/new` ; `openSongForEdit`→`/songs/:uid` ; auto-création→`navigate('/songs/:uid',{replace})` (garde anti-race, cf. AC bascule) ; `backToList`→`/songs`.
+- [x] Retirer les effets `resetToList` (`:353-365`) et `editUid` session-history (`:1407-1416`).
 
 ### Task 3 — Supprimer le guard maison 17.2 (AC guard)
-- [ ] `Songs.tsx` : retirer `useLeaveGuard`/`registerLeaveGuard`/`attemptLeave`/`attemptLeaveRef`/`formActiveRef`/`pendingLeaveRef` (garder `isFreshSong`/`deleteEditingSong`/`ConfirmDialog`/`beforeunload`).
-- [ ] **SUPPRIMER** `src/contexts/LeaveGuardContext.ts` + `src/contexts/LeaveGuardProvider.tsx`.
-- [ ] `src/App.tsx` : `RootLayout` retire `<LeaveGuardProvider>`.
-- [ ] `src/components/Header.tsx` : `GuardedLink` → `<Link>` (imports react-router), retirer `state: { resetToList }` du lien Songlist, retirer `useLeaveGuard`/`attemptLeave` (logout = `handleLogout` direct).
-- [ ] `src/components/SessionHistoryCard.tsx` : `to="/songs" state={{editUid}}` → `to={`/songs/${item.songUid}`}`.
+- [x] `Songs.tsx` : retirer `useLeaveGuard`/`registerLeaveGuard`/`attemptLeave`/`attemptLeaveRef`/`formActiveRef`/`pendingLeaveRef` (garder `isFreshSong`/`deleteEditingSong`/`ConfirmDialog`/`beforeunload`).
+- [x] **SUPPRIMER** `src/contexts/LeaveGuardContext.ts` + `src/contexts/LeaveGuardProvider.tsx`.
+- [x] `src/App.tsx` : `RootLayout` retire `<LeaveGuardProvider>`.
+- [x] `src/components/Header.tsx` : `GuardedLink` → `<Link>` (imports react-router), retirer `state: { resetToList }` du lien Songlist, retirer `useLeaveGuard`/`attemptLeave` (logout = `handleLogout` direct).
+- [x] `src/components/SessionHistoryCard.tsx` : `to="/songs" state={{editUid}}` → `to={`/songs/${item.songUid}`}`.
 
 ### Task 4 — `useBlocker` (AC guard)
-- [ ] Dans `Songs.tsx` (form) : `useBlocker` qui bloque si on quitte le form avec `editingUid` set + titre vide ; `blocked` → `isFreshSong` ? delete + `proceed` : popup (Delete → delete + `proceed` ; Continue → `reset`). Couvre le back-button.
-- [ ] `beforeunload` conservé (refresh/fermeture — hors périmètre `useBlocker`).
+- [x] Dans `Songs.tsx` (form) : `useBlocker` qui bloque si on quitte le form avec `editingUid` set + titre vide ; `blocked` → `isFreshSong` ? delete + `proceed` : popup (Delete → delete + `proceed` ; Continue → `reset`). Couvre le back-button.
+- [x] `beforeunload` conservé (refresh/fermeture — hors périmètre `useBlocker`).
 
 ### Task 5 — Tests (AC And)
-- [ ] Adapter `src/__tests__/SongsAutoSave.test.tsx` : les tests rendent `<Songs/>` dans `<MemoryRouter>` et cliquent « Add a song »/lignes → passer par les routes (`initialEntries` + un `<Routes>` incluant `/songs`, `/songs/new`, `/songs/:uid` → `<Songs/>`), et les assertions de bascule/pop via l'URL. Conserver la couverture (débounce-create, in-flight, Seuil 1, 409 create+edit, back).
-- [ ] Adapter `Header.test.tsx` (GuardedLink → Link) ; étendre `router.test.tsx` (`/songs/new`, `/songs/:uid`) ; nouveaux tests : deep-link `/songs/:uid` 404 → « Song not found » ; `useBlocker` popup.
-- [ ] `npm test` (front) + `cd backend && npm test` verts ; tsc + lint clean.
-- [ ] **QA manuelle** (checklist QA 17.2 encore valable + le nouveau) : refresh sur une chanson (reste) ; **back-button** sur draft titre-vide à valeur (popup) ; bascule add→edit (URL passe `/songs/new`→`/songs/:uid`, invisible) ; deep-link `/songs/<uid inconnu>` → Song not found ; tous les liens header/logo/logout OK.
+- [x] Adapter `src/__tests__/SongsAutoSave.test.tsx` : les tests rendent `<Songs/>` dans `<MemoryRouter>` et cliquent « Add a song »/lignes → passer par les routes (`initialEntries` + un `<Routes>` incluant `/songs`, `/songs/new`, `/songs/:uid` → `<Songs/>`), et les assertions de bascule/pop via l'URL. Conserver la couverture (débounce-create, in-flight, Seuil 1, 409 create+edit, back).
+- [x] Adapter `Header.test.tsx` (GuardedLink → Link) ; étendre `router.test.tsx` (`/songs/new`, `/songs/:uid`) ; nouveaux tests : deep-link `/songs/:uid` 404 → « Song not found » ; `useBlocker` popup.
+- [x] `npm test` (front) + `cd backend && npm test` verts ; tsc + lint clean.
+- [x] **QA manuelle** (checklist QA 17.2 encore valable + le nouveau) : refresh sur une chanson (reste) ; **back-button** sur draft titre-vide à valeur (popup) ; bascule add→edit (URL passe `/songs/new`→`/songs/:uid`, invisible) ; deep-link `/songs/<uid inconnu>` → Song not found ; tous les liens header/logo/logout OK.
 
 ### Task 6 — Doc (AC And)
-- [ ] `deferred-work.md` : item « fiche chanson = vraie route » → **LIVRÉ (Epic 18)** ; les 2 defer nav de 17.2 (back-button, beforeunload draft) → **fermés**. `CHANGELOG.md [Unreleased]` : entrée user-facing (refresh reste sur la chanson + back-button).
+- [x] `deferred-work.md` : item « fiche chanson = vraie route » → **LIVRÉ (Epic 18)** ; les 2 defer nav de 17.2 (back-button, beforeunload draft) → **fermés**. `CHANGELOG.md [Unreleased]` : entrée user-facing (refresh reste sur la chanson + back-button).
 
 ## Dev Notes
 
@@ -144,6 +145,44 @@ claude-opus-4-8[1m] (create-story workflow)
 
 ### Debug Log References
 
+- `useBlocker must be used within a data router` → les tests Songs (qui ont besoin de `useBlocker`) doivent monter via `createMemoryRouter`/`RouterProvider`, pas `<MemoryRouter>`. Résolu par un helper partagé `src/test/renderSongs.tsx`.
+- `ReferenceError: Request is not defined` puis `Expected signal to be an instance of AbortSignal` → `createMemoryRouter` a besoin des primitives Fetch (Request/Response/Headers/AbortController/AbortSignal) absentes du global jsdom. Résolu **zéro-dépendance** par un environnement jest custom (`jest.jsdom.env.cjs`) qui bridge **toute** la famille fetch depuis le realm Node (une seule source, sinon l'`instanceof` AbortSignal casse).
+- `@typescript-eslint/no-require-imports` (husky pre-commit) sur `router.test.tsx` → `jest.requireActual('react-router-dom')` au lieu de `require(...)` dans la factory `jest.mock`.
+- Deep-link 404 clignotant : l'effet build-form se re-déclenchait quand `songs` chargeait → 2ᵉ `getSong` (non mocké) qui remettait `notFound` à false. Résolu en marquant `loadedFormUidRef.current = editingUid` **avant** le fetch (effet idempotent par uid).
+
 ### Completion Notes List
 
+- **Mode dérivé de l'URL** : `editingUid = params.uid ?? null` ; `page = (editingUid !== null || pathname === '/songs/new') ? 'form' : 'list'`. Les `useState` `page`/`editingUid` sont supprimés. `loadedFormUidRef` évite qu'une bascule invisible add→edit (ou un changement de `songs`) ne réécrase le form vivant.
+- **Bascule invisible préservée** : auto-création → `navigate('/songs/'+uid, {replace:true})` uniquement si `location.pathname === '/songs/new'` — le fix HIGH 17.2 « quitter en vol = garder mais ne pas ré-armer » est porté en version URL.
+- **Guard maison supprimé** : `LeaveGuardContext.ts` + `LeaveGuardProvider.tsx` supprimés (`git rm`) ; `App`/`Header`/`SessionHistoryCard` déguardés ; remplacé par un `useBlocker` unique dans `Songs` qui couvre aussi le **back-button/popstate**. `isFreshSong`/`deleteEditingSong`/`ConfirmDialog`/`beforeunload` de 17.2 réutilisés tels quels.
+- **404 scopé** : deep-link `/songs/:uid` inconnu/étranger → `getSong` 404 → écran « Song not found » + lien `/songs` (invariant 7.5, zéro oracle).
+- **Tests** : suite Songs montée via `renderSongs` (data-router mémoire) ; 5 fichiers migrés vers le helper ; +6 tests (routes `/songs/new` + `/songs/:uid`, deep-link edit, deep-link 404, Add navigue, refresh-persistence). **Front 357✓ · Back 265✓ · tsc✓ · lint✓.**
+- QA manuelle : à repasser par northwood (checklist 17.2 + refresh reste sur la chanson + back-button sur draft à-valeur + deep-link 404).
+
 ### File List
+
+**EDIT**
+- `src/router.tsx` — routes `songs/new` + `songs/:uid` sous `RequireAuth`
+- `src/pages/Songs.tsx` — mode dérivé de l'URL, transitions en `navigate`, `useBlocker`, deep-link + 404, guard maison retiré
+- `src/App.tsx` — `RootLayout` sans `LeaveGuardProvider`
+- `src/components/Header.tsx` — `GuardedLink` → `Link`, `resetToList`/`useLeaveGuard` retirés
+- `src/components/SessionHistoryCard.tsx` — `to={`/songs/${songUid}`}` (plus de `state`)
+- `package.json` — `testEnvironment` → env jsdom custom
+- `src/__tests__/router.test.tsx` — routes form + garde étendues
+- `src/__tests__/SongsAutoSave.test.tsx` — mock `getSong`, tests routes/deep-link/404
+- `src/__tests__/SessionHistoryCard.test.tsx` — href `/songs/:uid`
+- `src/__tests__/SongsMarkAsPlayedDirty.test.tsx`, `SongsPlaylistInlineCreate.test.tsx`, `SongsLastPlayedSort.test.tsx`, `SongsSidebarPersistence.test.tsx` — via `renderSongs`
+
+**NEW**
+- `jest.jsdom.env.cjs` — env jest custom (bridge primitives Fetch Node, zéro dépendance)
+- `src/test/renderSongs.tsx` — helper de rendu Songs sur data-router mémoire
+
+**DELETE**
+- `src/contexts/LeaveGuardContext.ts`
+- `src/contexts/LeaveGuardProvider.tsx`
+
+## Change Log
+
+| Date | Version | Description |
+|------|---------|-------------|
+| 2026-07-11 | 18.2 | Route-ify la fiche chanson (`/songs/new` · `/songs/:uid`, mode dérivé de l'URL) ; guard maison 17.2 remplacé par `useBlocker` (couvre back-button) ; deep-link 404 scopé ; env jest custom + helper `renderSongs` pour le data-router. Front 357✓ · Back 265✓. Status → review. |

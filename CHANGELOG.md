@@ -12,6 +12,9 @@ project adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+### Changed
+- **Your open song now has its own web address** — opening a song puts it at `/songs/<id>`, so refreshing the page keeps you on that song (instead of bouncing back to the list), the browser Back button leaves the song like any other page (asking before you lose an unsaved new song), and a song link opens straight to it — showing "Song not found" if it isn't yours.
+
 ## [1.13.0] — 2026-07-11
 
 ### Fixed

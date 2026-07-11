@@ -1,6 +1,5 @@
-import { render, screen, fireEvent, waitFor, within } from '@testing-library/react';
-import { MemoryRouter } from 'react-router-dom';
-import Songs from '../pages/Songs';
+import { screen, fireEvent, waitFor, within } from '@testing-library/react';
+import { renderSongs } from '../test/renderSongs';
 
 // Two songs sharing the artist 'A', so renaming Alpha's title to 'Beta' makes a
 // live duplicate (title+artist match) — used for the freeze test.
@@ -16,6 +15,7 @@ jest.mock('../services/songService', () => ({
     updateSong: jest.fn().mockResolvedValue({ uid: 'song-a', title: 'Alpha', artist: 'A', instrument: ['Guitar'] }),
     createSong: jest.fn().mockResolvedValue({}),
     deleteSong: jest.fn().mockResolvedValue(undefined),
+    getSong: jest.fn(),
   },
 }));
 jest.mock('../services/instrumentService', () => ({ instrumentService: { getAll: jest.fn().mockResolvedValue([]) } }));
@@ -32,13 +32,6 @@ const updateSong = songService.updateSong as jest.Mock;
 const createSong = songService.createSong as jest.Mock;
 const deleteSong = songService.deleteSong as jest.Mock;
 
-function renderSongs() {
-  return render(
-    <MemoryRouter future={{ v7_startTransition: true, v7_relativeSplatPath: true }}>
-      <Songs />
-    </MemoryRouter>
-  );
-}
 
 beforeEach(() => {
   localStorage.clear();
@@ -220,5 +213,33 @@ describe('Songs — empty-title Seuil 1 on leave (story 17.2)', () => {
     const dialog = screen.getByRole('dialog');
     fireEvent.click(within(dialog).getByRole('button', { name: /^delete$/i }));
     await waitFor(() => expect(deleteSong).toHaveBeenCalledWith('song-a'));
+  });
+});
+
+describe('Songs — routes & deep-links (story 18.2)', () => {
+  const getSong = songService.getSong as jest.Mock;
+
+  test('deep-link to /songs/:uid opens the edit form (refresh keeps the song)', async () => {
+    getSong.mockResolvedValueOnce({ uid: 'deep-1', title: 'Deep Cut', artist: 'Z', instrument: ['Guitar'] });
+    renderSongs('/songs/deep-1');
+    // The form is shown (Back to songlist bar), loaded from getSong, not the list.
+    expect(await screen.findByRole('button', { name: /back to songlist/i })).toBeInTheDocument();
+    expect((await screen.findByLabelText('Title') as HTMLInputElement).value).toBe('Deep Cut');
+    expect(getSong).toHaveBeenCalledWith('deep-1');
+  });
+
+  test('deep-link to an unknown/foreign song uid shows "Song not found" (scoped 404)', async () => {
+    getSong.mockRejectedValueOnce(new Error('not found'));
+    renderSongs('/songs/ghost');
+    expect(await screen.findByText(/song not found/i)).toBeInTheDocument();
+    expect(screen.queryByLabelText('Title')).not.toBeInTheDocument();
+  });
+
+  test('the "Add a song" entry navigates to the add form', async () => {
+    renderSongs();
+    fireEvent.click(await screen.findByRole('button', { name: /add a song/i }));
+    // Blank add form: Title empty, still on the form (Back bar present).
+    expect((screen.getByLabelText('Title') as HTMLInputElement).value).toBe('');
+    expect(screen.getByRole('button', { name: /back to songlist/i })).toBeInTheDocument();
   });
 });
