@@ -1,5 +1,6 @@
 import { screen, fireEvent, waitFor, within } from '@testing-library/react';
 import { renderSongs } from '../test/renderSongs';
+import { makeSong } from '../test/makeSong';
 
 // Two songs sharing the artist 'A', so renaming Alpha's title to 'Beta' makes a
 // live duplicate (title+artist match) — used for the freeze test.
@@ -32,6 +33,7 @@ const updateSong = songService.updateSong as jest.Mock;
 const createSong = songService.createSong as jest.Mock;
 const deleteSong = songService.deleteSong as jest.Mock;
 const getAllSongs = songService.getAllSongs as jest.Mock;
+const getSong = songService.getSong as jest.Mock;
 
 const DEFAULT_SONGS = [
   { uid: 'song-a', title: 'Alpha', artist: 'A', instrument: ['Guitar'] },
@@ -45,6 +47,9 @@ beforeEach(() => {
   // clearAllMocks wipes call data but not implementations — restore the default list so a
   // test that overrides getAllSongs (persistent mockResolvedValue) can't leak into the next.
   getAllSongs.mockResolvedValue(DEFAULT_SONGS);
+  // getSong is per-test (deep-link cases); reset its impl so a persistent mock (needed
+  // because StrictMode double-invokes the fetch) can't leak forward.
+  getSong.mockReset();
 });
 
 describe('Songs — auto-save (story 13.1)', () => {
@@ -128,7 +133,7 @@ describe('Songs — auto-create at debounce (story 17.2)', () => {
     // false permanently, so the add→edit navigate was skipped, the form stayed in add
     // mode, and the just-created song matched ITSELF → "already exists" for every title.
     createSong.mockResolvedValueOnce({ uid: 'strict-1', title: 'Zzz Unique', artist: '', instrument: [] });
-    renderSongs('/songs/new', { strict: true });
+    renderSongs('/songs/new');
     fireEvent.change(await screen.findByLabelText('Title'), { target: { value: 'Zzz Unique' } });
     await waitFor(() => expect(createSong).toHaveBeenCalledTimes(1), { timeout: 2500 });
     await screen.findByText(/saved/i);
@@ -221,13 +226,7 @@ describe('Songs — empty-title Seuil 1 on leave (story 17.2)', () => {
     // Regression (manual QA): a form rebuilt from a real server record carries
     // uid/userUid/timestamps and null (not '') for empty text; the old exact-JSON
     // freshness check tripped on those and wrongly popped the "no title" dialog.
-    const serverDraft = {
-      uid: 'draft-1', title: 'Draft', artist: null, album: null, bpm: null, key: '',
-      notes: '', instrument: null, instrumentDifficulty: {}, instrumentTuning: {},
-      streamingLinks: null, instrumentLinks: null, myInstrumentUid: null, lastPlayed: null,
-      pitchStandard: 440, createdAt: '2026-07-11T00:00:00.000Z', updatedAt: '2026-07-11T00:00:00.000Z',
-    };
-    getAllSongs.mockResolvedValue([serverDraft]);
+    getAllSongs.mockResolvedValue([makeSong({ uid: 'draft-1', title: 'Draft' })]);
     renderSongs();
     fireEvent.click(await screen.findByText('Draft'));
     fireEvent.change(await screen.findByLabelText('Title'), { target: { value: '' } });
@@ -264,7 +263,7 @@ describe('Songs — empty-title Seuil 1 on leave (story 17.2)', () => {
   // → a SECOND "no title" popup stacked on top of the delete confirm. Only reproduces
   // under StrictMode's double-invoke, so this test must run strict.
   test('deleting an empty-titled song via the trash button does not stack a "no title" popup', async () => {
-    renderSongs('/songs', { strict: true });
+    renderSongs();
     fireEvent.click(await screen.findByText('Alpha')); // edit song-a
     fireEvent.change(await screen.findByLabelText('Title'), { target: { value: '' } });
     // The form's own Delete button (no dialog open yet) → delete-confirm dialog.
@@ -280,10 +279,11 @@ describe('Songs — empty-title Seuil 1 on leave (story 17.2)', () => {
 });
 
 describe('Songs — routes & deep-links (story 18.2)', () => {
-  const getSong = songService.getSong as jest.Mock;
-
+  // Persistent (not ...Once) mocks: StrictMode double-invokes the build-form effect, so
+  // getSong fires twice on a deep-link (the first fetch is cancelled). makeSong gives a
+  // server-shaped record (nulls, timestamps) rather than a minimal inline object.
   test('deep-link to /songs/:uid opens the edit form (refresh keeps the song)', async () => {
-    getSong.mockResolvedValueOnce({ uid: 'deep-1', title: 'Deep Cut', artist: 'Z', instrument: ['Guitar'] });
+    getSong.mockResolvedValue(makeSong({ uid: 'deep-1', title: 'Deep Cut', artist: 'Z', instrument: ['Guitar'] }));
     renderSongs('/songs/deep-1');
     // The form is shown (Back to songlist bar), loaded from getSong, not the list.
     expect(await screen.findByRole('button', { name: /back to songlist/i })).toBeInTheDocument();
@@ -292,7 +292,7 @@ describe('Songs — routes & deep-links (story 18.2)', () => {
   });
 
   test('deep-link to an unknown/foreign song uid shows "Song not found" (scoped 404)', async () => {
-    getSong.mockRejectedValueOnce(new Error('not found'));
+    getSong.mockRejectedValue(new Error('not found'));
     renderSongs('/songs/ghost');
     expect(await screen.findByText(/song not found/i)).toBeInTheDocument();
     expect(screen.queryByLabelText('Title')).not.toBeInTheDocument();
@@ -309,7 +309,7 @@ describe('Songs — routes & deep-links (story 18.2)', () => {
   // Code-review 18.2 (HIGH): an unbuilt or not-found form (empty title, editingUid from
   // the URL) must NOT be mistaken for a fresh titleless draft and silently deleted.
   test('leaving the "Song not found" screen does not delete the foreign/unknown song', async () => {
-    getSong.mockRejectedValueOnce(new Error('not found'));
+    getSong.mockRejectedValue(new Error('not found'));
     renderSongs('/songs/ghost');
     await screen.findByText(/song not found/i); // wait for the 404 screen (not the loading flash)
     fireEvent.click(screen.getByRole('button', { name: /back to songlist/i }));
@@ -319,12 +319,14 @@ describe('Songs — routes & deep-links (story 18.2)', () => {
 
   test('leaving a deep-link form while it is still loading does not delete the song', async () => {
     let resolveGet!: (v: unknown) => void;
-    getSong.mockImplementationOnce(() => new Promise(res => { resolveGet = res; }));
+    // Persistent impl (StrictMode calls getSong twice); the last-assigned resolver is the
+    // live fetch's — resolving it stands in for the in-flight request completing.
+    getSong.mockImplementation(() => new Promise(res => { resolveGet = res; }));
     renderSongs('/songs/real-1');
     // Form shell is up (Back bar) while getSong is still in flight, title empty.
     fireEvent.click(await screen.findByRole('button', { name: /back to songlist/i }));
     // The fetch resolves after we've left — must NOT trigger a delete of the real song.
-    resolveGet({ uid: 'real-1', title: 'Real', artist: '', instrument: [] });
+    resolveGet(makeSong({ uid: 'real-1', title: 'Real' }));
     await waitFor(() => expect(deleteSong).not.toHaveBeenCalled());
   });
 });

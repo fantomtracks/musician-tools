@@ -8,9 +8,12 @@ import Songs from '../pages/Songs';
 // routes as production. The custom jest environment (jest.jsdom.env.cjs) provides the
 // Fetch primitives createMemoryRouter needs.
 //
-// `strict` wraps in <StrictMode> to reproduce dev's mount→unmount→mount double-invoke,
-// which surfaces mount-flag / effect-cleanup bugs the single-pass test render hides.
-export function renderSongs(initialPath = '/songs', { strict = false } = {}) {
+// Wrapped in <StrictMode> BY DEFAULT — main.tsx mounts the app under StrictMode, so
+// tests must exercise the same mount→unmount→mount double-invoke; it surfaces mount-flag /
+// effect-cleanup / non-idempotent-effect bugs the single-pass render hides (Epic 18 QA
+// caught three of these in prod-dev while the non-strict suite stayed green). Pass
+// { strict: false } only to isolate a non-StrictMode baseline when debugging.
+export function renderSongs(initialPath = '/songs', { strict = true } = {}) {
   const router = createMemoryRouter(
     [
       { path: '/songs', element: <Songs /> },
