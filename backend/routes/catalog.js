@@ -14,6 +14,9 @@ router.post('/', authsess, requireCurator, catalogController.createCatalogEntry)
 router.put('/:uid', authsess, requireCurator, catalogController.updateCatalogEntry);
 router.delete('/:uid', authsess, requireCurator, catalogController.deleteCatalogEntry);
 
-// GET list/detail routes: story 19.3 (read = authsess only, non-scoped userUid).
+// Story 19.3 — Catalog READ routes (any logged-in user; NON scoped userUid, cf. §3).
+// authsess only (no requireCurator). List is the app's only enveloped endpoint.
+router.get('/', authsess, catalogController.getCatalogList);
+router.get('/:uid', authsess, catalogController.getCatalogEntry);
 
 module.exports = router;

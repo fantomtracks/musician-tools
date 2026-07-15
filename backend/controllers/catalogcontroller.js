@@ -180,8 +180,95 @@ const deleteCatalogEntry = async (req, res, next) => {
   }
 };
 
+// ---- Story 19.3: READ endpoints (list + detail) ----
+// SHARED read — NOT scoped by userUid (principle §3, project-context.md). A Catalog
+// entry is readable by every logged-in user; do NOT add userUid to the where.
+
+const DEFAULT_LIMIT = 24;
+const MAX_LIMIT = 100;
+
+// Whitelisted sort keys -> ORDER BY. Every option ends with `uid` (unique tiebreaker)
+// so LIMIT/OFFSET pages never duplicate or skip a row. An unknown/absent sort falls
+// back to artist->title (default). This closes the ORDER BY injection vector.
+const SORT_WHITELIST = {
+  artist: [['artist', 'ASC'], ['title', 'ASC'], ['uid', 'ASC']],
+  title: [['title', 'ASC'], ['artist', 'ASC'], ['uid', 'ASC']],
+  bpm: [['bpm', 'ASC'], ['artist', 'ASC'], ['title', 'ASC'], ['uid', 'ASC']],
+  recent: [['createdAt', 'DESC'], ['artist', 'ASC'], ['title', 'ASC'], ['uid', 'ASC']],
+};
+
+function clampInt(value, def, min, max) {
+  const n = parseInt(value, 10);
+  if (!Number.isFinite(n)) return def;
+  return Math.min(Math.max(n, min), max);
+}
+
+// Accent- AND case-insensitive substring match on a text column, reusing the
+// IMMUTABLE f_unaccent wrapper (topics migration 20260625, already in prod). This
+// is a DIFFERENT normalization from the canonical key (case-only, accents kept).
+function foldedLike(column, pattern) {
+  return whereFn(
+    fn('lower', fn('f_unaccent', col(column))),
+    { [Op.like]: fn('lower', fn('f_unaccent', pattern)) }
+  );
+}
+
+const getCatalogList = async (req, res, next) => {
+  try {
+    const q = req.query || {};
+    const limit = clampInt(q.limit, DEFAULT_LIMIT, 1, MAX_LIMIT);
+    const page = clampInt(q.page, 1, 1, Number.MAX_SAFE_INTEGER);
+    const offset = (page - 1) * limit;
+    const order = SORT_WHITELIST[q.sort] || SORT_WHITELIST.artist;
+
+    const and = [];
+    // Intrinsic filters (equality), combined with AND. No instrument filters (DL-17).
+    if (q.key) and.push({ key: q.key });
+    if (q.mode) and.push({ mode: q.mode });
+    if (q.timeSignature) and.push({ timeSignature: q.timeSignature });
+    if (q.genre) and.push({ genre: { [Op.contains]: [q.genre] } }); // JSONB array @>
+    const search = typeof q.search === 'string' ? q.search.trim() : '';
+    if (search) {
+      // Escape LIKE metacharacters so a user typing %/_/\ searches for them LITERALLY
+      // (Postgres' default LIKE escape is backslash). Prevents "50%" from matching
+      // everything or "a_c" from matching "abc".
+      const escaped = search.replace(/[\\%_]/g, '\\$&');
+      const pattern = `%${escaped}%`;
+      and.push({ [Op.or]: [foldedLike('title', pattern), foldedLike('artist', pattern)] });
+    }
+    const where = and.length ? { [Op.and]: and } : undefined;
+
+    // findAndCountAll: `count` is the FILTERED total (what the client paginates over).
+    const { rows, count } = await CatalogSong.findAndCountAll({ where, order, limit, offset });
+    res.json({ items: rows, total: count, page, limit });
+  } catch (error) {
+    logger.error('Error listing catalog:', error);
+    next(createError(500, 'Error listing catalog'));
+  }
+};
+
+const getCatalogEntry = async (req, res, next) => {
+  try {
+    // 404 calme (deep-link périmé) : uid inconnu OU invalide → même 404. Pas d'oracle
+    // (la fiche est de toute façon publique-aux-connectés), juste un not-found propre.
+    if (!isUuid(req.params.uid)) {
+      return next(createError(404, 'Catalog entry not found'));
+    }
+    const entry = await CatalogSong.findByPk(req.params.uid);
+    if (!entry) {
+      return next(createError(404, 'Catalog entry not found'));
+    }
+    res.json(entry); // entité brute (convention normale ; l'enveloppe est réservée à la liste)
+  } catch (error) {
+    logger.error('Error fetching catalog entry:', error);
+    next(createError(500, 'Error fetching catalog entry'));
+  }
+};
+
 module.exports = {
   createCatalogEntry,
   updateCatalogEntry,
   deleteCatalogEntry,
+  getCatalogList,
+  getCatalogEntry,
 };

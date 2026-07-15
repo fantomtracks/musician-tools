@@ -7,6 +7,7 @@ import { useEffect, useRef, useState } from 'react';
 // dropdown on desktop / the account section of the mobile menu, not here.
 const navLinks: { to: string; label: string }[] = [
   { to: '/songs', label: 'Songlist' },
+  { to: '/catalog', label: 'Catalog' },
   { to: '/my-heatmap', label: 'Heatmap' },
   { to: '/my-sessions', label: 'Sessions' },
   { to: '/my-playlists', label: 'Playlists' },

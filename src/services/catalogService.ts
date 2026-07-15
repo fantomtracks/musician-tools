@@ -23,6 +23,35 @@ export type CatalogSong = {
 export type CreateCatalogDTO = Omit<CatalogSong, 'uid' | 'createdAt' | 'updatedAt'>;
 export type UpdateCatalogDTO = Partial<CreateCatalogDTO>;
 
+// The list endpoint is the app's ONLY enveloped response (story 19.3): the client
+// needs `total` to paginate. Unit endpoints (detail, add) stay raw.
+export type CatalogListResponse = {
+  items: CatalogSong[];
+  total: number;
+  page: number;
+  limit: number;
+};
+
+export type CatalogListParams = {
+  search?: string;
+  key?: string;
+  mode?: string;
+  timeSignature?: string;
+  genre?: string;
+  sort?: string;
+  page?: number;
+  limit?: number;
+};
+
+// Thrown when a detail lookup 404s (deep-link to a removed/unknown entry). Lets the
+// page show a calm not-found instead of a generic error.
+export class CatalogNotFoundError extends Error {
+  constructor() {
+    super('Catalog entry not found');
+    this.name = 'CatalogNotFoundError';
+  }
+}
+
 // Thrown on a 409 from create/update (story 19.1's GLOBAL canonical unique index
 // on (lower(title), COALESCE(lower(artist),''))). Carries the existing entry so
 // callers can point at it. Mirror of SongConflictError, but the backend body key
@@ -39,6 +68,45 @@ export class CatalogConflictError extends Error {
 const API_BASE = '/api';
 
 export const catalogService = {
+  // Browse the shared Catalog (any logged-in user). Returns the {items,total,page,limit}
+  // envelope. `signal` lets the caller abort a superseded request (debounced search).
+  async listCatalog(params: CatalogListParams = {}, signal?: AbortSignal): Promise<CatalogListResponse> {
+    const qs = new URLSearchParams();
+    if (params.search) qs.set('search', params.search);
+    if (params.key) qs.set('key', params.key);
+    if (params.mode) qs.set('mode', params.mode);
+    if (params.timeSignature) qs.set('timeSignature', params.timeSignature);
+    if (params.genre) qs.set('genre', params.genre);
+    if (params.sort) qs.set('sort', params.sort);
+    if (params.page) qs.set('page', String(params.page));
+    if (params.limit) qs.set('limit', String(params.limit));
+    const query = qs.toString();
+    const response = await apiFetch(`${API_BASE}/catalog${query ? `?${query}` : ''}`, {
+      credentials: 'include',
+      signal,
+    });
+    if (!response.ok) {
+      throw new Error('Failed to load the catalog');
+    }
+    return response.json();
+  },
+
+  // Fetch one entry (detail). 404 -> CatalogNotFoundError so the page shows a calm
+  // not-found (deep-link to a removed entry).
+  async getCatalogEntry(uid: string, signal?: AbortSignal): Promise<CatalogSong> {
+    const response = await apiFetch(`${API_BASE}/catalog/${uid}`, {
+      credentials: 'include',
+      signal,
+    });
+    if (response.status === 404) {
+      throw new CatalogNotFoundError();
+    }
+    if (!response.ok) {
+      throw new Error('Failed to load the catalog entry');
+    }
+    return response.json();
+  },
+
   // Create a catalog entry (curator only; the route is gated server-side by
   // requireCurator -> 403). apiFetch attaches the CSRF token.
   async createCatalogEntry(entry: CreateCatalogDTO): Promise<CatalogSong> {

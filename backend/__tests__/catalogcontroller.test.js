@@ -3,6 +3,7 @@ jest.mock('../models', () => ({
     create: jest.fn(),
     findByPk: jest.fn(),
     findOne: jest.fn(),
+    findAndCountAll: jest.fn(),
   },
 }));
 
@@ -180,5 +181,78 @@ describe('catalogcontroller', () => {
     const next = mockNext();
     await controller.deleteCatalogEntry({ params: { uid: UID } }, mockRes(), next);
     expect(next.mock.calls[0][0].status).toBe(404);
+  });
+
+  // --- list (story 19.3) ---
+
+  test('getCatalogList returns the {items,total,page,limit} envelope', async () => {
+    CatalogSong.findAndCountAll.mockResolvedValue({ rows: [{ uid: 'a' }], count: 1 });
+    const res = mockRes();
+    await controller.getCatalogList({ query: {} }, res, mockNext());
+    const body = res.json.mock.calls[0][0];
+    expect(body).toEqual({ items: [{ uid: 'a' }], total: 1, page: 1, limit: 24 });
+  });
+
+  test('getCatalogList clamps limit (max 100) and defaults a garbage limit', async () => {
+    CatalogSong.findAndCountAll.mockResolvedValue({ rows: [], count: 0 });
+    const res = mockRes();
+    await controller.getCatalogList({ query: { limit: '9999', page: '3' } }, res, mockNext());
+    let arg = CatalogSong.findAndCountAll.mock.calls[0][0];
+    expect(arg.limit).toBe(100);
+    expect(arg.offset).toBe((3 - 1) * 100);
+    expect(res.json.mock.calls[0][0].limit).toBe(100);
+
+    CatalogSong.findAndCountAll.mockClear();
+    await controller.getCatalogList({ query: { limit: 'abc', page: '0' } }, mockRes(), mockNext());
+    arg = CatalogSong.findAndCountAll.mock.calls[0][0];
+    expect(arg.limit).toBe(24); // garbage -> default
+    expect(arg.offset).toBe(0); // page clamped to >= 1
+  });
+
+  test('getCatalogList ignores an out-of-whitelist sort (falls back to artist->title->uid)', async () => {
+    CatalogSong.findAndCountAll.mockResolvedValue({ rows: [], count: 0 });
+    await controller.getCatalogList({ query: { sort: 'title); DROP TABLE' } }, mockRes(), mockNext());
+    const arg = CatalogSong.findAndCountAll.mock.calls[0][0];
+    expect(arg.order).toEqual([['artist', 'ASC'], ['title', 'ASC'], ['uid', 'ASC']]);
+  });
+
+  test('getCatalogList query is NOT scoped by userUid (shared read, §3)', async () => {
+    CatalogSong.findAndCountAll.mockResolvedValue({ rows: [], count: 0 });
+    await controller.getCatalogList({ query: { key: 'Em' }, session: { user: 'u1' } }, mockRes(), mockNext());
+    const arg = CatalogSong.findAndCountAll.mock.calls[0][0];
+    // filters present, but userUid never injected into the where.
+    expect(JSON.stringify(arg.where)).not.toContain('userUid');
+    expect(JSON.stringify(arg.where)).not.toContain('user_uid');
+  });
+
+  test('getCatalogList with a search term builds the folded-LIKE where without crashing (exercises fn/col/whereFn)', async () => {
+    CatalogSong.findAndCountAll.mockResolvedValue({ rows: [], count: 0 });
+    const next = mockNext();
+    // %/_ are escaped to literals; the point is the search branch actually runs.
+    await controller.getCatalogList({ query: { search: '50%_test' } }, mockRes(), next);
+    expect(CatalogSong.findAndCountAll).toHaveBeenCalled();
+    expect(CatalogSong.findAndCountAll.mock.calls[0][0].where).toBeDefined();
+    expect(next).not.toHaveBeenCalled(); // no 500
+  });
+
+  // --- detail (story 19.3) ---
+
+  test('getCatalogEntry returns the raw entity', async () => {
+    CatalogSong.findByPk.mockResolvedValue({ uid: UID, title: 'Zombie' });
+    const res = mockRes();
+    await controller.getCatalogEntry({ params: { uid: UID } }, res, mockNext());
+    expect(res.json.mock.calls[0][0].uid).toBe(UID);
+  });
+
+  test('getCatalogEntry -> 404 calm on unknown or invalid uid', async () => {
+    CatalogSong.findByPk.mockResolvedValue(null);
+    const n1 = mockNext();
+    await controller.getCatalogEntry({ params: { uid: UID } }, mockRes(), n1);
+    expect(n1.mock.calls[0][0].status).toBe(404);
+
+    const n2 = mockNext();
+    await controller.getCatalogEntry({ params: { uid: 'not-a-uuid' } }, mockRes(), n2);
+    expect(n2.mock.calls[0][0].status).toBe(404);
+    expect(CatalogSong.findByPk).toHaveBeenCalledTimes(1); // invalid uid didn't hit the DB
   });
 });
