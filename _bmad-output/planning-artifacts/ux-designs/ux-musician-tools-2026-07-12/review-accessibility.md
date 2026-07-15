@@ -1,0 +1,40 @@
+# Accessibility Review (WCAG 2.1 AA) — musician-tools Catalog
+
+## Overall verdict
+
+The spine pair inherits a solid a11y floor and handles the headline risks well: the duplicate state is icon + text (not color alone), icon-only Add buttons get a full `aria-label`, the swipe-only rail trap is defused with a focusable container, and the Collection-import recap is `aria-live`. What the *new* Catalog surfaces leave open are mostly SPA/dynamic-content concerns the floor never had to face: focus is not restored on back-navigation from the detail route, the search-to-collapse + no-results updates are not announced to screen readers, the clickable card/row bodies nest interactive Add buttons/badges inside a clickable region, and the gradient tile commits `text-white` without a numeric contrast target. None are full blockers, but several are `high` because downstream code will mirror this spine verbatim.
+
+## Findings
+
+- **[high]** Clickable card/row **body** (→ detail route) contains an inline **Add button** and, in the duplicate case, a clickable `✓ Already in your songlist` **badge** — nested interactive controls. Recently-added card (EXPERIENCE.md line 82), Catalog list row (EXPERIENCE.md line 83), DESIGN.md Components lines 61-62, 67-68. A `<button>`/`<a>` inside a clickable `<a>` is invalid HTML and breaks keyboard/SR activation (ambiguous target, focus-order noise). *Fix:* Do **not** wrap the whole card/row in an anchor. Use a stretched-title-link pattern: the title is the navigation `<a>`, the Add button and duplicate badge are **siblings** raised above it (`position:relative; z-index`) so they remain independent tab stops. Commit this pattern in DESIGN Components so downstream doesn't ship a `<div onClick>` wrapping a button.
+
+- **[high]** Back-navigation from `/catalog/:uid` restores **scroll position + filters** but not **keyboard focus** (DL-10; EXPERIENCE.md lines 46, 110). On a data-router SPA, `history.back()` leaves focus on `<body>`, so keyboard/SR users lose their place in the list. *Fix:* Persist the activating element's id in history/router state and, on return to Browse, move focus back to the row/card that opened the detail (not only scroll). Add this to the Accessibility Floor alongside the existing scroll/filter restore.
+
+- **[high]** Search-to-collapse, live list filtering, and the **no-results** state are not announced to screen readers — no `aria-live`/status region is committed on the results list or a result count. Search-to-collapse (EXPERIENCE.md line 80), `No songs match your search.` (EXPERIENCE.md line 95). Only the import recap toast is `aria-live` (floor line 123). A sighted user sees rails vanish and the list shrink; a SR user hears nothing (WCAG 4.1.3 Status Messages). *Fix:* Wrap the filterable list in a region with `aria-live="polite"` that announces the result count ("12 songs" / "No songs match your search"); make the rail collapse a non-silent, focus-safe DOM change (collapse happens while focus is in the search field, so no trap — but the content change must be announced).
+
+- **[high]** White text on the brand→purple gradient tile commits `text-white` "to hold contrast" but states **no numeric target**, and a gradient means contrast varies across the tile. DESIGN.md line 37 / token `collection_tile_gradient` (`from-brand-500 to-purple-600`). The **count** is `meta`-sized small text (needs ≥4.5:1); white over the *lightest* stop (`brand-500`, a mid-tone) is the failure risk, in both light and dark variants. *Fix:* Commit explicit targets (name ≥3:1 if ≥18.66px bold, else ≥4.5:1; count ≥4.5:1) and verify white against the lightest gradient stop in both themes; if `brand-500` fails, darken the stop or add a subtle bottom scrim behind the text block.
+
+- **[medium]** The `≥44px` target commitment (floor line 122) conflicts with the specified rendering: the icon-only `+` Add in a **dense list-row cell** (DESIGN.md line 72) and the clickable `badge-success` duplicate state (DESIGN.md line 74) are badge/compact-sized and will render **below 44px**. *Fix:* Enforce a 44×44px minimum hit area (min-h/min-w or padding/pseudo-element expansion) on the compact `+` Add and on the clickable "Already in your songlist" badge, even in tight cells — call this out so the compact variants don't silently shrink.
+
+- **[medium]** Single-add success/error **toasts** and the **optimistic button relabel** (`✓ Added` → `Already in your songlist`) are not committed as announced. Only the Collection import recap is `aria-live` (floor line 123); the unitary flow uses `setToastMessage` (EXPERIENCE.md lines 97, 112) with no stated role. *Fix:* Give the shared toast container `role="status" aria-live="polite"` for **all** toasts, and ensure the button's accessible-name change (Add → Added → Already) is perceivable to SR (live region or managed focus).
+
+- **[medium]** Rails are `flex` div containers with **no list semantics or accessible name**. DESIGN.md `rail_scroll_container` (line 19), Components lines 58-65; floor gives `tabindex="0"` but no role. *Fix:* Mark each rail as `role="list"` (or `ul`/`li`) with `aria-label` ("Collections", "Recently added") so SR users get an item count and grouping; give the focusable scroll container an accessible name.
+
+- **[medium]** ConfirmDialog: focus-trap + `Esc` + safe default are committed (floor line 123), but **return-focus-to-trigger** on close and **dialog semantics** are not. *Fix:* State that closing returns focus to the "Add collection to my songlist" button, and require `role="dialog"` + `aria-modal="true"` + `aria-labelledby` pointing at the dialog title (Robust — even when reusing the existing `ConfirmDialog.tsx`, the spine should assert these so a mirror can't regress them).
+
+- **[medium]** New **curator form error states** are not specified for assistive tech: required-title validation and the 409 duplicate `A "{title}" by {artist} is already in the Catalog.` (EXPERIENCE.md line 103). The floor only says "don't regress inherited SongForm ARIA" (line 124) — the new errors aren't covered. *Fix:* Associate field errors via `aria-invalid` + `aria-describedby`; render the 409 as `role="alert"` and move focus to it.
+
+- **[low]** Keyboard scroll of rails: with `snap-x snap-mandatory` + `shrink-0` cards, tabbing to an off-screen card relies on browser scroll-into-view, which snap can fight; no visible focus-ring or arrow-key affordance is stated. *Fix:* Add `scroll-snap-align`/`scroll-margin` so a focused card reliably scrolls into view, ensure a visible focus ring on cards, optionally support arrow-key nav.
+
+- **[low]** The **403** curator state (`You don't have curator access.`, EXPERIENCE.md line 101) is not stated as focus-managed or announced. *Fix:* On render, move focus to the message heading and/or expose it via `role="alert"`.
+
+- **[low]** The `<lg` **card-fallback** of the filterable list (DESIGN.md line 47) drops the inherited semantic table; ensure the card grid remains a proper `list`/`listitem` structure so the responsive reflow doesn't lose row semantics.
+
+## What's handled well
+
+- **Duplicate state is not color-only**: `✓` icon + `Already in your songlist` text, explicitly for colorblind and SR users (floor line 121; DESIGN.md line 74) — and green-not-red avoids a false error semantic.
+- **Icon-only Add carries a full `aria-label`** when space collapses the label (floor line 120; DESIGN.md line 72).
+- **Rails are keyboard-reachable** via `tabindex="0"` scroll container + tabbable cards in visual order (floor line 119) — the swipe-only trap is anticipated and defused.
+- **Collection-import recap is `aria-live`** (floor line 123) — the one high-value batch feedback path is announced.
+- **Inherited floor carried cleanly**: semantic Songlist table reused, opaque sticky header, `min-w-0` rule, existing form ARIA, focus order = reading order, explicit ≥44px intent (2026-07-04 EXPERIENCE Accessibility Floor).
+- **URL-state restore on back** (scroll + filters via query params, DL-10) is a strong baseline — it just needs focus restore added to be complete.

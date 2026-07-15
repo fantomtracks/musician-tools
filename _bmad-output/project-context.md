@@ -133,6 +133,13 @@ _Versions = état actuel du projet (aucune contrainte de montée de version docu
 - Mots de passe : bcryptjs via le setter du modèle User (jamais de hash manuel) ; `defaultScope` exclut `password` — ne jamais le contourner sauf login (`scope(null)`)
 - CORS hardcodé (`https://musician-tools.app` / `localhost:5173`) dans server.js — à étendre si nouvel origin, pas de wildcard
 
+**Catalog (données partagées) — 2 exceptions ASSUMÉES au réflexe 404/scoping (Epic 19+, archi 2026-07-12)**
+- Le principe app-wide n'est PAS « tout est scopé `userUid` → 404 » mais : **« une réponse ne doit jamais révéler l'existence d'une ressource dont l'existence est confidentielle. »** Pour les données perso (existence secrète) → scoping + 404 anti-oracle (règle inchangée). Pour le **Catalog** (fiche lisible par TOUT connecté, existence non-secrète), le MÊME principe donne 2 exceptions :
+  1. **Lecture Catalog non scopée `userUid`** : `catalogcontroller` fait `CatalogSong.findAll({ where: <filtres> })` **sans** `userUid` — c'est CORRECT (aucun secret à protéger), pas une régression IDOR. Ne PAS rescoper par réflexe.
+  2. **Écriture Catalog → 403 franc** (middleware `requireCurator`, attribut `User.isCurator`), PAS 404 anti-oracle : la ressource est publique-aux-connectés, le seul secret est le privilège (pas une ressource). Le pattern 404 durci 7.5 ne s'applique donc PAS aux routes d'écriture Catalog.
+- Frontière (v2) : si une fiche acquiert un état non-publié (draft/contribution communautaire), son existence redevient secrète → le 404 anti-oracle re-primerait. À re-décider le jour venu.
+- ⚠️ Ces 2 points sont volontaires : ne pas les flagger en régression 7.5 en review. Marqués par un commentaire d'ancrage dans `catalogcontroller`/`requirecurator`.
+
 ---
 
 ## Usage Guidelines
@@ -151,4 +158,4 @@ _Versions = état actuel du projet (aucune contrainte de montée de version docu
 - Review periodically for outdated rules
 - Remove rules that become obvious over time
 
-Last Updated: 2026-06-06
+Last Updated: 2026-07-15 (ajout des 2 exceptions Catalog — données partagées, Epic 19+)

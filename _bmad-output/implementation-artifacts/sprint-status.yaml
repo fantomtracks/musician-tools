@@ -1,5 +1,5 @@
 # generated: 2026-06-07
-# last_updated: 2026-07-09
+# last_updated: 2026-07-12
 # project: musician-tools
 # project_key: NOKEY
 # tracking_system: file-system
@@ -173,7 +173,26 @@ development_status:
 
   # Epic 18: Fiche chanson = vraie route (migration data-router) — issu rétro Epic 17 + QA 17.2 ; cadré ADR architecture-song-route-2026-07-11.md (détail epics.md § Epic 18)
   # Ordre IMPOSÉ 18-1 (migration data-router pure) → 18-2 (route-ify + swap guard). Dé-risque : 18-1 = infra sans changement de comportement. 18-2 révise le guard shippé en 17.2 (v1.13.0).
-  epic-18: in-progress
+  epic-18: done   # 2/2 stories + rétro done ; mergé main v1.14.0 (a8d3044) ; pushé prod par northwood 2026-07-12 (front-only, aucune migration)
   18-1-migration-data-router: done   # infra ; BrowserRouter → createBrowserRouter/RouterProvider + RootLayout(Outlet)+RequireAuth+GuestOnly ; AUCUN changement de comportement, 13 routes à l'identique ; fiche chanson reste page-state ; guard 17.2 reste ; HomePage reste exporté (HomePage.test)
   18-2-route-ify-fiche-chanson-useblocker: done   # front ; /songs/new + /songs/:uid (editingUid/page dérivés URL) + auto-création navigate(replace) + guard maison 17.2 SUPPRIMÉ (LeaveGuard* rm, Header→Link, SessionHistoryCard→/songs/:uid, App sans provider) → useBlocker (couvre back-button) + 404 scopé deep-link. Env jest custom (bridge Fetch, 0 dép) + helper renderSongs. Code-review 3 couches → 4 findings (1 HIGH data-loss form non-chargé/404 pris pour draft frais + 2 MED [stale location yank-back, StrictMode deep-link dev] + 1 LOW toast) TOUS corrigés : gate formReady, pathnameRef/isMountedRef, rollback loadedFormUidRef, toast restauré ; +2 tests non-régression. Front 359✓ back 265✓ tsc✓ lint✓. CHANGELOG [Unreleased] + deferred-work (2 defer nav 17.2 clos, item route livré). ⚠️ QA manuelle + merge main = northwood.
   epic-18-retrospective: done   # epic-18-retro-2026-07-11.md — leçon centrale : StrictMode + mocks minimaux = 2 angles morts (3 bugs StrictMode + 1 forme-de-donnée passés en QA manuelle). Action items A (renderSongs strict par défaut) + B (fixtures serveur makeSong) FAITS (commit f2ec3d1). Reste : C smoke-journeys (fil de l'eau), D règle refs mount-once en setup, E push 1.14.0 (northwood), F revue deferred-work avant next epic.
+
+  # Epic 19: Catalog — Browse & Add (pool partagé ; cadré archi 2026-07-12 architecture-catalog-2026-07-12.md ; détail epics.md § Epic 19)
+  # Première donnée PARTAGÉE non-scopée userUid. 2 exceptions ASSUMÉES au réflexe 404/scoping (inscrites project-context.md) : lecture non-scopée + écriture 403 requireCurator (PAS 404 anti-oracle). Réutilise SANS modifier : unicité Epic 17 (respondDuplicateSong/23505→409), auto-fill 8.1, data-router Epic 18, songDuplicate.ts.
+  # Ordre IMPOSÉ 19-1 (fondation+curation back) → {19-2 admin front, 19-3 browse} → 19-4 Add. ⚠️ 19-1 + 19-4 = migrations → partent en PROD au merge (idempotentes + testées local).
+  epic-19: in-progress
+  19-1-fondation-catalog-curateur-fiches: ready-for-dev   # back ; migrations CatalogSong + index canonique GLOBAL (lower/COALESCE, par migration, absent du modèle) + Users.isCurator ; middleware requireCurator (403) ; CRUD fiches (409 duplicate_catalog_entry create ET rename ; in-place uid stable). Mirror discipline 17-1 SANS user_uid. ⚠️ migration part en prod
+  19-2-admin-saisir-fiche-front: backlog                  # front ; CatalogAdmin entry form (structure SongForm RESTREINTE aux champs intrinsèques DL-17) + auto-fill sans écraser + route gated + entrée dropdown compte si isCurator
+  19-3-browse-recherche-filtres-detail: backlog           # back+front ; endpoint liste paginé à ENVELOPPE (sort whitelist, cap limit, unaccent) + lecture non-scopée + détail 404 calme ; Catalog.tsx URL-state + debounce/AbortController + nav 7e lien
+  19-4-add-to-my-songlist: backlog                        # back+front ; migration Songs.sourceCatalogUid (souple, pas de FK) + endpoint Add dédié (deep-clone structuredClone + respondDuplicateSong 409) + bouton 3 états + flag doublon client-side (songDuplicate.ts) + crochet Songlist-vide. ⚠️ migration part en prod
+  epic-19-retrospective: optional
+
+  # Epic 20: Catalog — Collections (peuplement thématique ; bâtit sur Epic 19 ; détail epics.md § Epic 20)
+  # Ordre IMPOSÉ 20-1 (fondation+compose back) → {20-2 composer front, 20-3 import endpoint} → 20-4 browse+import front. Réutilise createPlaylist/PlaylistConflictError (Epic 10) + mécanique Add (19-4). Import NON-ATOMIQUE (best-effort, pas de transaction englobante).
+  epic-20: backlog
+  20-1-fondation-collections-composition: backlog         # back ; migrations CatalogCollection + jointure CatalogCollectionSongs (composite unique) ; CRUD Collections + compose (multi) ; nettoyage DUR jointure au delete fiche (étend 19-1)
+  20-2-composer-collections-admin-front: backlog          # front ; composer recherche + Add/Remove (pas de drag, comboboxKeyboard) ; multi-appartenance
+  20-3-import-endpoint-non-atomique-playlist-miroir: backlog   # back ; POST collections/:uid/add-to-songlist best-effort (pas de transaction) + playlist miroir lower(name) idempotente + récap {added,skipped,failed,playlistUid}
+  20-4-browse-importer-collections-front: backlog         # front ; rail Collections (tuiles gradient+scrim) + page détail Collection + ConfirmDialog + toast récap + enrichit crochet Songlist-vide (aperçu Collections)
+  epic-20-retrospective: optional

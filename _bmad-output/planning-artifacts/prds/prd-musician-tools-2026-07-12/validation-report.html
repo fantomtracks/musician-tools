@@ -1,0 +1,390 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+<meta charset="utf-8">
+<title>PRD Validation: Catalog (musician-tools)</title>
+<style>
+  :root {
+    --bg: #fafaf9;
+    --surface: #ffffff;
+    --border: #e7e5e4;
+    --text: #1c1917;
+    --muted: #78716c;
+
+    --verdict-strong: #16a34a;
+    --verdict-adequate: #65a30d;
+    --verdict-thin: #d97706;
+    --verdict-broken: #dc2626;
+
+    --sev-low: #64748b;
+    --sev-medium: #ca8a04;
+    --sev-high: #ea580c;
+    --sev-critical: #dc2626;
+
+    --grade-exc: #16a34a;
+    --grade-good: #65a30d;
+    --grade-fair: #d97706;
+    --grade-poor: #dc2626;
+  }
+  * { box-sizing: border-box; }
+  html, body { margin: 0; padding: 0; }
+  body {
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Inter, system-ui, sans-serif;
+    background: var(--bg);
+    color: var(--text);
+    line-height: 1.6;
+    font-size: 15px;
+  }
+  .container { max-width: 960px; margin: 0 auto; padding: 32px 24px 64px; }
+
+  header.report-header {
+    display: flex;
+    align-items: flex-start;
+    justify-content: space-between;
+    gap: 24px;
+    padding-bottom: 16px;
+    border-bottom: 1px solid var(--border);
+    margin-bottom: 24px;
+  }
+  .title h1 { margin: 0; font-size: 22px; font-weight: 600; letter-spacing: -0.01em; }
+  .title .subtitle { color: var(--muted); font-size: 13px; margin-top: 4px; font-family: ui-monospace, "SF Mono", Menlo, monospace; }
+  .grade {
+    padding: 10px 18px;
+    border-radius: 8px;
+    font-weight: 600;
+    color: white;
+    font-size: 15px;
+    white-space: nowrap;
+  }
+  .grade-excellent { background: var(--grade-exc); }
+  .grade-good { background: var(--grade-good); }
+  .grade-fair { background: var(--grade-fair); }
+  .grade-poor { background: var(--grade-poor); }
+
+  .synthesis {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-left: 3px solid var(--muted);
+    border-radius: 8px;
+    padding: 18px 22px;
+    margin-bottom: 24px;
+    font-size: 15.5px;
+  }
+  .synthesis p { margin: 0 0 10px; }
+  .synthesis p:last-child { margin-bottom: 0; }
+
+  .dimension-summary {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+    gap: 10px;
+    margin-bottom: 24px;
+  }
+  .dim-card {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    padding: 12px 14px;
+  }
+  .dim-card .dim-name { font-size: 13px; color: var(--muted); margin-bottom: 6px; }
+  .dim-card .dim-verdict { font-size: 14px; font-weight: 600; }
+
+  section.dimension, section.reviewer-section { margin-bottom: 14px; }
+  section.dimension details, section.reviewer-section details {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    overflow: hidden;
+  }
+  section summary {
+    padding: 14px 20px;
+    cursor: pointer;
+    user-select: none;
+    list-style: none;
+    display: flex;
+    align-items: center;
+    gap: 12px;
+  }
+  section summary::-webkit-details-marker { display: none; }
+  section summary::before {
+    content: "▸";
+    display: inline-block;
+    color: var(--muted);
+    transition: transform 0.15s ease;
+  }
+  section details[open] summary::before { transform: rotate(90deg); }
+  section summary h2 {
+    display: inline;
+    margin: 0;
+    font-size: 16px;
+    font-weight: 600;
+    letter-spacing: -0.005em;
+    flex: 1;
+  }
+  .verdict-pill {
+    font-size: 11px;
+    padding: 3px 10px;
+    border-radius: 999px;
+    font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: 0.04em;
+    color: white;
+  }
+  .verdict-strong { background: var(--verdict-strong); }
+  .verdict-adequate { background: var(--verdict-adequate); }
+  .verdict-thin { background: var(--verdict-thin); }
+  .verdict-broken { background: var(--verdict-broken); }
+
+  .dim-body { padding: 4px 20px 18px; }
+  .dim-judgment { color: var(--text); font-size: 14.5px; }
+  .dim-judgment p { margin: 0 0 10px; }
+
+  .findings-list { padding: 0 20px 4px; }
+  article.finding {
+    padding: 14px 0;
+    border-top: 1px solid var(--border);
+  }
+  article.finding:first-child { border-top: none; }
+  article.finding header {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    flex-wrap: wrap;
+    margin-bottom: 6px;
+  }
+  .badge {
+    font-size: 10.5px;
+    padding: 3px 8px;
+    border-radius: 4px;
+    font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: 0.04em;
+    line-height: 1.4;
+  }
+  .badge-sev-low { background: rgba(100, 116, 139, 0.12); color: var(--sev-low); }
+  .badge-sev-medium { background: rgba(202, 138, 4, 0.14); color: var(--sev-medium); }
+  .badge-sev-high { background: rgba(234, 88, 12, 0.14); color: var(--sev-high); }
+  .badge-sev-critical { background: rgba(220, 38, 38, 0.14); color: var(--sev-critical); }
+  .finding-title { margin: 0; font-size: 15px; font-weight: 500; flex: 1; min-width: 200px; }
+  .finding-location { font-family: ui-monospace, "SF Mono", Menlo, monospace; font-size: 12.5px; color: var(--muted); }
+  .finding-note, .finding-fix { margin-top: 6px; font-size: 14px; }
+  .finding-fix strong { color: var(--muted); font-weight: 500; }
+
+  .reviewer-source {
+    font-size: 12px;
+    color: var(--muted);
+    font-family: ui-monospace, "SF Mono", Menlo, monospace;
+  }
+
+  .mechanical {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    padding: 16px 20px;
+    margin-top: 24px;
+    font-size: 14px;
+  }
+  .mechanical h3 { margin: 0 0 10px; font-size: 14px; font-weight: 600; color: var(--muted); text-transform: uppercase; letter-spacing: 0.04em; }
+  .mechanical ul { margin: 0; padding-left: 20px; }
+  .mechanical li { margin-bottom: 4px; color: var(--text); }
+
+  footer.report-footer {
+    margin-top: 40px;
+    padding-top: 16px;
+    border-top: 1px solid var(--border);
+    font-size: 12px;
+    color: var(--muted);
+    font-family: ui-monospace, "SF Mono", Menlo, monospace;
+  }
+  footer .meta { display: flex; gap: 24px; flex-wrap: wrap; }
+</style>
+</head>
+<body>
+  <div class="container">
+
+    <header class="report-header">
+      <div class="title">
+        <h1>PRD Catalog — Validation Report</h1>
+        <div class="subtitle">_bmad-output/planning-artifacts/prds/prd-musician-tools-2026-07-12/prd.md</div>
+      </div>
+      <div class="grade grade-fair">Fair</div>
+    </header>
+
+    <div class="synthesis">
+      <p><strong>Sur la forme, le PRD est solide et prêt pour l'aval.</strong> Il tient une thèse claire (« friction zéro » : supprimer la Songlist vide à l'onboarding), la décline en features et métriques cohérentes, documente honnêtement ce qui est décidé / différé / supposé, et donne à l'architecture une amorce exploitable (Glossaire verbatim, FR à conséquences testables, addendum qui isole le « comment » et acte la rupture mono-user → partagé). Le <em>rubric walker</em> note les 7 dimensions <em>strong/adequate</em>, 0 finding high/critical.</p>
+      <p><strong>La passe adversariale déplace nettement le tableau.</strong> Sous une forme propre, plusieurs décisions <em>fondatrices</em> sont présentées comme acquises alors qu'elles sont en réalité des questions ouvertes bloquantes : le mapping champ-par-champ Catalog→Song (FR-4), la stabilité de l'uid canonique dont dépend toute la provenance, et le choix 403-vs-404 sur l'admin (décision de sécu conceptuelle, pas d'implémentation). Elle relève aussi des métriques dimensionnées pour une échelle que le produit n'a pas (N≈4) et une promesse UX Collections qui s'évapore à l'import.</p>
+      <p><strong>Note du validateur (vérification code).</strong> J'ai recalibré les 3 CRITICAL de l'adversarial après lecture du modèle <code>Song</code> réel. Bonne nouvelle sur C1 : les colonnes existent déjà (<code>genre</code>/<code>language</code> en JSONB, <code>timeSignature</code>, <code>mode</code>, <code>durationSeconds</code>, <code>key</code>, <code>album</code>) — <strong>aucune migration de la table <code>Song</code> perso, aucune perte silencieuse de données</strong> ; la framing « data-loss » est surestimée. En revanche un vrai écart demeure : les noms/formes proposés pour <code>CatalogSong</code> divergent de <code>Song</code> (<code>instrumentTypes</code>≠<code>instrument</code>, <code>difficulty</code>≠<code>instrumentDifficulty</code>, <code>tunings</code>≠<code>instrumentTuning</code>, et <code>youtubeUrl</code>/<code>spotifyUrl</code> scalaires vs <code>streamingLinks</code> JSONB) → FR-4 est une <strong>copie avec transformation de forme</strong>, pas un copier-coller 1:1. Net : les « CRITICAL » deviennent des <strong>HIGH/MEDIUM à trancher avant les epics</strong>, aucun n'est un défaut bloquant-cassé. D'où la note <strong>Fair</strong> : de bonnes fondations, mais un socle qui repose sur des décisions non prises.</p>
+    </div>
+
+    <div class="dimension-summary">
+      <div class="dim-card"><div class="dim-name">Decision-readiness</div><div class="dim-verdict" style="color: var(--verdict-strong)">strong</div></div>
+      <div class="dim-card"><div class="dim-name">Substance over theater</div><div class="dim-verdict" style="color: var(--verdict-strong)">strong</div></div>
+      <div class="dim-card"><div class="dim-name">Strategic coherence</div><div class="dim-verdict" style="color: var(--verdict-adequate)">adequate</div></div>
+      <div class="dim-card"><div class="dim-name">Done-ness clarity</div><div class="dim-verdict" style="color: var(--verdict-strong)">strong</div></div>
+      <div class="dim-card"><div class="dim-name">Scope honesty</div><div class="dim-verdict" style="color: var(--verdict-strong)">strong</div></div>
+      <div class="dim-card"><div class="dim-name">Downstream usability</div><div class="dim-verdict" style="color: var(--verdict-strong)">strong</div></div>
+      <div class="dim-card"><div class="dim-name">Shape fit</div><div class="dim-verdict" style="color: var(--verdict-strong)">strong</div></div>
+    </div>
+
+    <section class="dimension">
+      <details>
+        <summary><h2>Decision-readiness</h2><span class="verdict-pill verdict-strong">strong</span></summary>
+        <div class="dim-body"><div class="dim-judgment">
+          <p>Un décideur peut agir. Les décisions fondatrices sont posées <em>comme des décisions</em> (§0), et le <code>.decision-log.md</code> conserve les alternatives rejetées avec leur motif. Le trade-off le plus contre-intuitif est nommé et argumenté (§5 : les paroles sont juridiquement <em>les plus</em> risquées, à rebours de l'intuition « les tabs sont pires »). Les 6 Questions ouvertes (§8) sont réellement ouvertes. Réserve : certaines de ces « décisions » sont en fait des opens bloquantes (voir la passe adversariale, C1–C3/H1).</p>
+        </div></div>
+      </details>
+    </section>
+
+    <section class="dimension">
+      <details>
+        <summary><h2>Substance over theater</h2><span class="verdict-pill verdict-strong">strong</span></summary>
+        <div class="dim-body"><div class="dim-judgment">
+          <p>Pas de furniture. 3 personas (Léa, Marc, northwood), chacun portant un UJ et un JTBD, aucun décoratif. Vision spécifique au produit, non transposable. NFR product-specific (NFR-1 nomme la rupture « première donnée non scopée <code>userUid</code> », NFR-4 précise la référence souple sans FK vive). La sémantique « snapshot + provenance » vient de la recherche paysage (digest UG/MuseScore/Spotify dans le decision-log), pas d'une case de template.</p>
+        </div></div>
+      </details>
+    </section>
+
+    <section class="dimension">
+      <details open>
+        <summary><h2>Strategic coherence</h2><span class="verdict-pill verdict-adequate">adequate</span></summary>
+        <div class="dim-body"><div class="dim-judgment">
+          <p>La thèse est nette, les features en découlent (Browse/Add/Collections servent « friction zéro », la Curation est l'enabler assumé), les chantiers différés sont explicitement modèle-aware non-construits en v1. Counter-métriques bien choisies (SM-C1 « Songs copiées jamais jouées » garde la qualité de la thèse). Descend à <em>adequate</em> car les cibles des Success Metrics sont sous-spécifiées.</p>
+        </div></div>
+        <div class="findings-list">
+          <article class="finding">
+            <header><span class="badge badge-sev-medium">medium</span><h3 class="finding-title">Cibles de métriques molles</h3><span class="finding-location">§7 · SM-2/SM-3/SM-4</span></header>
+            <div class="finding-note">SM-2 (traduction directe de la thèse : time-to-first-song) se contente d'« une baisse nette vs saisie manuelle » sans baseline ni valeur ; SM-3/SM-4 n'ont aucune cible.</div>
+            <div class="finding-fix"><strong>Fix :</strong> mesurer une baseline (time-to-first-song actuel) + cible chiffrée même grossière pour SM-2 ; seuil de succès pour SM-3 et SM-4. (Voir aussi H2/H3/L4 sur la mesurabilité à N≈4.)</div>
+          </article>
+        </div>
+      </details>
+    </section>
+
+    <section class="dimension">
+      <details>
+        <summary><h2>Done-ness clarity</h2><span class="verdict-pill verdict-strong">strong</span></summary>
+        <div class="dim-body"><div class="dim-judgment">
+          <p>Dimension la mieux tenue. Chaque FR porte un bloc <code>Consequences (testable)</code> vérifiable, pas des adjectifs (FR-5 « supprimer la fiche Catalog laisse la Song perso intacte » ; FR-6 « n'ajoute aucune ligne » + message exact ; FR-9 récap chiffré). Réserve importante : la passe adversariale (M4) montre que <em>quelques</em> consequences ne sont pas testables tant que des codes/champs restent indécis (FR-10 « 404/403 », FR-4 « + version »).</p>
+        </div></div>
+        <div class="findings-list">
+          <article class="finding">
+            <header><span class="badge badge-sev-low">low</span><h3 class="finding-title">Recherche sans borne de résultat/latence</h3><span class="finding-location">§4.2 · FR-2</span></header>
+            <div class="finding-note">Les consequences couvrent le fonctionnel (casse/accents, ET des filtres, état vide) mais aucune borne de perf, alors que NFR-2 pose que le Catalog « croît bien au-delà d'une Songlist ».</div>
+            <div class="finding-fix"><strong>Fix :</strong> borne indicative (taille de page / latence cible) ou renvoi explicite à l'UX/archi.</div>
+          </article>
+          <article class="finding">
+            <header><span class="badge badge-sev-low">low</span><h3 class="finding-title">Choix « paginé ou virtualisé » laissé ouvert</h3><span class="finding-location">FR-1 · NFR-2</span></header>
+            <div class="finding-note">Acceptable comme décision déléguée, mais à acter en UX/archi pour que « done » soit sans ambiguïté côté implémentation.</div>
+            <div class="finding-fix"><strong>Fix :</strong> marquer d'un <code>[NOTE FOR PM]</code>/renvoi UX plutôt qu'un « ou » implicite.</div>
+          </article>
+        </div>
+      </details>
+    </section>
+
+    <section class="dimension">
+      <details>
+        <summary><h2>Scope honesty</h2><span class="verdict-pill verdict-strong">strong</span></summary>
+        <div class="dim-body"><div class="dim-judgment">
+          <p>Omissions explicites et argumentées, jamais laissées à l'inférence. §5 Non-Goals justifie chaque exclusion (paroles/tabs = risque juridique ; browse public = surface SEO/rate-limit) ; §6.2 range chaque hors-périmètre avec une cible de version. <code>[ASSUMPTION]</code> indexés (§9), <code>[NON-GOAL for MVP]</code> présents, de-scoping proposé ouvertement (§4.5/§4.6). Densité open-items proportionnée à l'enjeu « refonte structurante ».</p>
+        </div></div>
+      </details>
+    </section>
+
+    <section class="dimension">
+      <details>
+        <summary><h2>Downstream usability</h2><span class="verdict-pill verdict-strong">strong</span></summary>
+        <div class="dim-body"><div class="dim-judgment">
+          <p>PRD chain-top assumé. Glossaire (§3) riche avec consigne verbatim ; IDs contigus (FR-1→13, UJ-1→3, SM-1→4 + C1/C2, NFR-1→6) ; cross-refs internes résolvent ; chaque UJ a un protagoniste nommé portant le contexte inline ; addendum directement exploitable par l'architecture. Réserve mineure : quelques références externes cryptiques (« 10.1/17.1 ») et un verbe d'import non glossé (voir Mechanical notes).</p>
+        </div></div>
+      </details>
+    </section>
+
+    <section class="dimension">
+      <details>
+        <summary><h2>Shape fit</h2><span class="verdict-pill verdict-strong">strong</span></summary>
+        <div class="dim-body"><div class="dim-judgment">
+          <p>Forme mixte adaptée : consumer à UX signifiante (UJ à protagoniste nommé load-bearing pour Léa/Marc) + rôle opérateur Curator traité en capability-spec (FR-10→13) + un UJ opérateur unique (UJ-3). Contexte brownfield correctement traité : références à l'existant précises et plausibles (Epic 17 unicité, story 7.5 anti-oracle, story 8.1 auto-fill, Epic 18 data-router) ; l'addendum distingue le neuf de l'existant réutilisé.</p>
+        </div></div>
+      </details>
+    </section>
+
+    <section class="reviewer-section">
+      <details open>
+        <summary><h2>Revue adversariale (voix conservée)</h2><span class="reviewer-source">review-adversarial-general.md</span></summary>
+        <div class="dim-body"><div class="dim-judgment">
+          <p>« Le PRD est bien écrit et honnête sur ses ruptures, mais il maquille en décisions tranchées plusieurs choix qui sont en réalité des questions ouvertes bloquantes, et empile deux paris fondateurs (identité canonique globale + provenance) qui s'auto-sabotent. » <em>Sévérités originales de l'adversarial conservées ci-dessous ; le badge entre crochets indique la recalibration du validateur après vérification code.</em></p>
+        </div></div>
+        <div class="findings-list">
+          <article class="finding">
+            <header><span class="badge badge-sev-critical">critical → [high]</span><h3 class="finding-title">C1 — Mapping de champs Catalog→Song non figé</h3><span class="finding-location">FR-4 · §8.5 · addendum</span></header>
+            <div class="finding-note">FR-4 « crée une Song à partir des champs de la fiche » mais le mapping champ-par-champ est une question ouverte. <strong>Recalibrage validateur :</strong> les colonnes existent dans <code>Song</code> (pas de migration ni de perte de données) — mais les noms/formes divergent (<code>instrumentTypes</code>≠<code>instrument</code>, <code>difficulty</code>≠<code>instrumentDifficulty</code>, <code>tunings</code>≠<code>instrumentTuning</code>, <code>youtubeUrl</code>/<code>spotifyUrl</code> vs <code>streamingLinks</code> JSONB). Sémantique <code>difficulty</code> : Catalog = suggérée/objective vs perso <code>instrumentDifficulty</code> = par-instrument.</div>
+            <div class="finding-fix"><strong>Fix :</strong> figer un tableau de correspondance champ-par-champ (nom source → nom cible → transformation de forme) en architecture — pré-requis de FR-4/FR-9. Aligner aussi le nommage <code>CatalogSong</code> de l'addendum sur <code>Song</code> pour tuer l'illusion d'une copie 1:1.</div>
+          </article>
+          <article class="finding">
+            <header><span class="badge badge-sev-critical">critical → [high]</span><h3 class="finding-title">C2 — Identité canonique globale variant-hostile, sans workflow de correction</h3><span class="finding-location">FR-13 · §4.4 · §6.2 · addendum</span></header>
+            <div class="finding-note">« Miroir de l'index Epic 17 » est un abus de langage : Epic 17 est <strong>per-user</strong> (tu corriges ta ligne), l'index Catalog est <strong>global</strong> (la 1ʳᵉ fiche verrouille la clé pour tous). Le curateur ne peut pas seeder studio vs live, standard vs drop-D (mêmes titre+artiste). Passer aux variantes en v2 exigera de changer la clé unique — migration sur donnée partagée en prod. Le besoin émerge à « la chanson n°2 qui est une reprise ».</div>
+            <div class="finding-fix"><strong>Fix :</strong> assumer explicitement en architecture le choix v1 « une entrée canonique » + décrire un workflow de correction/merge, ou introduire dès v1 un discriminant de variante dans la clé.</div>
+          </article>
+          <article class="finding">
+            <header><span class="badge badge-sev-critical">critical → [medium]</span><h3 class="finding-title">C3 — Provenance fragile dès qu'un curateur corrige un titre</h3><span class="finding-location">§4.5 · NFR-4 · addendum</span></header>
+            <div class="finding-note">Snapshot <em>+provenance</em> (vs snapshot pur) n'est justifié que par le futur re-sync (§4.5). Si corriger une fiche se fait par delete+recreate → nouvel <code>uid</code> → tous les <code>sourceCatalogUid</code> distribués pendent en silence. <strong>Recalibrage validateur :</strong> partiellement réfutable — une édition <em>in-place</em> (UPDATE même ligne) préserve l'uid ; le delete+recreate n'est pas forcé. Le risque tient uniquement si la curation supprime-recrée.</div>
+            <div class="finding-fix"><strong>Fix :</strong> poser par contrat « édition in-place, uid stable, jamais delete+recreate une fiche référencée » ; sinon assumer que la provenance est best-effort et cesser d'en faire la raison d'être du snapshot.</div>
+          </article>
+          <article class="finding">
+            <header><span class="badge badge-sev-high">high</span><h3 class="finding-title">H1 — Anti-oracle 403/404 cargo-culté sur l'admin Catalog</h3><span class="finding-location">FR-10 · addendum §Autorisation</span></header>
+            <div class="finding-note">Le pattern 7.5 cache les ressources <em>d'autrui</em> ; le Catalog est publiquement lisible par tout connecté — il n'y a rien à cacher. 404 sur la route d'écriture d'une ressource déjà lisible = théâtre. Le bon choix est un 403 franc. C'est une décision de sécu <em>conceptuelle</em>, pas d'implémentation : elle conditionne <code>requireCurator</code>, chaque route d'écriture et les AC.</div>
+            <div class="finding-fix"><strong>Fix :</strong> trancher 403 en amont (architecture) et purger la « Consequence testable » indécise de FR-10.</div>
+          </article>
+          <article class="finding">
+            <header><span class="badge badge-sev-high">high</span><h3 class="finding-title">H2 — SM-1 mesure la couverture déguisée en adoption, gonflable par imports batch</h3><span class="finding-location">§7 · SM-1</span></header>
+            <div class="finding-note">Coverage ≠ adoption : catalogue maigre → saisie manuelle → SM-1 bas (pénalise un bon produit). Et 1 import de Collection = 20 « adds Catalog » d'un clic → franchit >50 % trivialement, récompensant le remplissage vide que SM-C1 dénonce.</div>
+            <div class="finding-fix"><strong>Fix :</strong> découpler adoption/couverture ; exclure (ou compter à part) les adds issus d'imports batch ; qualifier « une fois seedé » par un volume de seed décidé.</div>
+          </article>
+          <article class="finding">
+            <header><span class="badge badge-sev-high">high</span><h3 class="finding-title">H4 — La valeur des Collections s'évapore à l'import</h3><span class="finding-location">§4.3 · FR-9 · UJ-2 · §8.6</span></header>
+            <div class="finding-note">FR-9 assume que l'import ne crée pas de Playlist perso → après « Rock 90 » (20 titres) le user obtient 20 chansons en vrac sans regroupement thématique. Le JTBD émotionnel et le climax d'UJ-2 promettent une cohérence que le résultat ne livre pas. Le mapping Collection→Playlist est relégué en v2.</div>
+            <div class="finding-fix"><strong>Fix :</strong> trancher Collection→regroupement perso <em>avant</em> de figer FR-9 (UX), sinon la feature phare de §4.3 est un anti-climax.</div>
+          </article>
+          <article class="finding">
+            <header><span class="badge badge-sev-high">high</span><h3 class="finding-title">H3 — Goulot « un seul curateur » + volume de seed indécis</h3><span class="finding-location">UJ-3 · §8.4 · SM-1/SM-4</span></header>
+            <div class="finding-note">Tout le catalogue dépend d'une personne saisissant les fiches une par une ; le volume de seed est une question ouverte ; le CSV import (seul levier réaliste) est repoussé. « Une fois seedé » (SM-1) n'a donc pas de définition, et SM-4 n'a ni cible ni capacité de production estimée.</div>
+            <div class="finding-fix"><strong>Fix :</strong> décider le volume de seed cible et le pipeline (saisie/auto-fill/CSV) ; sans lui, SM-1/SM-4 sont bâties sur du sable.</div>
+          </article>
+          <article class="finding">
+            <header><span class="badge badge-sev-high">high</span><h3 class="finding-title">H5 — La garde de doublon rate sur les données saisies avant le Catalog</h3><span class="finding-location">FR-6 · FR-9</span></header>
+            <div class="finding-note">Les chansons déjà saisies à la main n'ont jamais transité par la normalisation canonique : « Zombie / Cranberries » (user) vs « Zombie / The Cranberries » (Catalog) → la garde ne matche pas → doublon quasi-identique en silence ; ou fusion agressive perçue comme un bug (SM-C2). Le récap « 18 added, 2 already » peut être faux dans les deux sens.</div>
+            <div class="finding-fix"><strong>Fix :</strong> spécifier la normalisation exacte et le comportement sur collisions partielles/near-miss.</div>
+          </article>
+          <article class="finding">
+            <header><span class="badge badge-sev-medium">medium</span><h3 class="finding-title">Medium (6) — rollup</h3><span class="finding-location">review-adversarial-general.md</span></header>
+            <div class="finding-note"><strong>M1</strong> import best-effort sans seau « failed » dans le récap (ni idempotence/perf du lot). <strong>M2</strong> <code>sourceCatalogVersion</code> « Optionnel » (§8.1) mais listé comme conséquence testable de FR-4 → contradiction interne. <strong>M3</strong> NFR-2 promet la scalabilité sans conception (pas de cache/invalidation) — fausse confiance. <strong>M4</strong> plusieurs « Consequences testable » non testables (codes/champs indécis). <strong>M5</strong> la lecture Catalog non scopée <code>userUid</code> viole la règle gravée dans <code>project-context.md</code> → sera flaggée comme régression 7.5 à chaque story tant qu'une exception n'est pas inscrite <em>dans project-context.md lui-même</em>. <strong>M6</strong> copie snapshot = deep-clone des structures JSON + respect convention colonnes (renforcé par la vérif code).</div>
+            <div class="finding-fix"><strong>Fix :</strong> détails dans <code>review-adversarial-general.md</code> §MEDIUM.</div>
+          </article>
+          <article class="finding">
+            <header><span class="badge badge-sev-low">low</span><h3 class="finding-title">Low (4) — rollup</h3><span class="finding-location">review-adversarial-general.md</span></header>
+            <div class="finding-note"><strong>L1</strong> narratif « zéro SQL » de UJ-3 faux à la racine (le rôle curateur se pose à la main en base). <strong>L2</strong> course browse→Add (fiche supprimée entre-temps) non spécifiée côté UI. <strong>L3</strong> search/browse sur donnée partagée = surface de scraping (non-problème à N≈4, à garder en tête). <strong>L4</strong> métriques chiffrées sur N≈4 = bruit statistique (fausse rigueur).</div>
+            <div class="finding-fix"><strong>Fix :</strong> détails dans <code>review-adversarial-general.md</code> §LOW.</div>
+          </article>
+        </div>
+      </details>
+    </section>
+
+    <div class="mechanical">
+      <h3>Mechanical notes (rubric)</h3>
+      <ul>
+        <li><strong>Roundtrip Assumptions Index (low)</strong> — l'index §9 a 5 entrées mais « §0 / addendum » et « §6.1 » n'ont pas de tag <code>[ASSUMPTION]</code> inline à l'endroit cité. Ajouter les tags manquants ou retirer ces entrées.</li>
+        <li><strong>Verbe d'import non glossé (low)</strong> — « Add collection to my songlist » (UJ-2, §11) n'est pas au Glossaire (§3), seul « Add to my songlist » y figure. L'ajouter pour rester verbatim en aval.</li>
+        <li><strong>Références externes cryptiques (low)</strong> — « miroir 10.1/17.1 » ne se résout pas depuis ce PRD. Nommer la source (« index unique per-user d'Epic 17 ») partout.</li>
+        <li><strong>ID continuity</strong> — OK : FR-1→13, UJ-1→3, SM-1→4 + C1/C2, NFR-1→6, tous contigus/uniques/sans cross-ref cassée.</li>
+      </ul>
+    </div>
+
+    <footer class="report-footer">
+      <div class="meta">
+        <span>Rubric: .claude/skills/bmad-prd/assets/prd-validation-checklist.md</span>
+        <span>Reviewers: review-rubric.md · review-adversarial-general.md</span>
+        <span>Generated: 2026-07-12T15:00:10+0200</span>
+      </div>
+    </footer>
+  </div>
+</body>
+</html>
