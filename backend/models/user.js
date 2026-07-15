@@ -69,6 +69,15 @@ module.exports = (sequelize) => {
       type: DataTypes.BOOLEAN,
       allowNull: false,
       defaultValue: false
+    },
+    isCurator: {
+      // Story 19.1 (Epic 19 — Catalog): gates WRITE access to the shared Catalog
+      // (requireCurator -> 403). Boolean attribute, no roles table; set by hand in
+      // the DB for the single v1 curator (no role-management UI).
+      type: DataTypes.BOOLEAN,
+      allowNull: false,
+      defaultValue: false,
+      field: 'is_curator'
     }
   }, {
     tableName: 'Users',

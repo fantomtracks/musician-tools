@@ -8,6 +8,7 @@ var playlistsRouter = require('./playlists');
 var topicsRouter = require('./topics');
 var sessionsRouter = require('./sessions');
 var accountRouter = require('./account');
+var catalogRouter = require('./catalog');
 
 // CSRF guard on every /api route (story 7.3): mints a per-session token, exempts
 // safe methods, and rejects mutations without a valid X-CSRF-Token header.
@@ -48,5 +49,9 @@ router.use('/sessions', sessionsRouter);
 
 // Account/profile routes (story 7.8)
 router.use('/account', accountRouter);
+
+// Catalog routes (Epic 19 — shared song pool). Reads = authsess (non-scoped);
+// writes = requireCurator (403). CSRF above covers the mutations.
+router.use('/catalog', catalogRouter);
 
 module.exports = router;
