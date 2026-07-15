@@ -5,9 +5,13 @@ jest.mock('../models', () => ({
     findOne: jest.fn(),
     findAndCountAll: jest.fn(),
   },
+  Song: {
+    create: jest.fn(),
+    findOne: jest.fn(),
+  },
 }));
 
-const { CatalogSong } = require('../models');
+const { CatalogSong, Song } = require('../models');
 const controller = require('../controllers/catalogcontroller');
 
 const UID = '11111111-1111-4111-8111-111111111111';
@@ -254,5 +258,74 @@ describe('catalogcontroller', () => {
     await controller.getCatalogEntry({ params: { uid: 'not-a-uuid' } }, mockRes(), n2);
     expect(n2.mock.calls[0][0].status).toBe(404);
     expect(CatalogSong.findByPk).toHaveBeenCalledTimes(1); // invalid uid didn't hit the DB
+  });
+
+  // --- Add to my songlist (story 19.4) ---
+
+  const CATALOG = {
+    uid: UID, title: 'Zombie', artist: 'The Cranberries', album: 'No Need to Argue',
+    key: 'Em', bpm: 84, mode: 'minor', timeSignature: '4/4', durationSeconds: 260,
+    language: ['English'], genre: ['Rock'], streamingLinks: [{ label: 'YouTube', url: 'https://y' }],
+    pitchStandard: 440,
+    // Parasite fields: NOT part of a CatalogSong, but present here to prove the
+    // explicit build never leaks personal/instrument data into the copy.
+    userUid: 'someone-else', instrument: ['guitar'], capo: 3, notes: 'secret',
+    lastPlayed: '2020-01-01T00:00:00.000Z', myInstrumentUid: 'inst-x',
+  };
+
+  test('addToSonglist copies intrinsic fields (deep-cloned), sets sourceCatalogUid, blanks personal fields -> 201', async () => {
+    CatalogSong.findByPk.mockResolvedValue(CATALOG);
+    Song.create.mockImplementation(async (data) => ({ ...data, uid: 'song-uid' }));
+    const res = mockRes();
+    const next = mockNext();
+
+    await controller.addToSonglist({ params: { uid: UID }, session: { user: 'u1' } }, res, next);
+
+    const arg = Song.create.mock.calls[0][0];
+    expect(arg.userUid).toBe('u1');
+    expect(arg.sourceCatalogUid).toBe(UID);
+    expect(arg.title).toBe('Zombie');
+    expect(arg.lastPlayed).toBeNull();
+    // deep-clone: equal value, different reference (no shared JSON with the catalog entry)
+    expect(arg.genre).toEqual(['Rock']);
+    expect(arg.genre).not.toBe(CATALOG.genre);
+    expect(arg.streamingLinks).not.toBe(CATALOG.streamingLinks);
+    // no instrument/personal fields leaked, and userUid is the SESSION user (not the
+    // parasite value on the fixture)
+    expect(arg.instrument).toBeUndefined();
+    expect(arg.capo).toBeUndefined();
+    expect(arg.notes).toBeUndefined();
+    expect(arg.myInstrumentUid).toBeUndefined();
+    expect(arg.userUid).toBe('u1');
+    expect(res.status).toHaveBeenCalledWith(201);
+    expect(next).not.toHaveBeenCalled();
+  });
+
+  test('addToSonglist on a per-user duplicate -> 409 duplicate_song with the existing song', async () => {
+    CatalogSong.findByPk.mockResolvedValue(CATALOG);
+    Song.create.mockRejectedValue({ name: 'SequelizeUniqueConstraintError' });
+    Song.findOne.mockResolvedValue({ uid: 'existing-song', title: 'Zombie' });
+    const res = mockRes();
+    const next = mockNext();
+
+    await controller.addToSonglist({ params: { uid: UID }, session: { user: 'u1' } }, res, next);
+
+    expect(res.status).toHaveBeenCalledWith(409);
+    const body = res.json.mock.calls[0][0];
+    expect(body.error).toBe('duplicate_song');
+    expect(body.song.uid).toBe('existing-song');
+    expect(next).not.toHaveBeenCalled();
+  });
+
+  test('addToSonglist -> 404 when the catalog entry is absent, 401 without a session', async () => {
+    CatalogSong.findByPk.mockResolvedValue(null);
+    const n1 = mockNext();
+    await controller.addToSonglist({ params: { uid: UID }, session: { user: 'u1' } }, mockRes(), n1);
+    expect(n1.mock.calls[0][0].status).toBe(404);
+    expect(Song.create).not.toHaveBeenCalled();
+
+    const n2 = mockNext();
+    await controller.addToSonglist({ params: { uid: UID }, session: {} }, mockRes(), n2);
+    expect(n2.mock.calls[0][0].status).toBe(401);
   });
 });

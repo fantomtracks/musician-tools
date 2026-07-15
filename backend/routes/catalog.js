@@ -19,4 +19,8 @@ router.delete('/:uid', authsess, requireCurator, catalogController.deleteCatalog
 router.get('/', authsess, catalogController.getCatalogList);
 router.get('/:uid', authsess, catalogController.getCatalogEntry);
 
+// Story 19.4 — Add to my songlist. Writes the USER's own Songlist (a Song copy),
+// NOT the Catalog → authsess only (no requireCurator). CSRF app-wide covers it.
+router.post('/:uid/add-to-songlist', authsess, catalogController.addToSonglist);
+
 module.exports = router;

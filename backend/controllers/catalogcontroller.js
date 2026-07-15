@@ -5,7 +5,7 @@
 //
 // Story 19.1 scope: curator write CRUD on catalog entries. Read (list/detail)
 // endpoints land in story 19.3; "Add to my songlist" in story 19.4.
-const { CatalogSong } = require('../models');
+const { CatalogSong, Song } = require('../models');
 const { Op, fn, col, where: whereFn } = require('sequelize');
 const createError = require('http-errors');
 const logger = require('../logger');
@@ -265,10 +265,85 @@ const getCatalogEntry = async (req, res, next) => {
   }
 };
 
+// ---- Story 19.4: Add to my songlist (snapshot + provenance) ----
+
+// The intrinsic columns copied 1:1 from a CatalogSong into a personal Song. The
+// JSON ones (language/genre/streamingLinks) are DEEP-CLONED so the shared entry
+// and the personal copy never share a reference. Personal/instrument fields are
+// left at their defaults (blank).
+function buildSongFromCatalog(catalog, userUid) {
+  return {
+    userUid,
+    sourceCatalogUid: catalog.uid, // soft provenance pointer (no FK)
+    title: catalog.title,
+    artist: catalog.artist ?? null,
+    album: catalog.album ?? null,
+    key: catalog.key ?? null,
+    bpm: catalog.bpm ?? null,
+    mode: catalog.mode ?? null,
+    timeSignature: catalog.timeSignature ?? null,
+    durationSeconds: catalog.durationSeconds ?? null,
+    language: structuredClone(catalog.language ?? null),
+    genre: structuredClone(catalog.genre ?? null),
+    streamingLinks: structuredClone(catalog.streamingLinks ?? null),
+    pitchStandard: catalog.pitchStandard ?? null,
+    lastPlayed: null, // never copied — a copy has no practice history
+  };
+}
+
+// Per-user existing song on the SAME folded key as the Epic 17 unique index
+// (user_uid, lower(title), COALESCE(lower(artist), '')). Scoped by userUid → no
+// cross-user existence oracle. Replicated from songcontroller (additive strict).
+function findExistingUserSong(userUid, title, artist) {
+  const foldedTitle = whereFn(fn('lower', col('title')), String(title == null ? '' : title).toLowerCase());
+  const foldedArtist = whereFn(fn('coalesce', fn('lower', col('artist')), ''), artist ? String(artist).toLowerCase() : '');
+  return Song.findOne({ where: { [Op.and]: [{ userUid }, foldedTitle, foldedArtist] } });
+}
+
+// POST /api/catalog/:uid/add-to-songlist — copy a Catalog entry into the user's
+// Songlist. Auth only (it writes the USER's own songlist, not the Catalog).
+const addToSonglist = async (req, res, next) => {
+  // Hoisted so the 409 catch reuses the already-fetched entry (no refetch) and can
+  // look up the existing Song by its title/artist even under a concurrent delete.
+  let catalog = null;
+  try {
+    const userId = req.session && req.session.user;
+    if (!userId) {
+      return next(createError(401, 'Unauthorized'));
+    }
+    if (!isUuid(req.params.uid)) {
+      return next(createError(404, 'Catalog entry not found'));
+    }
+    catalog = await CatalogSong.findByPk(req.params.uid);
+    if (!catalog) {
+      return next(createError(404, 'Catalog entry not found'));
+    }
+
+    const song = await Song.create(buildSongFromCatalog(catalog, userId));
+    res.status(201).json(song);
+  } catch (error) {
+    // Per-user duplicate (Epic 17 index, 23505) → typed 409 the front reads as
+    // "Already in your songlist" + points at the existing Song. Same shape as
+    // songcontroller.createSong. Uses the hoisted `catalog` (folded lookup matches
+    // the index that just fired, so `existing` is found → the badge stays clickable).
+    if (error && error.name === 'SequelizeUniqueConstraintError' && catalog) {
+      const existing = await findExistingUserSong(req.session.user, catalog.title, catalog.artist).catch(() => null);
+      return res.status(409).json({
+        error: 'duplicate_song',
+        message: 'A song with this title and artist already exists',
+        song: existing,
+      });
+    }
+    logger.error('Error adding catalog entry to songlist:', error);
+    next(createError(500, 'Error adding to songlist'));
+  }
+};
+
 module.exports = {
   createCatalogEntry,
   updateCatalogEntry,
   deleteCatalogEntry,
   getCatalogList,
   getCatalogEntry,
+  addToSonglist,
 };

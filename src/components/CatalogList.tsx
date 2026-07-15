@@ -1,12 +1,22 @@
 import { Link, useNavigate } from 'react-router-dom';
 import type { CatalogSong } from '../services/catalogService';
+import type { Song } from '../services/songService';
+import CatalogAddButton from './CatalogAddButton';
 
-// Read-only filterable list of Catalog entries (story 19.3). Columns Artist · Title ·
-// Key · BPM (artist first, DL-18). The Title cell is a real <Link> (keyboard/SR
-// affordance); the whole row also navigates on mouse click for convenience. When
-// story 19.4 adds the inline Add button, this becomes a proper stretched-link with
-// the Add button as a sibling action cell (no nested interactive controls).
-export default function CatalogList({ items }: { items: CatalogSong[] }) {
+// Filterable list of Catalog entries (story 19.3 + Add cell in 19.4). Columns Artist ·
+// Title · Key · BPM (artist first, DL-18) + a trailing action cell (Add). The Title
+// cell is a real <Link> (keyboard/SR); the row also navigates on mouse click. The Add
+// button is a SIBLING in its own cell (never nested in the title link); its cell stops
+// click propagation so pressing Add doesn't also navigate to the detail route.
+export default function CatalogList({
+  items,
+  existingFor,
+  onAdded,
+}: {
+  items: CatalogSong[];
+  existingFor?: (entry: CatalogSong) => Song | null;
+  onAdded?: (song: Song) => void;
+}) {
   const navigate = useNavigate();
   return (
     <div className="overflow-auto max-h-[65vh] rounded-lg border border-gray-200 dark:border-gray-700">
@@ -17,6 +27,7 @@ export default function CatalogList({ items }: { items: CatalogSong[] }) {
             <th className="px-3 py-2 font-medium">Title</th>
             <th className="px-3 py-2 font-medium">Key</th>
             <th className="px-3 py-2 font-medium">BPM</th>
+            <th className="px-3 py-2 font-medium sr-only">Add</th>
           </tr>
         </thead>
         <tbody>
@@ -34,6 +45,11 @@ export default function CatalogList({ items }: { items: CatalogSong[] }) {
               </td>
               <td className="px-3 py-2 text-gray-600 dark:text-gray-300 whitespace-nowrap">{entry.key || '—'}</td>
               <td className="px-3 py-2 text-gray-600 dark:text-gray-300 whitespace-nowrap">{entry.bpm ?? '—'}</td>
+              {/* Action cell: sibling of the title link; stops propagation so clicking
+                  Add doesn't also trigger the row's navigate-to-detail. */}
+              <td className="px-3 py-2 whitespace-nowrap text-right" onClick={e => e.stopPropagation()}>
+                <CatalogAddButton entry={entry} existingSong={existingFor ? existingFor(entry) : null} onAdded={onAdded} />
+              </td>
             </tr>
           ))}
         </tbody>

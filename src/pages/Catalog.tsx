@@ -3,6 +3,7 @@ import { useSearchParams } from 'react-router-dom';
 import { catalogService } from '../services/catalogService';
 import type { CatalogListResponse } from '../services/catalogService';
 import CatalogList from '../components/CatalogList';
+import { useSonglistMatcher } from '../hooks/useSonglistMatcher';
 
 // Browse the shared Catalog (story 19.3). READ-ONLY surface: search + intrinsic
 // filters + paginated list. The "Add to my songlist" button + duplicate flag are
@@ -32,6 +33,7 @@ export default function Catalog() {
   const [error, setError] = useState(false);
   const [refetchToken, setRefetchToken] = useState(0); // bumped by Retry to force a refetch
   const abortRef = useRef<AbortController | null>(null);
+  const { findExisting, addToCache } = useSonglistMatcher(); // client-side "already in songlist" flag (19.4)
 
   const patchParams = (changes: Record<string, string | null>) => {
     setSearchParams(prev => {
@@ -154,7 +156,7 @@ export default function Catalog() {
       {!loading && !error && data && data.total > 0 && (
         <>
           {data.items.length > 0
-            ? <CatalogList items={data.items} />
+            ? <CatalogList items={data.items} existingFor={findExisting} onAdded={addToCache} />
             : <p className="text-gray-500 dark:text-gray-400 py-6 text-center">This page is empty — go back to a previous page.</p>}
           {totalPages > 1 && (
             <div className="flex items-center justify-center gap-4 mt-4">

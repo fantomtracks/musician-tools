@@ -128,6 +128,14 @@ module.exports = (sequelize, DataTypes) => {
     mode: {
       type: DataTypes.STRING,
       allowNull: true
+    },
+    sourceCatalogUid: {
+      // Story 19.4: provenance of an Add-from-Catalog copy. SOFT reference — no FK
+      // association (see migration): a Catalog entry deletion must not touch this Song.
+      type: DataTypes.UUID,
+      allowNull: true,
+      defaultValue: null,
+      field: 'source_catalog_uid'
     }
   }, {
     tableName: 'Songs',

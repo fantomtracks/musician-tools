@@ -2,6 +2,8 @@ import { useEffect, useState } from 'react';
 import { Link, useParams } from 'react-router-dom';
 import { catalogService, CatalogNotFoundError } from '../services/catalogService';
 import type { CatalogSong } from '../services/catalogService';
+import CatalogAddButton from '../components/CatalogAddButton';
+import { useSonglistMatcher } from '../hooks/useSonglistMatcher';
 
 // Read-only detail of a Catalog entry (story 19.3). Intrinsic fields only (DL-17) +
 // clickable streaming links. A deep-link to a removed/unknown entry shows a calm
@@ -22,6 +24,7 @@ function Field({ label, value }: { label: string; value: React.ReactNode }) {
 
 export default function CatalogEntry() {
   const { uid } = useParams();
+  const { findExisting, addToCache } = useSonglistMatcher(); // "already in songlist" flag (19.4)
   const [entry, setEntry] = useState<CatalogSong | null>(null);
   const [loading, setLoading] = useState(true);
   const [notFound, setNotFound] = useState(false);
@@ -77,7 +80,11 @@ export default function CatalogEntry() {
     <div className="max-w-2xl mx-auto px-4 py-6">
       {/* Artist-led header (DL-18). */}
       <p className="text-sm text-gray-500 dark:text-gray-400">{entry.artist || '—'}</p>
-      <h1 className="text-2xl font-semibold text-gray-900 dark:text-gray-100 mb-6">{entry.title}</h1>
+      <h1 className="text-2xl font-semibold text-gray-900 dark:text-gray-100 mb-4">{entry.title}</h1>
+
+      <div className="mb-6">
+        <CatalogAddButton entry={entry} existingSong={findExisting(entry)} onAdded={addToCache} />
+      </div>
 
       <div className="card-base p-4 sm:p-6 grid grid-cols-2 sm:grid-cols-3 gap-4">
         <Field label="Key" value={entry.key} />

@@ -1,4 +1,6 @@
 import { apiFetch } from './apiFetch';
+import { SongConflictError } from './songService';
+import type { Song } from './songService';
 
 // A Catalog entry: the SHARED, canonical song record (story 19.1). Mirrors the
 // INTRINSIC subset of Song columns — NO owner, NO instrument/personal fields.
@@ -103,6 +105,30 @@ export const catalogService = {
     }
     if (!response.ok) {
       throw new Error('Failed to load the catalog entry');
+    }
+    return response.json();
+  },
+
+  // Add a catalog entry to the user's Songlist (snapshot + provenance, story 19.4).
+  // 201 -> the created Song. 409 (already in the songlist, Epic 17 guard) ->
+  // SongConflictError carrying the existing Song (reused from songService).
+  async addToSonglist(uid: string): Promise<Song> {
+    const response = await apiFetch(`${API_BASE}/catalog/${uid}/add-to-songlist`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      credentials: 'include',
+    });
+    if (response.status === 409) {
+      const body = await response.json().catch(() => ({} as { song?: Song }));
+      throw new SongConflictError(body.song ?? undefined);
+    }
+    if (response.status === 404) {
+      // The entry was removed from the Catalog (e.g. curator deleted it) — a
+      // permanent failure, not a retryable one.
+      throw new CatalogNotFoundError();
+    }
+    if (!response.ok) {
+      throw new Error('Failed to add to songlist');
     }
     return response.json();
   },
