@@ -17,6 +17,8 @@ router.delete('/:uid', authsess, requireCurator, catalogController.deleteCatalog
 // Story 19.3 — Catalog READ routes (any logged-in user; NON scoped userUid, cf. §3).
 // authsess only (no requireCurator). List is the app's only enveloped endpoint.
 router.get('/', authsess, catalogController.getCatalogList);
+// /facets BEFORE /:uid so it isn't captured as a uid param.
+router.get('/facets', authsess, catalogController.getCatalogFacets);
 router.get('/:uid', authsess, catalogController.getCatalogEntry);
 
 // Story 19.4 — Add to my songlist. Writes the USER's own Songlist (a Song copy),

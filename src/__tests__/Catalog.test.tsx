@@ -6,13 +6,16 @@ import type { CatalogSong } from '../services/catalogService';
 
 jest.mock('../services/catalogService', () => {
   const actual = jest.requireActual('../services/catalogService');
-  return { ...actual, catalogService: { listCatalog: jest.fn() } };
+  return { ...actual, catalogService: { listCatalog: jest.fn(), getFacets: jest.fn() } };
 });
 const svc = catalogService as jest.Mocked<typeof catalogService>;
 
 const resp = (items: Partial<CatalogSong>[], total = items.length) => ({ items: items as CatalogSong[], total, page: 1, limit: 24 });
 
-beforeEach(() => { jest.clearAllMocks(); });
+beforeEach(() => {
+  jest.clearAllMocks();
+  svc.getFacets.mockResolvedValue({ genre: [], key: [], mode: [], timeSignature: [] });
+});
 
 test('renders the list with the "All songs" title (no query)', async () => {
   svc.listCatalog.mockResolvedValue(resp([{ uid: 'a', title: 'Zombie', artist: 'The Cranberries', key: 'Em', bpm: 84 }]));

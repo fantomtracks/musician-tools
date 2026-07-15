@@ -34,6 +34,14 @@ export type CatalogListResponse = {
   limit: number;
 };
 
+// Distinct filterable values present in the whole Catalog, for the browse facet pills.
+export type CatalogFacets = {
+  genre: string[];
+  key: string[];
+  mode: string[];
+  timeSignature: string[];
+};
+
 export type CatalogListParams = {
   search?: string;
   key?: string;
@@ -89,6 +97,15 @@ export const catalogService = {
     });
     if (!response.ok) {
       throw new Error('Failed to load the catalog');
+    }
+    return response.json();
+  },
+
+  // The distinct filterable values across the whole Catalog (for the facet pills).
+  async getFacets(signal?: AbortSignal): Promise<CatalogFacets> {
+    const response = await apiFetch(`${API_BASE}/catalog/facets`, { credentials: 'include', signal });
+    if (!response.ok) {
+      throw new Error('Failed to load catalog facets');
     }
     return response.json();
   },

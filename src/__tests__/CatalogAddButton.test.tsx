@@ -1,3 +1,4 @@
+import { StrictMode } from 'react';
 import { render, screen, fireEvent } from '@testing-library/react';
 import { MemoryRouter } from 'react-router-dom';
 import CatalogAddButton from '../components/CatalogAddButton';
@@ -15,8 +16,15 @@ const cat = catalogService as jest.Mocked<typeof catalogService>;
 const ENTRY = { uid: 'cat-1', title: 'Zombie', artist: 'The Cranberries' } as CatalogSong;
 const SONG = { uid: 'song-1', title: 'Zombie' } as Song;
 
+// Wrapped in StrictMode BY DEFAULT — the app mounts under StrictMode, whose dev
+// mount→cleanup→mount double-invoke surfaced the mountedRef-freeze bug that a
+// single-pass render hid (Epic 18 retro lesson).
 const renderBtn = (existingSong: Song | null = null) =>
-  render(<MemoryRouter><CatalogAddButton entry={ENTRY} existingSong={existingSong} /></MemoryRouter>);
+  render(
+    <StrictMode>
+      <MemoryRouter><CatalogAddButton entry={ENTRY} existingSong={existingSong} /></MemoryRouter>
+    </StrictMode>,
+  );
 
 beforeEach(() => { jest.clearAllMocks(); });
 

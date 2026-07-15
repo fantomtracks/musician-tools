@@ -1,9 +1,11 @@
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { Navigate } from 'react-router-dom';
 import { useAuth } from '../contexts/AuthContext';
 import { catalogService, CatalogConflictError } from '../services/catalogService';
 import type { CreateCatalogDTO } from '../services/catalogService';
 import { songService } from '../services/songService';
+import { parseDurationToSeconds, formatSecondsToMmss } from '../utils/duration';
+import { keyOptions, modeOptions, timeSignatureOptions, genreOptions, languageOptions } from '../utils/songFieldOptions';
 
 // Curator-only admin screen to create a Catalog entry (story 19.2). Utilitarian
 // (DL-14): reuses the design-system utilities, restricted to the INTRINSIC fields
@@ -42,11 +44,9 @@ function generateStreamingLinks(title: string, artist: string): StreamingLink[] 
   ];
 }
 
-// Comma-separated text <-> string[] for the genre/language inputs.
-const toList = (value: string): string[] =>
-  value.split(',').map(s => s.trim()).filter(Boolean);
-const fromList = (value: string[] | string | null | undefined): string =>
-  Array.isArray(value) ? value.join(', ') : (value ?? '');
+// Normalize a genre/language field (string[] | string | null) to an array.
+const asArr = (value: string[] | string | null | undefined): string[] =>
+  Array.isArray(value) ? value : (value ? [value] : []);
 
 export default function CatalogAdmin() {
   const { user } = useAuth();
@@ -57,6 +57,17 @@ export default function CatalogAdmin() {
   const [metadataSource, setMetadataSource] = useState<string | null>(null);
   const [toastMessage, setToastMessage] = useState<string | null>(null);
   const [conflictMessage, setConflictMessage] = useState<string | null>(null);
+  // Duration is entered as m:ss (like the SongForm). durationText is the source while
+  // typing; committed to form.durationSeconds on blur. Re-sync when the underlying
+  // value changes out-of-band (auto-fill, reset) without clobbering in-progress typing.
+  const [durationText, setDurationText] = useState('');
+  useEffect(() => {
+    const parsed = parseDurationToSeconds(durationText);
+    if (parsed !== (form.durationSeconds ?? null)) {
+      setDurationText(form.durationSeconds != null ? formatSecondsToMmss(form.durationSeconds) : '');
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [form.durationSeconds]);
 
   // Role gate: a non-curator never sees the form (route is auth-gated; this adds
   // the role check). Not a 404 oracle — the admin surface is a privilege gate.
@@ -131,6 +142,7 @@ export default function CatalogAdmin() {
       await catalogService.createCatalogEntry(form);
       showToast('Catalog entry created');
       setForm(emptyForm);
+      setDurationText('');
       setMetadataSource(null);
     } catch (err) {
       if (err instanceof CatalogConflictError) {
@@ -147,6 +159,57 @@ export default function CatalogAdmin() {
 
   const removeLink = (url: string) => {
     setForm(prev => ({ ...prev, streamingLinks: (prev.streamingLinks || []).filter(l => l.url !== url) }));
+  };
+
+  // Single-value dropdown (key/mode/timeSignature) — preserves an out-of-list value
+  // (e.g. from auto-fill) as an extra option so nothing is silently dropped.
+  const renderSelect = (param: 'key' | 'mode' | 'timeSignature', label: string, options: string[]) => {
+    const value = (form[param] as string | null) ?? '';
+    const opts = value && !options.includes(value) ? [value, ...options] : options;
+    return (
+      <div>
+        <label className="label-base" htmlFor={`cat-${param}`}>{label}</label>
+        <select
+          id={`cat-${param}`}
+          className="input-base"
+          value={value}
+          onChange={e => { setForm(prev => ({ ...prev, [param]: e.target.value || null }) as CreateCatalogDTO); setConflictMessage(null); }}
+        >
+          <option value="">—</option>
+          {opts.map(o => <option key={o} value={o}>{o}</option>)}
+        </select>
+      </div>
+    );
+  };
+
+  // Multi-select dropdown + removable chips (genre/language) — same values as the SongForm.
+  const renderMulti = (param: 'genre' | 'language', label: string, options: string[]) => {
+    const selected = asArr(form[param] as string[] | string | null);
+    const change = (next: string[]) => { setForm(prev => ({ ...prev, [param]: next }) as CreateCatalogDTO); setConflictMessage(null); };
+    return (
+      <div>
+        <label className="label-base" htmlFor={`cat-${param}`}>{label}</label>
+        <select
+          id={`cat-${param}`}
+          className="input-base"
+          value=""
+          onChange={e => { const v = e.target.value; if (v && !selected.includes(v)) change([...selected, v]); }}
+        >
+          <option value="">Add {label.toLowerCase()}…</option>
+          {options.filter(o => !selected.includes(o)).map(o => <option key={o} value={o}>{o}</option>)}
+        </select>
+        {selected.length > 0 && (
+          <div className="flex flex-wrap gap-2 mt-2">
+            {selected.map(v => (
+              <span key={v} className="inline-flex items-center gap-1 rounded-full bg-gray-100 dark:bg-gray-700 px-3 py-1 text-xs text-gray-700 dark:text-gray-200">
+                {v}
+                <button type="button" aria-label={`Remove ${v}`} className="text-gray-400 hover:text-red-500" onClick={() => change(selected.filter(x => x !== v))}>×</button>
+              </span>
+            ))}
+          </div>
+        )}
+      </div>
+    );
   };
 
   return (
@@ -190,18 +253,9 @@ export default function CatalogAdmin() {
         </div>
 
         <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
-          <div>
-            <label className="label-base" htmlFor="cat-key">Key</label>
-            <input id="cat-key" className="input-base" value={form.key ?? ''} onChange={e => setField('key', e.target.value)} />
-          </div>
-          <div>
-            <label className="label-base" htmlFor="cat-mode">Mode</label>
-            <input id="cat-mode" className="input-base" value={form.mode ?? ''} onChange={e => setField('mode', e.target.value)} />
-          </div>
-          <div>
-            <label className="label-base" htmlFor="cat-timesig">Time signature</label>
-            <input id="cat-timesig" className="input-base" value={form.timeSignature ?? ''} onChange={e => setField('timeSignature', e.target.value)} />
-          </div>
+          {renderSelect('key', 'Key', keyOptions)}
+          {renderSelect('mode', 'Mode', modeOptions)}
+          {renderSelect('timeSignature', 'Time signature', timeSignatureOptions)}
         </div>
 
         <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
@@ -210,8 +264,15 @@ export default function CatalogAdmin() {
             <input id="cat-bpm" type="number" className="input-base" value={form.bpm ?? ''} onChange={e => setField('bpm', parseNumber(e.target.value))} />
           </div>
           <div>
-            <label className="label-base" htmlFor="cat-duration">Duration (seconds)</label>
-            <input id="cat-duration" type="number" className="input-base" value={form.durationSeconds ?? ''} onChange={e => setField('durationSeconds', parseNumber(e.target.value))} />
+            <label className="label-base" htmlFor="cat-duration">Duration (m:ss)</label>
+            <input
+              id="cat-duration"
+              className="input-base"
+              placeholder="3:45"
+              value={durationText}
+              onChange={e => setDurationText(e.target.value)}
+              onBlur={() => { const s = parseDurationToSeconds(durationText); setField('durationSeconds', s); setDurationText(s != null ? formatSecondsToMmss(s) : ''); }}
+            />
           </div>
           <div>
             <label className="label-base" htmlFor="cat-pitch">Pitch standard (Hz)</label>
@@ -220,14 +281,8 @@ export default function CatalogAdmin() {
         </div>
 
         <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-          <div>
-            <label className="label-base" htmlFor="cat-genre">Genre <span className="text-gray-400">(comma-separated)</span></label>
-            <input id="cat-genre" className="input-base" value={fromList(form.genre)} onChange={e => setField('genre', toList(e.target.value))} />
-          </div>
-          <div>
-            <label className="label-base" htmlFor="cat-language">Language <span className="text-gray-400">(comma-separated)</span></label>
-            <input id="cat-language" className="input-base" value={fromList(form.language)} onChange={e => setField('language', toList(e.target.value))} />
-          </div>
+          {renderMulti('genre', 'Genre', genreOptions)}
+          {renderMulti('language', 'Language', languageOptions)}
         </div>
 
         {(form.streamingLinks && form.streamingLinks.length > 0) && (
@@ -252,7 +307,7 @@ export default function CatalogAdmin() {
           <button type="submit" className="btn-primary" disabled={!(form.title || '').trim() || saving}>
             {saving ? 'Saving…' : 'Save'}
           </button>
-          <button type="button" className="btn-secondary" onClick={() => { setForm(emptyForm); setConflictMessage(null); setMetadataSource(null); }}>
+          <button type="button" className="btn-secondary" onClick={() => { setForm(emptyForm); setDurationText(''); setConflictMessage(null); setMetadataSource(null); }}>
             Cancel
           </button>
         </div>

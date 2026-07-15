@@ -13,7 +13,11 @@ import type { Song } from '../services/songService';
 // link (never nested in an <a>) and keeps a ≥44px hit area. Outcomes are announced
 // via role="status" (aria-live).
 
-const HIT = 'min-h-[44px] inline-flex items-center justify-center';
+// Green states shaped like the site's buttons (rounded-lg px-4 py-2 font-medium),
+// NOT the rounded-full badge pill — consistent with btn-primary/btn-secondary. ≥44px.
+const HIT = 'min-h-[44px] inline-flex items-center justify-center gap-2 px-4 py-2 rounded-lg font-medium transition-colors';
+const ALREADY = `${HIT} bg-green-100 text-green-700 hover:bg-green-200 dark:bg-green-900/40 dark:text-green-300 dark:hover:bg-green-900/60`;
+const ADDED = `${HIT} bg-green-500 text-white`;
 
 export default function CatalogAddButton({
   entry,
@@ -36,6 +40,11 @@ export default function CatalogAddButton({
   const flashTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   useEffect(() => {
+    // Re-arm on every (re)mount — including StrictMode's dev mount→cleanup→mount
+    // double-invoke, which would otherwise leave mountedRef false and freeze the
+    // button on "Adding…" (the success handler + the finally's setSaving(false)
+    // are both gated on mountedRef).
+    mountedRef.current = true;
     return () => {
       mountedRef.current = false;
       if (flashTimer.current) clearTimeout(flashTimer.current);
@@ -81,19 +90,19 @@ export default function CatalogAddButton({
   }
 
   if (flashing) {
-    return <span role="status" aria-live="polite" className={`${HIT} rounded-md bg-green-500 text-white text-sm px-3`}>✓ Added</span>;
+    return <span role="status" aria-live="polite" className={ADDED}>✓ Added</span>;
   }
 
   if (already) {
     return (
-      <Link to={`/songs/${already.uid}`} className={`${HIT} badge-success cursor-pointer px-3`}>
+      <Link to={`/songs/${already.uid}`} className={`${ALREADY} cursor-pointer`}>
         ✓ Already in your songlist
       </Link>
     );
   }
 
   if (duplicateNoLink) {
-    return <span className={`${HIT} badge-success px-3`}>✓ Already in your songlist</span>;
+    return <span className={ALREADY}>✓ Already in your songlist</span>;
   }
 
   return (

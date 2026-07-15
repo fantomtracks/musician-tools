@@ -5,6 +5,8 @@ import type { SongPlay } from '../services/songPlayService';
 import { instrumentTypeOptions, instrumentTechniquesMap } from '../constants/instrumentTypes';
 import SongFormInstruments from './SongFormInstruments';
 import { parseDurationToSeconds, formatSecondsToMmss } from '../utils/duration';
+// Shared option lists (story 19.5) — single source used by the Catalog curator form too.
+import { keyOptions, timeSignatureOptions, modeOptions, genreOptions, languageOptions } from '../utils/songFieldOptions';
 import { handleComboKeyDown, useScrollHighlightIntoView, comboboxInputAria, comboboxOptionAria } from '../utils/comboboxKeyboard';
 
 type Mode = 'add' | 'edit';
@@ -43,65 +45,6 @@ type SongFormProps = {
   duplicate?: Song | null;
   onEditDuplicate?: () => void;
 };
-
-const keyOptions = ['C','C#','Db','D','Eb','E','F','F#','Gb','G','Ab','A','Bb','B'];
-const timeSignatureOptions = ['2/4', '3/4', '4/4', '5/4', '6/8', '7/8', '9/8', '12/8', '5/8', '7/4', '3/8', 'Other'];
-const modeOptions = ['Major', 'Minor', 'Dorian', 'Phrygian', 'Lydian', 'Mixolydian', 'Aeolian', 'Locrian', 'Other'];
-const genreOptions = [
-  'Acoustic',
-  'Alternative',
-  'Ambient',
-  'Blues',
-  'Classical',
-  'Country',
-  'Disco',
-  'Drum & Bass',
-  'EDM',
-  'Electronic',
-  'Folk',
-  'Funk',
-  'Gospel',
-  'Hard Rock',
-  'Hip-Hop',
-  'House',
-  'Indie',
-  'Jazz',
-  'K-Pop',
-  'Latin',
-  'Metal',
-  'Pop',
-  'Progressive',
-  'Punk',
-  'R&B / Soul',
-  'Rap',
-  'Reggae',
-  'Rock',
-  'Singer-Songwriter',
-  'Ska',
-  'Soundtrack',
-  'Techno',
-  'Trap',
-  'World',
-  'Other',
-];
-
-const languageOptions = [
-  'Afrikaans', 'Albanian', 'Amharic', 'Arabic', 'Armenian', 'Azerbaijani',
-  'Basque', 'Belarusian', 'Bengali', 'Bosnian', 'Bulgarian', 'Burmese',
-  'Catalan', 'Chinese (Cantonese)', 'Chinese (Mandarin)', 'Croatian', 'Czech',
-  'Danish', 'Dutch', 'English', 'Estonian', 'Farsi', 'Finnish', 'French',
-  'Galician', 'Georgian', 'German', 'Greek', 'Gujarati', 'Haitian Creole',
-  'Hausa', 'Hebrew', 'Hindi', 'Hungarian', 'Icelandic', 'Igbo', 'Indonesian',
-  'Irish', 'Italian', 'Japanese', 'Javanese', 'Kannada', 'Kazakh', 'Khmer',
-  'Kinyarwanda', 'Korean', 'Kurdish', 'Lao', 'Latvian', 'Lithuanian',
-  'Macedonian', 'Malay', 'Malayalam', 'Maltese', 'Maori', 'Marathi',
-  'Mongolian', 'Nepali', 'Norwegian', 'Odia', 'Pashto', 'Polish',
-  'Portuguese', 'Punjabi', 'Quechua', 'Romanian', 'Russian', 'Serbian',
-  'Sinhala', 'Slovak', 'Slovenian', 'Somali', 'Spanish', 'Swahili',
-  'Swedish', 'Tagalog', 'Tamil', 'Tatar', 'Telugu', 'Thai', 'Turkish',
-  'Ukrainian', 'Urdu', 'Uzbek', 'Vietnamese', 'Welsh', 'Wolof', 'Xhosa',
-  'Yoruba', 'Zulu', 'Other'
-];
 
 const getAvailableTechniques = (instrumentType: string) => {
   if (!instrumentType) return [];

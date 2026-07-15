@@ -222,11 +222,19 @@ const getCatalogList = async (req, res, next) => {
     const order = SORT_WHITELIST[q.sort] || SORT_WHITELIST.artist;
 
     const and = [];
-    // Intrinsic filters (equality), combined with AND. No instrument filters (DL-17).
-    if (q.key) and.push({ key: q.key });
-    if (q.mode) and.push({ mode: q.mode });
-    if (q.timeSignature) and.push({ timeSignature: q.timeSignature });
-    if (q.genre) and.push({ genre: { [Op.contains]: [q.genre] } }); // JSONB array @>
+    // Intrinsic filters (facet multi-select), combined with AND across dimensions.
+    // Each param is a comma-separated list of EXACT values (chosen from the facet
+    // endpoint → no case mismatch). No instrument filters (DL-17).
+    const parseList = (v) => (typeof v === 'string' ? v.split(',').map(s => s.trim()).filter(Boolean) : []);
+    const keys = parseList(q.key);
+    if (keys.length) and.push({ key: { [Op.in]: keys } });
+    const modes = parseList(q.mode);
+    if (modes.length) and.push({ mode: { [Op.in]: modes } });
+    const times = parseList(q.timeSignature);
+    if (times.length) and.push({ timeSignature: { [Op.in]: times } });
+    const genres = parseList(q.genre);
+    // Multi-genre = match ANY selected genre (OR of JSONB @> single-element).
+    if (genres.length) and.push({ [Op.or]: genres.map(g => ({ genre: { [Op.contains]: [g] } })) });
     const search = typeof q.search === 'string' ? q.search.trim() : '';
     if (search) {
       // Escape LIKE metacharacters so a user typing %/_/\ searches for them LITERALLY
@@ -244,6 +252,32 @@ const getCatalogList = async (req, res, next) => {
   } catch (error) {
     logger.error('Error listing catalog:', error);
     next(createError(500, 'Error listing catalog'));
+  }
+};
+
+// GET /api/catalog/facets — the distinct filterable values PRESENT in the whole
+// Catalog, to populate the browse facet pills. Server-side because the client is
+// paginated (it never holds all entries). Non-scoped (shared data, §3), auth only.
+const getCatalogFacets = async (req, res, next) => {
+  try {
+    const sequelize = CatalogSong.sequelize;
+    // Column names are hardcoded literals below (no user input) → no injection.
+    const scalar = async (column) => {
+      const rows = await sequelize.query(
+        `SELECT DISTINCT "${column}" AS v FROM "CatalogSongs" WHERE "${column}" IS NOT NULL AND "${column}" <> '' ORDER BY v`,
+        { type: sequelize.QueryTypes.SELECT }
+      );
+      return rows.map(r => r.v);
+    };
+    const genreRows = await sequelize.query(
+      `SELECT DISTINCT jsonb_array_elements_text(genre) AS v FROM "CatalogSongs" WHERE genre IS NOT NULL AND jsonb_typeof(genre) = 'array' ORDER BY v`,
+      { type: sequelize.QueryTypes.SELECT }
+    );
+    const [key, mode, timeSignature] = await Promise.all([scalar('key'), scalar('mode'), scalar('time_signature')]);
+    res.json({ genre: genreRows.map(r => r.v), key, mode, timeSignature });
+  } catch (error) {
+    logger.error('Error building catalog facets:', error);
+    next(createError(500, 'Error building catalog facets'));
   }
 };
 
@@ -344,6 +378,7 @@ module.exports = {
   updateCatalogEntry,
   deleteCatalogEntry,
   getCatalogList,
+  getCatalogFacets,
   getCatalogEntry,
   addToSonglist,
 };

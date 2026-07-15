@@ -1,9 +1,13 @@
 import { useEffect, useRef, useState } from 'react';
 import { useSearchParams } from 'react-router-dom';
 import { catalogService } from '../services/catalogService';
-import type { CatalogListResponse } from '../services/catalogService';
+import type { CatalogListResponse, CatalogFacets } from '../services/catalogService';
 import CatalogList from '../components/CatalogList';
+import CatalogFilters from '../components/CatalogFilters';
 import { useSonglistMatcher } from '../hooks/useSonglistMatcher';
+
+const EMPTY_FACETS: CatalogFacets = { genre: [], key: [], mode: [], timeSignature: [] };
+const asArr = (s: string): string[] => (s ? s.split(',').filter(Boolean) : []);
 
 // Browse the shared Catalog (story 19.3). READ-ONLY surface: search + intrinsic
 // filters + paginated list. The "Add to my songlist" button + duplicate flag are
@@ -34,6 +38,23 @@ export default function Catalog() {
   const [refetchToken, setRefetchToken] = useState(0); // bumped by Retry to force a refetch
   const abortRef = useRef<AbortController | null>(null);
   const { findExisting, addToCache } = useSonglistMatcher(); // client-side "already in songlist" flag (19.4)
+  const [facets, setFacets] = useState<CatalogFacets>(EMPTY_FACETS);
+
+  // Facet values (distinct across the whole Catalog) for the filter pills. Loaded once.
+  useEffect(() => {
+    const ctrl = new AbortController();
+    catalogService.getFacets(ctrl.signal)
+      .then(f => setFacets(f))
+      .catch(() => { /* degrade: no pills, search still works */ });
+    return () => ctrl.abort();
+  }, []);
+
+  // Toggle a value in a comma-separated multi-select filter param (resets to page 1).
+  const toggleFacet = (param: 'genre' | 'key' | 'mode' | 'timeSignature', value: string) => {
+    const current = asArr(searchParams.get(param) || '');
+    const next = current.includes(value) ? current.filter(v => v !== value) : [...current, value];
+    patchParams({ [param]: next.length ? next.join(',') : null, page: null });
+  };
 
   const patchParams = (changes: Record<string, string | null>) => {
     setSearchParams(prev => {
@@ -79,19 +100,6 @@ export default function Catalog() {
   const limit = data?.limit ?? 24;
   const totalPages = Math.max(1, Math.ceil(total / limit));
 
-  const filterInput = (label: string, value: string, param: string, placeholder: string) => (
-    <div>
-      <label className="label-base" htmlFor={`cat-f-${param}`}>{label}</label>
-      <input
-        id={`cat-f-${param}`}
-        className="input-base"
-        value={value}
-        placeholder={placeholder}
-        onChange={e => patchParams({ [param]: e.target.value || null, page: null })}
-      />
-    </div>
-  );
-
   return (
     <div className="max-w-5xl mx-auto px-4 py-6">
       <h1 className="text-2xl font-semibold text-gray-900 dark:text-gray-100 mb-4">Catalog</h1>
@@ -106,11 +114,12 @@ export default function Catalog() {
         onChange={e => setSearchInput(e.target.value)}
       />
 
-      <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 mt-3">
-        {filterInput('Key', key, 'key', 'e.g. Em')}
-        {filterInput('Mode', mode, 'mode', 'e.g. minor')}
-        {filterInput('Time signature', timeSignature, 'timeSignature', 'e.g. 4/4')}
-        {filterInput('Genre', genre, 'genre', 'e.g. Rock')}
+      <div className="mt-4">
+        <CatalogFilters
+          facets={facets}
+          selected={{ genre: asArr(genre), key: asArr(key), mode: asArr(mode), timeSignature: asArr(timeSignature) }}
+          onToggle={toggleFacet}
+        />
       </div>
 
       <div className="flex items-center justify-between mt-6 mb-2">
@@ -124,7 +133,9 @@ export default function Catalog() {
         )}
       </div>
 
-      {loading && (
+      {/* Skeleton ONLY on the first load (no data yet). On a re-fetch (filter/search
+          change) we keep the current list visible and just dim it — no flash. */}
+      {loading && !data && (
         <div className="space-y-2" aria-hidden="true">
           {Array.from({ length: 6 }).map((_, i) => (
             <div key={i} className="h-10 rounded bg-gray-100 dark:bg-gray-700 animate-pulse" />
@@ -132,7 +143,7 @@ export default function Catalog() {
         </div>
       )}
 
-      {!loading && error && (
+      {error && (
         <div className="text-center py-10">
           <p className="text-gray-600 dark:text-gray-300">Something went wrong.</p>
           <button
@@ -145,27 +156,27 @@ export default function Catalog() {
         </div>
       )}
 
-      {/* Truly no results (total 0). An out-of-range page (items empty but total>0)
-          is handled below so the pagination controls stay reachable. */}
-      {!loading && !error && data && data.total === 0 && (
-        <p className="text-gray-500 dark:text-gray-400 py-10 text-center">
-          {hasQuery ? 'No songs match your search.' : 'The Catalog is filling up — check back soon.'}
-        </p>
-      )}
-
-      {!loading && !error && data && data.total > 0 && (
-        <>
-          {data.items.length > 0
-            ? <CatalogList items={data.items} existingFor={findExisting} onAdded={addToCache} />
-            : <p className="text-gray-500 dark:text-gray-400 py-6 text-center">This page is empty — go back to a previous page.</p>}
-          {totalPages > 1 && (
-            <div className="flex items-center justify-center gap-4 mt-4">
-              <button type="button" className="btn-secondary" disabled={page <= 1} onClick={() => patchParams({ page: String(page - 1) })}>Previous</button>
-              <span className="text-sm text-gray-500 dark:text-gray-400">Page {page} of {totalPages}</span>
-              <button type="button" className="btn-secondary" disabled={page >= totalPages} onClick={() => patchParams({ page: String(page + 1) })}>Next</button>
-            </div>
+      {!error && data && (
+        <div className={loading ? 'opacity-50 transition-opacity duration-150' : 'transition-opacity duration-150'} aria-busy={loading}>
+          {data.total === 0 ? (
+            <p className="text-gray-500 dark:text-gray-400 py-10 text-center">
+              {hasQuery ? 'No songs match your search.' : 'The Catalog is filling up — check back soon.'}
+            </p>
+          ) : (
+            <>
+              {data.items.length > 0
+                ? <CatalogList items={data.items} existingFor={findExisting} onAdded={addToCache} />
+                : <p className="text-gray-500 dark:text-gray-400 py-6 text-center">This page is empty — go back to a previous page.</p>}
+              {totalPages > 1 && (
+                <div className="flex items-center justify-center gap-4 mt-4">
+                  <button type="button" className="btn-secondary" disabled={page <= 1} onClick={() => patchParams({ page: String(page - 1) })}>Previous</button>
+                  <span className="text-sm text-gray-500 dark:text-gray-400">Page {page} of {totalPages}</span>
+                  <button type="button" className="btn-secondary" disabled={page >= totalPages} onClick={() => patchParams({ page: String(page + 1) })}>Next</button>
+                </div>
+              )}
+            </>
           )}
-        </>
+        </div>
       )}
     </div>
   );

@@ -26,7 +26,8 @@ export default function CatalogList({
             <th className="px-3 py-2 font-medium">Artist</th>
             <th className="px-3 py-2 font-medium">Title</th>
             <th className="px-3 py-2 font-medium">Key</th>
-            <th className="px-3 py-2 font-medium">BPM</th>
+            <th className="px-3 py-2 font-medium">Mode</th>
+            <th className="px-3 py-2 font-medium text-right">Time signature</th>
             <th className="px-3 py-2 font-medium sr-only">Add</th>
           </tr>
         </thead>
@@ -37,14 +38,15 @@ export default function CatalogList({
               onClick={() => navigate(`/catalog/${entry.uid}`)}
               className="border-t border-gray-100 dark:border-gray-700 hover:bg-gray-50 dark:hover:bg-gray-700/50 min-w-0 cursor-pointer"
             >
-              <td className="px-3 py-2 text-gray-500 dark:text-gray-400 whitespace-nowrap">{entry.artist || '—'}</td>
+              <td className="px-3 py-2 text-gray-900 dark:text-gray-100 whitespace-nowrap">{entry.artist || '—'}</td>
               <td className="px-3 py-2 font-medium text-gray-900 dark:text-gray-100">
                 <Link to={`/catalog/${entry.uid}`} className="hover:text-brand-600 dark:hover:text-brand-400">
                   {entry.title}
                 </Link>
               </td>
               <td className="px-3 py-2 text-gray-600 dark:text-gray-300 whitespace-nowrap">{entry.key || '—'}</td>
-              <td className="px-3 py-2 text-gray-600 dark:text-gray-300 whitespace-nowrap">{entry.bpm ?? '—'}</td>
+              <td className="px-3 py-2 text-gray-600 dark:text-gray-300 whitespace-nowrap">{entry.mode || '—'}</td>
+              <td className="px-3 py-2 text-gray-600 dark:text-gray-300 whitespace-nowrap text-right">{entry.timeSignature || '—'}</td>
               {/* Action cell: sibling of the title link; stops propagation so clicking
                   Add doesn't also trigger the row's navigate-to-detail. */}
               <td className="px-3 py-2 whitespace-nowrap text-right" onClick={e => e.stopPropagation()}>

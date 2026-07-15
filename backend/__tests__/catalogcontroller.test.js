@@ -4,6 +4,7 @@ jest.mock('../models', () => ({
     findByPk: jest.fn(),
     findOne: jest.fn(),
     findAndCountAll: jest.fn(),
+    sequelize: { query: jest.fn(), QueryTypes: { SELECT: 'SELECT' } },
   },
   Song: {
     create: jest.fn(),
@@ -12,6 +13,7 @@ jest.mock('../models', () => ({
 }));
 
 const { CatalogSong, Song } = require('../models');
+const { Op } = require('sequelize');
 const controller = require('../controllers/catalogcontroller');
 
 const UID = '11111111-1111-4111-8111-111111111111';
@@ -237,6 +239,28 @@ describe('catalogcontroller', () => {
     expect(CatalogSong.findAndCountAll).toHaveBeenCalled();
     expect(CatalogSong.findAndCountAll.mock.calls[0][0].where).toBeDefined();
     expect(next).not.toHaveBeenCalled(); // no 500
+  });
+
+  test('getCatalogList accepts comma-separated multi-value filters (facet pills)', async () => {
+    CatalogSong.findAndCountAll.mockResolvedValue({ rows: [], count: 0 });
+    await controller.getCatalogList({ query: { key: 'Em,Am', genre: 'Rock,Reggae' } }, mockRes(), mockNext());
+    const where = CatalogSong.findAndCountAll.mock.calls[0][0].where;
+    const and = where[Op.and];
+    const keyClause = and.find(c => c.key);
+    expect(keyClause.key[Op.in]).toEqual(['Em', 'Am']); // multi-key -> Op.in
+    const genreClause = and.find(c => c[Op.or]);
+    expect(genreClause[Op.or]).toHaveLength(2); // multi-genre -> OR of 2 @> contains
+  });
+
+  test('getCatalogFacets returns distinct genre/key/mode/timeSignature', async () => {
+    CatalogSong.sequelize.query.mockResolvedValue([{ v: 'Rock' }, { v: 'Reggae' }]);
+    const res = mockRes();
+    await controller.getCatalogFacets({}, res, mockNext());
+    const body = res.json.mock.calls[0][0];
+    expect(body.genre).toEqual(['Rock', 'Reggae']);
+    expect(body).toHaveProperty('key');
+    expect(body).toHaveProperty('mode');
+    expect(body).toHaveProperty('timeSignature');
   });
 
   // --- detail (story 19.3) ---
