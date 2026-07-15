@@ -13,6 +13,10 @@ export type User = {
   // Soft-gate verification flag (story 7.9). Drives the VerifyEmailBanner. Optional
   // for users stored before 7.9 (undefined → banner not shown until next login).
   emailVerified?: boolean;
+  // Catalog curator role (story 19.2). Gates the "Curate" admin entry + /catalog/admin.
+  // Optional for users stored before 19.2 (undefined → treated as non-curator until
+  // next login re-hydrates it from the server).
+  isCurator?: boolean;
 };
 
 export type LoginRequest = {

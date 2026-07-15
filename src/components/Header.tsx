@@ -15,7 +15,7 @@ const navLinks: { to: string; label: string }[] = [
 ];
 
 function Header() {
-  const { isAuthenticated, logout } = useAuth();
+  const { isAuthenticated, logout, user } = useAuth();
   const navigate = useNavigate();
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
   const [accountMenuOpen, setAccountMenuOpen] = useState(false);
@@ -161,6 +161,16 @@ function Header() {
                     role="menu"
                     className="absolute right-0 mt-2 w-44 rounded-lg border border-gray-200 bg-white shadow-lg py-1 dark:border-gray-700 dark:bg-gray-800 z-50"
                   >
+                    {user?.isCurator && (
+                      <Link
+                        to="/catalog/admin"
+                        role="menuitem"
+                        onClick={() => setAccountMenuOpen(false)}
+                        className="block px-4 py-2 text-sm text-gray-700 hover:bg-gray-100 hover:text-brand-600 transition-colors dark:text-gray-300 dark:hover:bg-gray-700 dark:hover:text-brand-400"
+                      >
+                        Curate
+                      </Link>
+                    )}
                     <Link
                       to="/profile"
                       role="menuitem"
@@ -202,6 +212,15 @@ function Header() {
             {/* Account section (Profile + Sign out) — on mobile these live in the
                 menu since the desktop account dropdown is hidden below lg. */}
             <div className="mt-1 pt-1 border-t border-gray-200 dark:border-gray-700">
+              {user?.isCurator && (
+                <Link
+                  to="/catalog/admin"
+                  onClick={() => setMobileMenuOpen(false)}
+                  className="block rounded-lg px-3 py-3 text-gray-700 hover:bg-gray-100 hover:text-brand-600 font-medium transition-colors dark:text-gray-300 dark:hover:bg-gray-700 dark:hover:text-brand-400"
+                >
+                  Curate
+                </Link>
+              )}
               <Link
                 to="/profile"
                 onClick={() => setMobileMenuOpen(false)}

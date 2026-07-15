@@ -36,6 +36,13 @@ test('loads the profile and shows the handle + email with a change-email control
   expect(screen.getByPlaceholderText(/new email address/i)).toBeInTheDocument();
 });
 
+test('rehydrates the curator flag into the auth user on profile load (story 19.2)', async () => {
+  svc.getProfile.mockResolvedValue({ ...PROFILE, isCurator: true });
+  render(<ProfilePage />);
+  await screen.findByText('Ada#0042');
+  expect(patchUser).toHaveBeenCalledWith({ isCurator: true });
+});
+
 test('requesting an email change shows the generic message (never reveals availability)', async () => {
   svc.requestEmailChange.mockResolvedValue(undefined);
   render(<ProfilePage />);

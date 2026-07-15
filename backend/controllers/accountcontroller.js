@@ -32,6 +32,7 @@ const getProfile = async (req, res, next) => {
       pendingEmail: user.pendingEmail, // story 7.11: a change awaiting confirmation (else null)
       emailVerified: user.emailVerified,
       isAdmin: user.isAdmin,
+      isCurator: user.isCurator, // story 19.2: rehydrates the curator flag on profile load
     });
   } catch (error) {
     logger.error('Error fetching profile:', error.message);

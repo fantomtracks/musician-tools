@@ -10,6 +10,7 @@ import MyTopicsPage from './pages/MyTopicsPage';
 import MySessionsPage from './pages/MySessionsPage';
 import MyHeatmapPage from './pages/MyHeatmapPage';
 import ProfilePage from './pages/ProfilePage';
+import CatalogAdmin from './pages/CatalogAdmin';
 import VerifyEmailPage from './pages/VerifyEmailPage';
 import ForgotPasswordPage from './pages/ForgotPasswordPage';
 import ResetPasswordPage from './pages/ResetPasswordPage';
@@ -44,6 +45,9 @@ export const routes: RouteObject[] = [
             { path: 'my-sessions', element: <MySessionsPage /> },
             { path: 'my-heatmap', element: <MyHeatmapPage /> },
             { path: 'profile', element: <ProfilePage /> },
+            // Story 19.2 — Catalog curator admin. Auth-gated here; the curator role
+            // check lives inside CatalogAdmin (redirects non-curators to /).
+            { path: 'catalog/admin', element: <CatalogAdmin /> },
           ],
         },
         // Public — reached from the email link, possibly while signed out (story 7.9/7.10)

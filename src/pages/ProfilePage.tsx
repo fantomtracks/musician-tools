@@ -37,8 +37,17 @@ function ProfilePage() {
 
   useEffect(() => {
     profileService.getProfile()
-      .then((p) => { setProfile(p); setName(p.name); })
+      .then((p) => {
+        setProfile(p);
+        setName(p.name);
+        // Story 19.2: rehydrate the curator flag so a user promoted in the DB after
+        // login sees the "Curate" entry after visiting Profile (no full re-login).
+        patchUser({ isCurator: !!p.isCurator });
+      })
       .catch(() => setLoadError('Could not load your profile.'));
+    // Mount-once profile load; patchUser is a stable-intent context fn we don't want
+    // in deps (it isn't memoized → would re-fetch every render).
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   const handleSaveName = async (e: React.FormEvent) => {

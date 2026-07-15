@@ -280,3 +280,7 @@ _Les 4 stories UI/confort (filtres Songlist, refacto SessionHistoryCard, chanson
 ## Deferred from: code review of story-19.1 (2026-07-15)
 
 - **[LOW] `language` non normalisé au Catalog** — `catalogcontroller.createCatalogEntry`/`updateCatalogEntry` stocke `language` brut, alors que `songcontroller` applique `normalizeLanguage` (array trimmé, title-case). Cosmétique (pas de crash), donnée saisie par le curateur. À traiter dans le form d'admin Catalog (story 19-2) ou en suivi backend. Sans correctif, la valeur brute est copiée 1:1 dans les Songlists perso à l'Add (19-4).
+
+## Deferred from: code review of story-19.2 (2026-07-15)
+
+- **[MED] `bpm` / `pitchStandard` non normalisés côté serveur (Catalog ET Songs)** — `catalogcontroller.pickIntrinsic` (comme `songcontroller.createSong`) passe `bpm`/`pitchStandard` bruts dans les colonnes INTEGER : une valeur négative est persistée telle quelle, un décimal / hors-INT4 lève `SequelizeDatabaseError` → 500. Ce n'est PAS une régression 19.2 (le Song perso a le même comportement depuis toujours), d'où le defer. À traiter **app-wide** (helper `normalizeInt(min,max)` partagé, appliqué à bpm/pitchStandard côté Song ET Catalog) le jour où on durcit la saisie numérique. `durationSeconds` est déjà borné (1..86400) des deux côtés.
