@@ -4,6 +4,7 @@ import { useAuth } from '../contexts/AuthContext';
 import { catalogService, CatalogNotFoundError } from '../services/catalogService';
 import type { CatalogListResponse } from '../services/catalogService';
 import { ConfirmDialog } from '../components/ConfirmDialog';
+import { useRowSelection } from '../hooks/useRowSelection';
 
 // Curator hub to MANAGE the shared Catalog (story 19.5). Songlist-style table:
 // per-row checkboxes + a "Delete selected" bar on top (bulk delete), and a row click
@@ -26,7 +27,9 @@ export default function CatalogManage() {
   const [refetchToken, setRefetchToken] = useState(0);
   const abortRef = useRef<AbortController | null>(null);
 
-  const [selected, setSelected] = useState<Set<string>>(new Set());
+  // Ephemeral row selection (no persistKey — a curator session, unlike the Songlist).
+  const selection = useRowSelection();
+  const { selected } = selection; // the live Set — selected.size / .has / Array.from stay as-is
   const [confirmOpen, setConfirmOpen] = useState(false);
   const [deleting, setDeleting] = useState(false);
   const [toastMessage, setToastMessage] = useState<string | null>(null);
@@ -84,20 +87,14 @@ export default function CatalogManage() {
   const limit = data?.limit ?? 24;
   const totalPages = Math.max(1, Math.ceil(total / limit));
   const displayedUids = data?.items.map(i => i.uid) ?? [];
-  const allDisplayedSelected = displayedUids.length > 0 && displayedUids.every(u => selected.has(u));
+  const allDisplayedSelected = selection.allDisplayedSelected(displayedUids);
 
-  const toggleSelect = (uid: string) => setSelected(prev => {
-    const next = new Set(prev);
-    if (next.has(uid)) next.delete(uid); else next.add(uid);
-    return next;
-  });
-
-  const toggleSelectAll = () => setSelected(prev => {
-    const next = new Set(prev);
-    if (displayedUids.every(u => next.has(u))) displayedUids.forEach(u => next.delete(u));
-    else displayedUids.forEach(u => next.add(u));
-    return next;
-  });
+  // Select-all is "within": union/subtract only the displayed (paginated) uids, so a
+  // selection made on another page survives — composed from the shared primitives.
+  const toggleSelectAll = () => {
+    if (displayedUids.every(u => selection.isSelected(u))) selection.removeMany(displayedUids);
+    else selection.addMany(displayedUids);
+  };
 
   const handleDeleteSelected = async () => {
     if (selected.size === 0 || deleting) return;
@@ -124,7 +121,7 @@ export default function CatalogManage() {
         ? { ...prev, items: prev.items.filter(i => !removedSet.has(i.uid)), total: Math.max(0, prev.total - removed.length) }
         : prev);
     }
-    setSelected(prev => { const n = new Set(prev); removed.forEach(u => n.delete(u)); return n; });
+    selection.removeMany(removed);
     setDeleting(false);
     setConfirmOpen(false);
   };
@@ -235,7 +232,7 @@ export default function CatalogManage() {
                               type="checkbox"
                               className="h-4 w-4 cursor-pointer accent-brand-500 dark:accent-brand-400"
                               checked={isSel}
-                              onChange={() => toggleSelect(entry.uid)}
+                              onChange={() => selection.toggle(entry.uid)}
                               aria-label={`Select ${entry.title}`}
                             />
                           </td>

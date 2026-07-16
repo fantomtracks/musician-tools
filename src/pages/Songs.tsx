@@ -11,6 +11,7 @@ import { instrumentTechniquesMap, instrumentTuningsMap, instrumentTypeOptions } 
 import { applySongFilters, countActiveFilters, NO_INSTRUMENT } from '../utils/songFilters';
 import { handleComboKeyDown, useScrollHighlightIntoView, comboboxInputAria, comboboxOptionAria } from '../utils/comboboxKeyboard';
 import { useAutosave } from '../hooks/useAutosave';
+import { useRowSelection } from '../hooks/useRowSelection';
 import { findDuplicateSong } from '../utils/songDuplicate';
 import { formatLocalDate } from '../utils/heatmap';
 
@@ -89,10 +90,9 @@ function Songs() {
   const [cameFromDuplicate, setCameFromDuplicate] = useState(false);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const [selectedSongs, setSelectedSongs] = useState<Set<string>>(() => {
-    const saved = typeof window !== 'undefined' ? window.localStorage.getItem('songsSelectedUids') : null;
-    return saved ? new Set(JSON.parse(saved)) : new Set();
-  });
+  // Persistent row selection (survives refresh via localStorage) — shared hook (19.9).
+  const songSelection = useRowSelection({ persistKey: 'songsSelectedUids' });
+  const selectedSongs = songSelection.selected; // the live Set — .size / .has / Array.from stay as-is
   const [bulkPlaylistOpen, setBulkPlaylistOpen] = useState(false);
   const [bulkPlaylistSelection, setBulkPlaylistSelection] = useState<Set<string>>(new Set());
   const [toastMessage, setToastMessage] = useState<string | null>(null);
@@ -727,12 +727,6 @@ function Songs() {
     } catch { /* ignore */ }
   }, [playlistAccordionOpen]);
 
-  useEffect(() => {
-    try {
-      window.localStorage.setItem('songsSelectedUids', JSON.stringify(Array.from(selectedSongs)));
-    } catch { /* ignore */ }
-  }, [selectedSongs]);
-
   // Story 18.2: build the form from a loaded Song (list click / deep-link fetch).
   const buildFormFromSong = (song: Song, fromDuplicate: boolean): void => {
     const builtForm: CreateSongDTO = {
@@ -1253,7 +1247,7 @@ function Songs() {
         });
         return next;
       });
-      setSelectedSongs(new Set());
+      songSelection.clear();
     } catch (err) {
       setError('Error while updating songs');
       console.error(err);
@@ -1481,11 +1475,7 @@ function Songs() {
       setSongs(songs.filter(song => song.uid !== uidToDelete));
       
       // Remove from selected songs if it was selected
-      setSelectedSongs(prev => {
-        const next = new Set(prev);
-        next.delete(uidToDelete);
-        return next;
-      });
+      songSelection.removeMany([uidToDelete]);
       
       setDeleteDialogOpen(false);
       setDeleteUid(null);
@@ -1534,7 +1524,7 @@ function Songs() {
       await Promise.all(Array.from(selectedSongs).map(uid => songService.deleteSong(uid)));
       
       setSongs(songs.filter(song => !selectedSongs.has(song.uid)));
-      setSelectedSongs(new Set());
+      songSelection.clear();
       setDeleteDialogOpen(false);
       setDeleteMode(null);
     } catch (err) {
@@ -1619,32 +1609,13 @@ function Songs() {
     }
   };
 
-  const toggleSelectSong = (uid: string) => {
-    setSelectedSongs(prev => {
-      const newSet = new Set(prev);
-      if (newSet.has(uid)) {
-        newSet.delete(uid);
-      } else {
-        newSet.add(uid);
-      }
-      return newSet;
-    });
-  };
+  const toggleSelectSong = songSelection.toggle;
 
-  const selectAllSongs = () => {
-    setSelectedSongs(new Set(displayedSongs.map(song => song.uid)));
-  };
-
-  const deselectAllSongs = () => {
-    setSelectedSongs(new Set());
-  };
-
+  // Select-all is "replace": exactly the displayed (filtered) songs — matches the prior
+  // `new Set(displayed)`, so a selection filtered out of view is dropped.
   const toggleSelectAll = () => {
-    if (displayedSongs.every(song => selectedSongs.has(song.uid))) {
-      deselectAllSongs();
-    } else {
-      selectAllSongs();
-    }
+    if (displayedSongs.every(song => selectedSongs.has(song.uid))) songSelection.clear();
+    else songSelection.selectOnly(displayedSongs.map(song => song.uid));
   };
 
   const sortedSongs = songs;
@@ -1761,7 +1732,7 @@ function Songs() {
 
   const displayedSongs = sortByColumnFunc(filteredSongs);
 
-  const allDisplayedSelected = displayedSongs.length > 0 && displayedSongs.every(song => selectedSongs.has(song.uid));
+  const allDisplayedSelected = songSelection.allDisplayedSelected(displayedSongs.map(song => song.uid));
 
   const SortHeader = ({ column, label, align = 'left' }: { column: string; label: string; align?: 'left' | 'right' }) => (
     <th
