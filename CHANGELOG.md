@@ -12,6 +12,14 @@ project adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+## [1.15.0] — 2026-07-16
+
+### Added
+- **A shared Catalog of ready-made songs you can add to your songlist in one tap.**
+  - **Browse & search** a shared pool of pre-filled songs — title, artist, key, mode, time signature — with filters, and open any entry to see its details.
+  - **Add to my songlist** copies a catalog song straight into your own songlist with its details pre-filled; if it's already there, you're told instead of ending up with a duplicate.
+  - **Curators** get a dedicated area to build and maintain the shared Catalog — add, edit, and remove entries (including removing several at once) — kept cleanly separate from everyone's personal songlists.
+
 ## [1.14.0] — 2026-07-11
 
 ### Changed
