@@ -13,6 +13,8 @@ router.use(bodyParser.json());
 router.post('/', authsess, requireCurator, catalogController.createCatalogEntry);
 router.put('/:uid', authsess, requireCurator, catalogController.updateCatalogEntry);
 router.delete('/:uid', authsess, requireCurator, catalogController.deleteCatalogEntry);
+// Story 19.6 — publish a draft (curator). Distinct sub-path, no clash with /:uid.
+router.post('/:uid/publish', authsess, requireCurator, catalogController.publishCatalogEntry);
 
 // Story 19.3 — Catalog READ routes (any logged-in user; NON scoped userUid, cf. §3).
 // authsess only (no requireCurator). List is the app's only enveloped endpoint.

@@ -1,8 +1,8 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { Navigate, Link, useParams, useNavigate } from 'react-router-dom';
 import { useAuth } from '../contexts/AuthContext';
 import { catalogService, CatalogConflictError, CatalogNotFoundError } from '../services/catalogService';
-import type { CreateCatalogDTO, CatalogSong } from '../services/catalogService';
+import type { CreateCatalogDTO, CatalogSong, CatalogFacets } from '../services/catalogService';
 import { songService } from '../services/songService';
 import { parseDurationToSeconds, formatSecondsToMmss } from '../utils/duration';
 import { keyOptions, modeOptions, timeSignatureOptions, genreOptions, languageOptions } from '../utils/songFieldOptions';
@@ -68,11 +68,15 @@ const mapEntryToForm = (e: CatalogSong): CreateCatalogDTO => ({
   pitchStandard: e.pitchStandard ?? 440,
 });
 
+// Canonical (title, artist) key — matches the server's folded uniqueness. Used to
+// suppress re-firing an autosave PUT that already 409'd on the same key (review F1).
+const foldedKey = (f: { title?: string | null; artist?: string | null }) =>
+  `${(f.title || '').trim().toLowerCase()}|${(f.artist || '').trim().toLowerCase()}`;
+
 export default function CatalogAdmin() {
   const { user } = useAuth();
 
   const [form, setForm] = useState<CreateCatalogDTO>(emptyForm);
-  const [saving, setSaving] = useState(false);
   const [metadataLoading, setMetadataLoading] = useState(false);
   const [metadataSource, setMetadataSource] = useState<string | null>(null);
   const [toastMessage, setToastMessage] = useState<string | null>(null);
@@ -99,10 +103,32 @@ export default function CatalogAdmin() {
   const [deleteOpen, setDeleteOpen] = useState(false);
   const [deleting, setDeleting] = useState(false);
 
+  // Story 19.6 — autosave + draft/publish. `workingUid` is the entry being autosaved
+  // (from the route in edit mode; set after the lazy create in create mode). `isDraft`
+  // drives the Publish button. Refs guard re-entrancy / self-clobber (StrictMode-safe).
+  const [workingUid, setWorkingUid] = useState<string | null>(uid ?? null);
+  const [isDraft, setIsDraft] = useState(true); // a fresh entry is a draft until published
+  const [saveStatus, setSaveStatus] = useState<'idle' | 'saving' | 'saved' | 'error'>('idle');
+  const [publishing, setPublishing] = useState(false);
+  const [dupMessage, setDupMessage] = useState<string | null>(null); // duplicate exists → block save + hide Publish
+  const savingRef = useRef(false);
+  const creatingRef = useRef(false);
+  const justCreatedRef = useRef(false);
+  const baselineRef = useRef<string>(JSON.stringify(emptyForm)); // form JSON as last loaded/saved (review F3)
+  const dupRef = useRef(false); // a duplicate (title, artist) already exists → block autosave (19.6 revised)
+
   // Pre-fill the form from the existing entry. `active` guard makes it StrictMode-
   // safe (double-mount) and cancels a stale response if the uid changes mid-flight.
   useEffect(() => {
     if (!uid) return;
+    setWorkingUid(uid);
+    // We just created this draft ourselves (lazy create) → the form is already in sync;
+    // refetching would clobber in-progress typing. Clear the flag and skip the load.
+    if (justCreatedRef.current) {
+      justCreatedRef.current = false;
+      setLoading(false);
+      return;
+    }
     let active = true;
     setLoading(true);
     setNotFound(false);
@@ -111,7 +137,9 @@ export default function CatalogAdmin() {
         if (!active) return;
         const mapped = mapEntryToForm(entry);
         setForm(mapped);
+        baselineRef.current = JSON.stringify(mapped); // loaded content is already saved (F3)
         setDurationText(mapped.durationSeconds != null ? formatSecondsToMmss(mapped.durationSeconds) : '');
+        setIsDraft(entry.publishedAt == null);
         setLoading(false);
       })
       .catch(err => {
@@ -126,6 +154,108 @@ export default function CatalogAdmin() {
       });
     return () => { active = false; };
   }, [uid]);
+
+  // Autosave (19.6): the FIRST non-empty change in create mode lazily POSTs a draft,
+  // then we switch to edit mode (navigate replace); afterwards every change PUTs. No
+  // manual Save button. Kept in a ref so the debounce always calls the latest closure.
+  const autoSave = async () => {
+    if (savingRef.current) return;
+    const title = (form.title || '').trim();
+    if (!title) return; // a title is the entry's identity — never autosave without one (F2)
+    const snapshot = JSON.stringify(form);
+    if (snapshot === baselineRef.current) return; // nothing changed since last save/load (F3)
+    if (dupRef.current) { setSaveStatus('idle'); return; } // a duplicate exists → never persist it (19.6 revised)
+    savingRef.current = true;
+    setSaveStatus('saving');
+    try {
+      if (workingUid) {
+        await catalogService.updateCatalogEntry(workingUid, form);
+      } else if (!creatingRef.current) {
+        creatingRef.current = true;
+        const created = await catalogService.createCatalogEntry(form);
+        justCreatedRef.current = true;
+        setWorkingUid(created.uid);
+        navigate(`/catalog/admin/${created.uid}`, { replace: true });
+      }
+      baselineRef.current = snapshot; // this content is now persisted (F3)
+      setSaveStatus('saved');
+    } catch (err) {
+      if (err instanceof CatalogConflictError) {
+        // Backstop: the client dup-check missed a race → the GLOBAL unique index rejected
+        // it. Block + surface (don't hammer the server on every keystroke).
+        dupRef.current = true;
+        setDupMessage('This title and artist already exist in the Catalog.');
+        setSaveStatus('idle');
+      } else {
+        setSaveStatus('error');
+      }
+      creatingRef.current = false; // allow the next change to retry
+    } finally {
+      savingRef.current = false;
+    }
+  };
+  const autoSaveRef = useRef(autoSave);
+  autoSaveRef.current = autoSave;
+  const workingUidRef = useRef(workingUid);
+  workingUidRef.current = workingUid;
+
+  // Debounce form changes into an autosave (never while the initial prefill loads).
+  useEffect(() => {
+    if (loading) return;
+    if (!(form.title || '').trim()) return; // no title yet → nothing to persist (F2)
+    const t = setTimeout(() => { void autoSaveRef.current(); }, 1200);
+    return () => clearTimeout(t);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [form]);
+
+  // Flush a pending change on unmount (review F4): navigating away (a header link, the
+  // browser Back button) within the debounce window must not silently drop the last
+  // edits. Only in EDIT mode (workingUid set) — never lazily CREATE a draft on unmount
+  // (review F2, else "Back to list" mid-typing would leave an abandoned draft + a
+  // navigate race). autoSave no-ops if nothing changed (baseline guard).
+  useEffect(() => () => { if (workingUidRef.current) void autoSaveRef.current(); }, []);
+
+  // Distinct catalog artists/albums for the field autocomplete (19.6 QA — parity with
+  // the Song form). Optional: degrades to a plain input on failure.
+  const [facets, setFacets] = useState<CatalogFacets | null>(null);
+  useEffect(() => {
+    const ctrl = new AbortController();
+    catalogService.getFacets(ctrl.signal, true).then(setFacets).catch(() => { /* autocomplete is optional */ });
+    return () => ctrl.abort();
+  }, []);
+
+  // Duplicate guard (19.6 revised): while typing, check the WHOLE Catalog (drafts AND
+  // published, via the curator list) for an existing (title, artist). A match BLOCKS the
+  // autosave (dupRef) and hides Publish — no duplicate can ever be created. The server's
+  // GLOBAL unique index is the backstop.
+  useEffect(() => {
+    // Fail-open on every edit: unblock autosave immediately (review F1). The debounced
+    // check below re-sets dupRef if it's still a dup (500ms < the 1200ms autosave); on
+    // a check error/abort we stay unblocked and the server's GLOBAL unique index 409s
+    // as the backstop — never a wedged form.
+    dupRef.current = false;
+    const title = (form.title || '').trim();
+    if (!title) { setDupMessage(null); return; }
+    const key = foldedKey(form);
+    const ctrl = new AbortController();
+    const t = setTimeout(() => {
+      catalogService.listCatalog({ search: title, includeDrafts: true, limit: 10 }, ctrl.signal)
+        .then(res => {
+          const match = res.items.find(e => e.uid !== workingUid && foldedKey(e) === key);
+          if (match) {
+            const a = (form.artist || '').trim();
+            dupRef.current = true;
+            setDupMessage(a ? `A "${title}" by ${a} already exists in the Catalog.` : `A "${title}" already exists in the Catalog.`);
+          } else {
+            dupRef.current = false;
+            setDupMessage(null);
+          }
+        })
+        .catch(() => { /* leave state as-is on error/abort */ });
+    }, 500);
+    return () => { clearTimeout(t); ctrl.abort(); };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [form.title, form.artist, workingUid]);
 
   // Role gate: a non-curator never sees the form (route is auth-gated; this adds
   // the role check). Not a 404 oracle — the admin surface is a privilege gate.
@@ -169,7 +299,7 @@ export default function CatalogAdmin() {
     const artist = (form.artist || '').trim();
     // Guard against no title/artist AND against an in-flight lookup/save (a save
     // resolving mid-lookup resets the form → the pending merge would ghost-fill it).
-    if (!title || !artist || metadataLoading || saving) return;
+    if (!title || !artist || metadataLoading || publishing) return;
 
     setMetadataLoading(true);
     try {
@@ -205,33 +335,26 @@ export default function CatalogAdmin() {
     }
   };
 
-  const handleSubmit = async (e: React.FormEvent) => {
-    e.preventDefault();
-    if (!(form.title || '').trim() || saving) return;
-    setSaving(true);
+  // Publish a draft (19.6): flush the latest content, then flip to published. A 409
+  // (a published entry already owns the canonical key) surfaces the amber
+  // DuplicateBanner and the entry stays a draft.
+  const handlePublish = async () => {
+    if (!workingUid || publishing) return;
+    setPublishing(true);
     setConflictMessage(null);
     try {
-      if (isEdit && uid) {
-        await catalogService.updateCatalogEntry(uid, form);
-        showToast('Catalog entry updated');
-        navigate('/catalog/manage');
-      } else {
-        await catalogService.createCatalogEntry(form);
-        showToast('Catalog entry created');
-        setForm(emptyForm);
-        setDurationText('');
-        setMetadataSource(null);
-      }
+      await catalogService.updateCatalogEntry(workingUid, form);
+      await catalogService.publishCatalogEntry(workingUid);
+      navigate('/catalog/manage');
     } catch (err) {
       if (err instanceof CatalogConflictError) {
         const t = (form.title || '').trim();
         const a = (form.artist || '').trim();
-        setConflictMessage(a ? `A "${t}" by ${a} is already in the Catalog.` : `A "${t}" is already in the Catalog.`);
+        setConflictMessage(a ? `A "${t}" by ${a} is already published in the Catalog.` : `A "${t}" is already published in the Catalog.`);
       } else {
-        showToast('Could not save the catalog entry.');
+        showToast('Could not publish the catalog entry.');
       }
-    } finally {
-      setSaving(false);
+      setPublishing(false);
     }
   };
 
@@ -307,14 +430,35 @@ export default function CatalogAdmin() {
 
   return (
     <div className="max-w-3xl mx-auto px-4 py-6">
+      {/* Sticky action bar (like the Song form's "Back to songlist" header). Autosave
+          means there's nothing to cancel — just leave. Lives outside any glass card so
+          position:sticky works; top-16 sits under the app header (h-16). */}
+      <div className="sticky top-16 z-20 mb-4 px-4 py-3 rounded-lg bg-white/90 dark:bg-gray-800/90 backdrop-blur border border-gray-200 dark:border-gray-700 shadow-sm flex items-center justify-between gap-3">
+        <button type="button" className="btn-secondary" onClick={() => navigate('/catalog/manage')}>
+          <span aria-hidden="true">←</span> Back to list
+        </button>
+        <div className="flex items-center gap-3">
+          <span className="text-xs text-gray-500 dark:text-gray-400" aria-live="polite">
+            {saveStatus === 'saving' ? 'Saving…' : saveStatus === 'saved' ? 'Saved ✓' : saveStatus === 'error' ? 'Save failed' : ''}
+          </span>
+          {isDraft && !dupMessage && (
+            <button type="button" className="btn-primary" onClick={handlePublish} disabled={!workingUid || publishing || !(form.title || '').trim()}>
+              {publishing ? 'Publishing…' : 'Publish'}
+            </button>
+          )}
+        </div>
+      </div>
       <h1 className="text-2xl font-semibold text-gray-900 dark:text-gray-100 mb-1">{isEdit ? 'Edit catalog entry' : 'Curate the Catalog'}</h1>
       <p className="text-sm text-gray-500 dark:text-gray-400 mb-6">{isEdit ? 'Update this shared song entry. Only intrinsic song fields — no instrument settings.' : 'Add a shared song entry. Only intrinsic song fields — no instrument settings.'}</p>
 
-      <form onSubmit={handleSubmit} className="card-base p-4 sm:p-6 space-y-4">
+      <form onSubmit={e => e.preventDefault()} className="card-base p-4 sm:p-6 space-y-4">
         {/* Artist first (DL-18), then Title — same field order as the Song edit form. */}
         <div>
           <label className="label-base" htmlFor="cat-artist">Artist</label>
-          <input id="cat-artist" className="input-base" value={form.artist ?? ''} onChange={e => setField('artist', e.target.value)} />
+          <input id="cat-artist" className="input-base" list="cat-artist-list" value={form.artist ?? ''} onChange={e => setField('artist', e.target.value)} />
+          <datalist id="cat-artist-list">
+            {(facets?.artist ?? []).map(a => <option key={a} value={a} />)}
+          </datalist>
         </div>
 
         <div>
@@ -328,9 +472,11 @@ export default function CatalogAdmin() {
           />
         </div>
 
-        {/* Conflict banner right after artist+title, same component + spot as SongForm. */}
-        {conflictMessage && (
-          <DuplicateBanner><p>{conflictMessage}</p></DuplicateBanner>
+        {/* Duplicate block right after artist+title (same component + spot as SongForm):
+            the entry already exists (draft or published) → save is blocked and Publish
+            hidden until the curator changes the title/artist. */}
+        {(conflictMessage || dupMessage) && (
+          <DuplicateBanner><p>{conflictMessage || dupMessage}</p></DuplicateBanner>
         )}
 
         <div>
@@ -338,7 +484,7 @@ export default function CatalogAdmin() {
             type="button"
             className="btn-secondary text-xs"
             onClick={handleAutoFill}
-            disabled={metadataLoading || saving || !(form.title || '').trim() || !(form.artist || '').trim()}
+            disabled={metadataLoading || publishing || !(form.title || '').trim() || !(form.artist || '').trim()}
           >
             {metadataLoading ? 'Auto-filling…' : 'Auto-fill metadata & links'}
           </button>
@@ -350,7 +496,10 @@ export default function CatalogAdmin() {
 
         <div>
           <label className="label-base" htmlFor="cat-album">Album</label>
-          <input id="cat-album" className="input-base" value={form.album ?? ''} onChange={e => setField('album', e.target.value)} />
+          <input id="cat-album" className="input-base" list="cat-album-list" value={form.album ?? ''} onChange={e => setField('album', e.target.value)} />
+          <datalist id="cat-album-list">
+            {(facets?.album ?? []).map(a => <option key={a} value={a} />)}
+          </datalist>
         </div>
 
         {renderMulti('language', 'Language', languageOptions)}
@@ -397,8 +546,8 @@ export default function CatalogAdmin() {
           </div>
         )}
 
-        <div className="flex items-center gap-3 pt-2">
-          {isEdit && (
+        {isEdit && (
+          <div className="pt-2">
             <button
               type="button"
               className="inline-flex items-center rounded-md bg-red-600 text-white px-3 py-2 text-sm hover:bg-red-700 disabled:opacity-50"
@@ -407,18 +556,8 @@ export default function CatalogAdmin() {
             >
               Delete
             </button>
-          )}
-          <button
-            type="button"
-            className={`btn-secondary ${isEdit ? 'ml-auto' : ''}`}
-            onClick={() => navigate('/catalog/manage')}
-          >
-            Cancel
-          </button>
-          <button type="submit" className="btn-primary" disabled={!(form.title || '').trim() || saving}>
-            {saving ? 'Saving…' : (isEdit ? 'Save changes' : 'Save')}
-          </button>
-        </div>
+          </div>
+        )}
       </form>
 
       {isEdit && (

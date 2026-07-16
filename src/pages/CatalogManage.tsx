@@ -65,7 +65,7 @@ export default function CatalogManage() {
     abortRef.current = ctrl;
     setLoading(true);
     setError(false);
-    catalogService.listCatalog({ search, page, sort: 'artist' }, ctrl.signal)
+    catalogService.listCatalog({ search, page, sort: 'artist', includeDrafts: true }, ctrl.signal)
       .then(res => { setData(res); setLoading(false); })
       .catch(err => {
         if (err?.name === 'AbortError') return;
@@ -240,7 +240,12 @@ export default function CatalogManage() {
                             />
                           </td>
                           <td className="px-3 py-2 text-gray-900 dark:text-gray-100 whitespace-nowrap">{entry.artist || '—'}</td>
-                          <td className="px-3 py-2 font-medium text-gray-900 dark:text-gray-100">{entry.title}</td>
+                          <td className="px-3 py-2 font-medium text-gray-900 dark:text-gray-100">
+                            {entry.title}
+                            {entry.publishedAt == null && (
+                              <span className="ml-2 inline-flex items-center rounded px-1.5 py-0.5 text-xs font-medium bg-amber-100 text-amber-800 dark:bg-amber-900/40 dark:text-amber-300">Draft</span>
+                            )}
+                          </td>
                           <td className="px-3 py-2 text-gray-600 dark:text-gray-300 whitespace-nowrap">{entry.key || '—'}</td>
                           <td className="px-3 py-2 text-gray-600 dark:text-gray-300 whitespace-nowrap">{entry.mode || '—'}</td>
                           <td className="px-3 py-2 text-gray-600 dark:text-gray-300 whitespace-nowrap text-right">{entry.timeSignature || '—'}</td>
