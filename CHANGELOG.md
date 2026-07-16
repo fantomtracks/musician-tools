@@ -12,7 +12,9 @@ project adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
-## [1.15.0] — 2026-07-16
+<!-- v2 line — the Catalog is a multi-epic feature (browse/add/curate + drafts +
+     song↔catalog link + curated content). It ships as 2.0.0 when complete, NOT
+     piecemeal. Keep its entries here until the v2 release. -->
 
 ### Added
 - **A shared Catalog of ready-made songs you can add to your songlist in one tap.**
