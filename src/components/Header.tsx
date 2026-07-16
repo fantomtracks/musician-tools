@@ -164,7 +164,7 @@ function Header() {
                   >
                     {user?.isCurator && (
                       <Link
-                        to="/catalog/admin"
+                        to="/catalog/manage"
                         role="menuitem"
                         onClick={() => setAccountMenuOpen(false)}
                         className="block px-4 py-2 text-sm text-gray-700 hover:bg-gray-100 hover:text-brand-600 transition-colors dark:text-gray-300 dark:hover:bg-gray-700 dark:hover:text-brand-400"
@@ -215,7 +215,7 @@ function Header() {
             <div className="mt-1 pt-1 border-t border-gray-200 dark:border-gray-700">
               {user?.isCurator && (
                 <Link
-                  to="/catalog/admin"
+                  to="/catalog/manage"
                   onClick={() => setMobileMenuOpen(false)}
                   className="block rounded-lg px-3 py-3 text-gray-700 hover:bg-gray-100 hover:text-brand-600 font-medium transition-colors dark:text-gray-300 dark:hover:bg-gray-700 dark:hover:text-brand-400"
                 >

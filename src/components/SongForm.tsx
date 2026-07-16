@@ -5,6 +5,7 @@ import type { SongPlay } from '../services/songPlayService';
 import { instrumentTypeOptions, instrumentTechniquesMap } from '../constants/instrumentTypes';
 import SongFormInstruments from './SongFormInstruments';
 import { parseDurationToSeconds, formatSecondsToMmss } from '../utils/duration';
+import { DuplicateBanner } from './DuplicateBanner';
 // Shared option lists (story 19.5) — single source used by the Catalog curator form too.
 import { keyOptions, timeSignatureOptions, modeOptions, genreOptions, languageOptions } from '../utils/songFieldOptions';
 import { handleComboKeyDown, useScrollHighlightIntoView, comboboxInputAria, comboboxOptionAria } from '../utils/comboboxKeyboard';
@@ -293,7 +294,7 @@ export function SongForm(props: SongFormProps) {
         />
       </div>
       {duplicate && (
-        <div className="rounded-md border border-amber-300 dark:border-amber-700 bg-amber-50 dark:bg-amber-900/30 p-3 text-sm text-amber-800 dark:text-amber-100">
+        <DuplicateBanner>
           <p>
             <span className="font-medium">"{duplicate.title}"</span>
             {duplicate.artist ? <> by <span className="font-medium">{duplicate.artist}</span></> : null}
@@ -309,7 +310,7 @@ export function SongForm(props: SongFormProps) {
               Edit this song →
             </button>
           )}
-        </div>
+        </DuplicateBanner>
       )}
       <div className="flex items-center gap-3">
         <button

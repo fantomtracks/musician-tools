@@ -101,7 +101,7 @@ export default function Catalog() {
   const totalPages = Math.max(1, Math.ceil(total / limit));
 
   return (
-    <div className="max-w-5xl mx-auto px-4 py-6">
+    <div className="w-full max-w-5xl mx-auto px-4 py-6">
       <h1 className="text-2xl font-semibold text-gray-900 dark:text-gray-100 mb-4">Catalog</h1>
 
       {/* Search is always above the list (DL-5). */}

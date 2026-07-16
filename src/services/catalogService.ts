@@ -191,4 +191,21 @@ export const catalogService = {
     }
     return response.json();
   },
+
+  // Delete a catalog entry (curator only). A 404 (already removed elsewhere) is
+  // surfaced as CatalogNotFoundError so the manage list can drop the row calmly.
+  // Deleting a fiche does NOT touch Songs users already copied from it — there is
+  // no FK on Song.sourceCatalogUid (soft reference, §4.7), so it just goes dangling.
+  async deleteCatalogEntry(uid: string): Promise<void> {
+    const response = await apiFetch(`${API_BASE}/catalog/${uid}`, {
+      method: 'DELETE',
+      credentials: 'include',
+    });
+    if (response.status === 404) {
+      throw new CatalogNotFoundError();
+    }
+    if (!response.ok) {
+      throw new Error('Failed to delete catalog entry');
+    }
+  },
 };

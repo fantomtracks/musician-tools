@@ -1,11 +1,13 @@
 import { useEffect, useState } from 'react';
-import { Navigate } from 'react-router-dom';
+import { Navigate, Link, useParams, useNavigate } from 'react-router-dom';
 import { useAuth } from '../contexts/AuthContext';
-import { catalogService, CatalogConflictError } from '../services/catalogService';
-import type { CreateCatalogDTO } from '../services/catalogService';
+import { catalogService, CatalogConflictError, CatalogNotFoundError } from '../services/catalogService';
+import type { CreateCatalogDTO, CatalogSong } from '../services/catalogService';
 import { songService } from '../services/songService';
 import { parseDurationToSeconds, formatSecondsToMmss } from '../utils/duration';
 import { keyOptions, modeOptions, timeSignatureOptions, genreOptions, languageOptions } from '../utils/songFieldOptions';
+import { DuplicateBanner } from '../components/DuplicateBanner';
+import { ConfirmDialog } from '../components/ConfirmDialog';
 
 // Curator-only admin screen to create a Catalog entry (story 19.2). Utilitarian
 // (DL-14): reuses the design-system utilities, restricted to the INTRINSIC fields
@@ -48,6 +50,24 @@ function generateStreamingLinks(title: string, artist: string): StreamingLink[] 
 const asArr = (value: string[] | string | null | undefined): string[] =>
   Array.isArray(value) ? value : (value ? [value] : []);
 
+// Map a fetched CatalogSong -> the editable form DTO (story 19.5 edit mode). Drops
+// uid/timestamps, coerces nullable columns to the form's empty representation, and
+// clones streamingLinks so editing never mutates the fetched object.
+const mapEntryToForm = (e: CatalogSong): CreateCatalogDTO => ({
+  title: e.title ?? '',
+  artist: e.artist ?? '',
+  album: e.album ?? '',
+  key: e.key ?? '',
+  bpm: e.bpm ?? null,
+  mode: e.mode ?? '',
+  timeSignature: e.timeSignature ?? '',
+  durationSeconds: e.durationSeconds ?? null,
+  language: asArr(e.language),
+  genre: asArr(e.genre),
+  streamingLinks: (e.streamingLinks ?? []).map(l => ({ ...l })),
+  pitchStandard: e.pitchStandard ?? 440,
+});
+
 export default function CatalogAdmin() {
   const { user } = useAuth();
 
@@ -69,10 +89,62 @@ export default function CatalogAdmin() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [form.durationSeconds]);
 
+  // Edit mode (story 19.5): /catalog/admin/:uid reuses this form to update an
+  // existing fiche in place. No uid = create mode (story 19.2, unchanged).
+  const { uid } = useParams();
+  const isEdit = Boolean(uid);
+  const navigate = useNavigate();
+  const [loading, setLoading] = useState(isEdit);
+  const [notFound, setNotFound] = useState(false);
+  const [deleteOpen, setDeleteOpen] = useState(false);
+  const [deleting, setDeleting] = useState(false);
+
+  // Pre-fill the form from the existing entry. `active` guard makes it StrictMode-
+  // safe (double-mount) and cancels a stale response if the uid changes mid-flight.
+  useEffect(() => {
+    if (!uid) return;
+    let active = true;
+    setLoading(true);
+    setNotFound(false);
+    catalogService.getCatalogEntry(uid)
+      .then(entry => {
+        if (!active) return;
+        const mapped = mapEntryToForm(entry);
+        setForm(mapped);
+        setDurationText(mapped.durationSeconds != null ? formatSecondsToMmss(mapped.durationSeconds) : '');
+        setLoading(false);
+      })
+      .catch(err => {
+        if (!active) return;
+        if (err instanceof CatalogNotFoundError) {
+          setNotFound(true);
+        } else {
+          setToastMessage('Could not load the catalog entry.');
+          setTimeout(() => setToastMessage(null), 2500);
+        }
+        setLoading(false);
+      });
+    return () => { active = false; };
+  }, [uid]);
+
   // Role gate: a non-curator never sees the form (route is auth-gated; this adds
   // the role check). Not a 404 oracle — the admin surface is a privilege gate.
   if (!user?.isCurator) {
     return <Navigate to="/" replace />;
+  }
+
+  // Edit mode: loading / not-found interstitials (calm deep-link handling, AC8).
+  if (isEdit && loading) {
+    return <div className="max-w-3xl mx-auto px-4 py-6 text-gray-500 dark:text-gray-400">Loading…</div>;
+  }
+  if (isEdit && notFound) {
+    return (
+      <div className="max-w-3xl mx-auto px-4 py-6">
+        <h1 className="text-2xl font-semibold text-gray-900 dark:text-gray-100 mb-2">Catalog entry not found</h1>
+        <p className="text-sm text-gray-500 dark:text-gray-400 mb-4">It may have been removed from the Catalog.</p>
+        <Link to="/catalog/manage" className="text-brand-600 dark:text-brand-400 hover:underline">← Back to manage</Link>
+      </div>
+    );
   }
 
   const showToast = (message: string) => {
@@ -139,11 +211,17 @@ export default function CatalogAdmin() {
     setSaving(true);
     setConflictMessage(null);
     try {
-      await catalogService.createCatalogEntry(form);
-      showToast('Catalog entry created');
-      setForm(emptyForm);
-      setDurationText('');
-      setMetadataSource(null);
+      if (isEdit && uid) {
+        await catalogService.updateCatalogEntry(uid, form);
+        showToast('Catalog entry updated');
+        navigate('/catalog/manage');
+      } else {
+        await catalogService.createCatalogEntry(form);
+        showToast('Catalog entry created');
+        setForm(emptyForm);
+        setDurationText('');
+        setMetadataSource(null);
+      }
     } catch (err) {
       if (err instanceof CatalogConflictError) {
         const t = (form.title || '').trim();
@@ -154,6 +232,21 @@ export default function CatalogAdmin() {
       }
     } finally {
       setSaving(false);
+    }
+  };
+
+  // Delete the entry being edited (curator). A 404 (already gone) is treated as done.
+  const handleDelete = async () => {
+    if (!uid || deleting) return;
+    setDeleting(true);
+    try {
+      await catalogService.deleteCatalogEntry(uid);
+      navigate('/catalog/manage');
+    } catch (err) {
+      if (err instanceof CatalogNotFoundError) { navigate('/catalog/manage'); return; }
+      showToast('Could not delete the catalog entry.');
+      setDeleting(false);
+      setDeleteOpen(false);
     }
   };
 
@@ -214,10 +307,16 @@ export default function CatalogAdmin() {
 
   return (
     <div className="max-w-3xl mx-auto px-4 py-6">
-      <h1 className="text-2xl font-semibold text-gray-900 dark:text-gray-100 mb-1">Curate the Catalog</h1>
-      <p className="text-sm text-gray-500 dark:text-gray-400 mb-6">Add a shared song entry. Only intrinsic song fields — no instrument settings.</p>
+      <h1 className="text-2xl font-semibold text-gray-900 dark:text-gray-100 mb-1">{isEdit ? 'Edit catalog entry' : 'Curate the Catalog'}</h1>
+      <p className="text-sm text-gray-500 dark:text-gray-400 mb-6">{isEdit ? 'Update this shared song entry. Only intrinsic song fields — no instrument settings.' : 'Add a shared song entry. Only intrinsic song fields — no instrument settings.'}</p>
 
       <form onSubmit={handleSubmit} className="card-base p-4 sm:p-6 space-y-4">
+        {/* Artist first (DL-18), then Title — same field order as the Song edit form. */}
+        <div>
+          <label className="label-base" htmlFor="cat-artist">Artist</label>
+          <input id="cat-artist" className="input-base" value={form.artist ?? ''} onChange={e => setField('artist', e.target.value)} />
+        </div>
+
         <div>
           <label className="label-base" htmlFor="cat-title">Title</label>
           <input
@@ -229,16 +328,10 @@ export default function CatalogAdmin() {
           />
         </div>
 
-        <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-          <div>
-            <label className="label-base" htmlFor="cat-artist">Artist</label>
-            <input id="cat-artist" className="input-base" value={form.artist ?? ''} onChange={e => setField('artist', e.target.value)} />
-          </div>
-          <div>
-            <label className="label-base" htmlFor="cat-album">Album</label>
-            <input id="cat-album" className="input-base" value={form.album ?? ''} onChange={e => setField('album', e.target.value)} />
-          </div>
-        </div>
+        {/* Conflict banner right after artist+title, same component + spot as SongForm. */}
+        {conflictMessage && (
+          <DuplicateBanner><p>{conflictMessage}</p></DuplicateBanner>
+        )}
 
         <div>
           <button
@@ -252,17 +345,17 @@ export default function CatalogAdmin() {
           {metadataSource && <span className="ml-2 text-xs text-gray-500 dark:text-gray-400">source: {metadataSource}</span>}
         </div>
 
-        <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
-          {renderSelect('key', 'Key', keyOptions)}
-          {renderSelect('mode', 'Mode', modeOptions)}
-          {renderSelect('timeSignature', 'Time signature', timeSignatureOptions)}
+        {/* Genre → Album → Language, then the numeric grids — mirrors SongForm. */}
+        {renderMulti('genre', 'Genre', genreOptions)}
+
+        <div>
+          <label className="label-base" htmlFor="cat-album">Album</label>
+          <input id="cat-album" className="input-base" value={form.album ?? ''} onChange={e => setField('album', e.target.value)} />
         </div>
 
+        {renderMulti('language', 'Language', languageOptions)}
+
         <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
-          <div>
-            <label className="label-base" htmlFor="cat-bpm">BPM</label>
-            <input id="cat-bpm" type="number" className="input-base" value={form.bpm ?? ''} onChange={e => setField('bpm', parseNumber(e.target.value))} />
-          </div>
           <div>
             <label className="label-base" htmlFor="cat-duration">Duration (m:ss)</label>
             <input
@@ -275,14 +368,19 @@ export default function CatalogAdmin() {
             />
           </div>
           <div>
+            <label className="label-base" htmlFor="cat-bpm">BPM</label>
+            <input id="cat-bpm" type="number" className="input-base" value={form.bpm ?? ''} onChange={e => setField('bpm', parseNumber(e.target.value))} />
+          </div>
+          {renderSelect('timeSignature', 'Time signature', timeSignatureOptions)}
+        </div>
+
+        <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
+          {renderSelect('key', 'Key', keyOptions)}
+          {renderSelect('mode', 'Mode', modeOptions)}
+          <div>
             <label className="label-base" htmlFor="cat-pitch">Pitch standard (Hz)</label>
             <input id="cat-pitch" type="number" className="input-base" value={form.pitchStandard ?? ''} onChange={e => setField('pitchStandard', parseNumber(e.target.value))} />
           </div>
-        </div>
-
-        <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-          {renderMulti('genre', 'Genre', genreOptions)}
-          {renderMulti('language', 'Language', languageOptions)}
         </div>
 
         {(form.streamingLinks && form.streamingLinks.length > 0) && (
@@ -299,19 +397,42 @@ export default function CatalogAdmin() {
           </div>
         )}
 
-        {conflictMessage && (
-          <p role="alert" className="text-sm text-amber-700 dark:text-amber-400">{conflictMessage}</p>
-        )}
-
         <div className="flex items-center gap-3 pt-2">
-          <button type="submit" className="btn-primary" disabled={!(form.title || '').trim() || saving}>
-            {saving ? 'Saving…' : 'Save'}
-          </button>
-          <button type="button" className="btn-secondary" onClick={() => { setForm(emptyForm); setDurationText(''); setConflictMessage(null); setMetadataSource(null); }}>
+          {isEdit && (
+            <button
+              type="button"
+              className="inline-flex items-center rounded-md bg-red-600 text-white px-3 py-2 text-sm hover:bg-red-700 disabled:opacity-50"
+              onClick={() => setDeleteOpen(true)}
+              disabled={deleting}
+            >
+              Delete
+            </button>
+          )}
+          <button
+            type="button"
+            className={`btn-secondary ${isEdit ? 'ml-auto' : ''}`}
+            onClick={() => navigate('/catalog/manage')}
+          >
             Cancel
+          </button>
+          <button type="submit" className="btn-primary" disabled={!(form.title || '').trim() || saving}>
+            {saving ? 'Saving…' : (isEdit ? 'Save changes' : 'Save')}
           </button>
         </div>
       </form>
+
+      {isEdit && (
+        <ConfirmDialog
+          isOpen={deleteOpen}
+          title="Delete catalog entry"
+          message={`Delete "${(form.title || '').trim() || 'this entry'}"${(form.artist || '').trim() ? ` by ${(form.artist || '').trim()}` : ''} from the Catalog? Users who already added this song keep their own copy.`}
+          confirmText={deleting ? 'Deleting…' : 'Delete'}
+          cancelText="Cancel"
+          isDangerous
+          onConfirm={handleDelete}
+          onCancel={() => { if (!deleting) setDeleteOpen(false); }}
+        />
+      )}
 
       {toastMessage && (
         <div role="status" aria-live="polite" className="fixed bottom-6 left-1/2 -translate-x-1/2 bg-gray-900 text-white text-sm px-4 py-2 rounded-lg shadow-lg">

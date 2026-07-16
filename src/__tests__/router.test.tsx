@@ -27,6 +27,10 @@ jest.mock('../pages/ProfilePage', () => ({ __esModule: true, default: () => <div
 jest.mock('../pages/VerifyEmailPage', () => ({ __esModule: true, default: () => <div>VERIFY</div> }));
 jest.mock('../pages/ForgotPasswordPage', () => ({ __esModule: true, default: () => <div>FORGOT</div> }));
 jest.mock('../pages/ResetPasswordPage', () => ({ __esModule: true, default: () => <div>RESET</div> }));
+jest.mock('../pages/Catalog', () => ({ __esModule: true, default: () => <div>CATALOG</div> }));
+jest.mock('../pages/CatalogAdmin', () => ({ __esModule: true, default: () => <div>CATALOG_ADMIN</div> }));
+jest.mock('../pages/CatalogManage', () => ({ __esModule: true, default: () => <div>CATALOG_MANAGE</div> }));
+jest.mock('../pages/CatalogEntry', () => ({ __esModule: true, default: () => <div>CATALOG_ENTRY</div> }));
 
 import { routes } from '../router';
 import { useAuth } from '../contexts/AuthContext';
@@ -104,5 +108,24 @@ describe('router — data-router route tree (story 18.1)', () => {
   test('public routes render regardless of auth', () => {
     renderAt('/verify-email', false);
     expect(screen.getByText('VERIFY')).toBeInTheDocument();
+  });
+
+  // Story 19.5 — the Catalog routes must resolve by segment specificity: the static
+  // `manage`/`admin` segments and the 3-segment `admin/:uid` must NOT be shadowed by
+  // the dynamic `catalog/:uid` detail route.
+  test.each([
+    ['/catalog', 'CATALOG'],
+    ['/catalog/manage', 'CATALOG_MANAGE'],
+    ['/catalog/admin', 'CATALOG_ADMIN'],
+    ['/catalog/admin/abc-123', 'CATALOG_ADMIN'],
+    ['/catalog/xyz-789', 'CATALOG_ENTRY'],
+  ])('catalog route %s resolves to the right element when signed in', (path, marker) => {
+    renderAt(path, true);
+    expect(screen.getByText(marker)).toBeInTheDocument();
+  });
+
+  test('catalog management route is guarded (redirect to /login signed out)', () => {
+    renderAt('/catalog/manage', false);
+    expect(screen.getByText('LOGIN')).toBeInTheDocument();
   });
 });

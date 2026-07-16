@@ -1,17 +1,18 @@
-import { render, screen, fireEvent, waitFor } from '@testing-library/react';
+import { StrictMode } from 'react';
+import { render, screen, fireEvent, waitFor, within } from '@testing-library/react';
 import { MemoryRouter, Routes, Route } from 'react-router-dom';
 import CatalogAdmin from '../pages/CatalogAdmin';
 import { useAuth } from '../contexts/AuthContext';
-import { catalogService, CatalogConflictError } from '../services/catalogService';
+import { catalogService, CatalogConflictError, CatalogNotFoundError } from '../services/catalogService';
 import { songService } from '../services/songService';
 
 jest.mock('../contexts/AuthContext', () => ({ useAuth: jest.fn() }));
-// Keep the real CatalogConflictError (needed for `instanceof`), mock the methods.
+// Keep the real error classes (needed for `instanceof`), mock the methods.
 jest.mock('../services/catalogService', () => {
   const actual = jest.requireActual('../services/catalogService');
   return {
     ...actual,
-    catalogService: { createCatalogEntry: jest.fn(), updateCatalogEntry: jest.fn() },
+    catalogService: { createCatalogEntry: jest.fn(), updateCatalogEntry: jest.fn(), getCatalogEntry: jest.fn(), deleteCatalogEntry: jest.fn() },
   };
 });
 jest.mock('../services/songService', () => ({
@@ -106,4 +107,90 @@ test('auto-fill fills empty fields but never overwrites a typed value', async ()
   // Typed BPM preserved, empty Key filled from the lookup.
   await waitFor(() => expect((screen.getByLabelText('Key') as HTMLInputElement).value).toBe('Em'));
   expect((screen.getByLabelText('BPM') as HTMLInputElement).value).toBe('120');
+});
+
+// ---- Story 19.5: edit mode (/catalog/admin/:uid). Rendered under StrictMode so the
+// pre-fill effect's double-mount can't regress (lesson from 19.4 CatalogAddButton). ----
+const renderEdit = (uid = 'c1') => render(
+  <StrictMode>
+    <MemoryRouter initialEntries={[`/catalog/admin/${uid}`]}>
+      <Routes>
+        <Route path="/catalog/admin/:uid" element={<CatalogAdmin />} />
+        <Route path="/catalog/manage" element={<div>manage-marker</div>} />
+      </Routes>
+    </MemoryRouter>
+  </StrictMode>
+);
+
+test('edit mode pre-fills the form and updates the same entry in place', async () => {
+  mockedUseAuth.mockReturnValue({ user: { isCurator: true } });
+  cat.getCatalogEntry.mockResolvedValue({
+    uid: 'c1', title: 'Zombie', artist: 'The Cranberries', bpm: 84, key: 'Em',
+    genre: ['Rock'], language: ['English'], durationSeconds: 200,
+  });
+  cat.updateCatalogEntry.mockResolvedValue({ uid: 'c1', title: 'Zombie (Remaster)' });
+  renderEdit('c1');
+
+  // Pre-filled from getCatalogEntry.
+  await waitFor(() => expect((screen.getByLabelText('Title') as HTMLInputElement).value).toBe('Zombie'));
+  expect((screen.getByLabelText('Artist') as HTMLInputElement).value).toBe('The Cranberries');
+  expect((screen.getByLabelText('BPM') as HTMLInputElement).value).toBe('84');
+
+  fireEvent.change(screen.getByLabelText('Title'), { target: { value: 'Zombie (Remaster)' } });
+  fireEvent.click(screen.getByRole('button', { name: 'Save changes' }));
+
+  await waitFor(() => expect(cat.updateCatalogEntry).toHaveBeenCalled());
+  expect(cat.updateCatalogEntry.mock.calls[0][0]).toBe('c1'); // same uid = in-place
+  expect(cat.updateCatalogEntry.mock.calls[0][1].title).toBe('Zombie (Remaster)');
+  // Never falls back to create.
+  expect(cat.createCatalogEntry).not.toHaveBeenCalled();
+  // Navigated back to the manage hub on success.
+  await screen.findByText('manage-marker');
+});
+
+test('edit mode surfaces a rename conflict (409) as a calm inline message', async () => {
+  mockedUseAuth.mockReturnValue({ user: { isCurator: true } });
+  cat.getCatalogEntry.mockResolvedValue({ uid: 'c1', title: 'Zombie', artist: 'A' });
+  cat.updateCatalogEntry.mockRejectedValue(new CatalogConflictError({ uid: 'other', title: 'Zombie' }));
+  renderEdit('c1');
+
+  await waitFor(() => expect((screen.getByLabelText('Title') as HTMLInputElement).value).toBe('Zombie'));
+  fireEvent.change(screen.getByLabelText('Artist'), { target: { value: 'B' } });
+  fireEvent.click(screen.getByRole('button', { name: 'Save changes' }));
+
+  await screen.findByText(/already in the Catalog/i);
+  // Stayed on the form (no navigation away).
+  expect(screen.queryByText('manage-marker')).toBeNull();
+});
+
+test('edit mode can delete the entry (confirm → back to manage)', async () => {
+  mockedUseAuth.mockReturnValue({ user: { isCurator: true } });
+  cat.getCatalogEntry.mockResolvedValue({ uid: 'c1', title: 'Zombie', artist: 'The Cranberries' });
+  cat.deleteCatalogEntry.mockResolvedValue(undefined);
+  renderEdit('c1');
+
+  await waitFor(() => expect((screen.getByLabelText('Title') as HTMLInputElement).value).toBe('Zombie'));
+  fireEvent.click(screen.getByRole('button', { name: 'Delete' }));
+
+  const dialog = await screen.findByRole('dialog');
+  fireEvent.click(within(dialog).getByRole('button', { name: 'Delete' }));
+
+  await waitFor(() => expect(cat.deleteCatalogEntry).toHaveBeenCalledWith('c1'));
+  await screen.findByText('manage-marker');
+});
+
+test('create mode has no Delete button', () => {
+  mockedUseAuth.mockReturnValue({ user: { isCurator: true } });
+  renderAdmin();
+  expect(screen.queryByRole('button', { name: 'Delete' })).toBeNull();
+});
+
+test('edit mode shows a calm not-found for a missing/removed entry', async () => {
+  mockedUseAuth.mockReturnValue({ user: { isCurator: true } });
+  cat.getCatalogEntry.mockRejectedValue(new CatalogNotFoundError());
+  renderEdit('gone');
+
+  await screen.findByText(/not found/i);
+  expect(screen.getByText(/Back to manage/i)).toBeInTheDocument();
+  expect(screen.queryByLabelText('Title')).toBeNull();
 });
