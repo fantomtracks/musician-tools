@@ -10,9 +10,12 @@ jest.mock('../models', () => ({
     create: jest.fn(),
     findOne: jest.fn(),
   },
+  User: {
+    findByPk: jest.fn(),
+  },
 }));
 
-const { CatalogSong, Song } = require('../models');
+const { CatalogSong, Song, User } = require('../models');
 const { Op } = require('sequelize');
 const controller = require('../controllers/catalogcontroller');
 
@@ -266,7 +269,7 @@ describe('catalogcontroller', () => {
   // --- detail (story 19.3) ---
 
   test('getCatalogEntry returns the raw entity', async () => {
-    CatalogSong.findByPk.mockResolvedValue({ uid: UID, title: 'Zombie' });
+    CatalogSong.findByPk.mockResolvedValue({ uid: UID, title: 'Zombie', publishedAt: '2026-01-01T00:00:00.000Z' });
     const res = mockRes();
     await controller.getCatalogEntry({ params: { uid: UID } }, res, mockNext());
     expect(res.json.mock.calls[0][0].uid).toBe(UID);
@@ -291,6 +294,7 @@ describe('catalogcontroller', () => {
     key: 'Em', bpm: 84, mode: 'minor', timeSignature: '4/4', durationSeconds: 260,
     language: ['English'], genre: ['Rock'], streamingLinks: [{ label: 'YouTube', url: 'https://y' }],
     pitchStandard: 440,
+    publishedAt: '2026-01-01T00:00:00.000Z', // published (19.6) → addToSonglist proceeds
     // Parasite fields: NOT part of a CatalogSong, but present here to prove the
     // explicit build never leaks personal/instrument data into the copy.
     userUid: 'someone-else', instrument: ['guitar'], capo: 3, notes: 'secret',
@@ -351,5 +355,101 @@ describe('catalogcontroller', () => {
     const n2 = mockNext();
     await controller.addToSonglist({ params: { uid: UID }, session: {} }, mockRes(), n2);
     expect(n2.mock.calls[0][0].status).toBe(401);
+  });
+
+  // --- Draft / publish (story 19.6) ---
+
+  const publishedNotNull = (c) => c.publishedAt && c.publishedAt[Op.not] === null;
+
+  test('getCatalogList (browse) scopes to published only', async () => {
+    CatalogSong.findAndCountAll.mockResolvedValue({ rows: [], count: 0 });
+    await controller.getCatalogList({ query: {}, session: { user: 'u1' } }, mockRes(), mockNext());
+    const where = CatalogSong.findAndCountAll.mock.calls[0][0].where;
+    expect(where[Op.and].some(publishedNotNull)).toBe(true);
+  });
+
+  test('getCatalogList ?includeDrafts=1 for a curator drops the published filter', async () => {
+    User.findByPk.mockResolvedValue({ uid: 'u1', isCurator: true });
+    CatalogSong.findAndCountAll.mockResolvedValue({ rows: [], count: 0 });
+    await controller.getCatalogList({ query: { includeDrafts: '1' }, session: { user: 'u1' } }, mockRes(), mockNext());
+    expect(CatalogSong.findAndCountAll.mock.calls[0][0].where).toBeUndefined();
+  });
+
+  test('getCatalogList ?includeDrafts=1 from a NON-curator still scopes to published', async () => {
+    User.findByPk.mockResolvedValue({ uid: 'u2', isCurator: false });
+    CatalogSong.findAndCountAll.mockResolvedValue({ rows: [], count: 0 });
+    await controller.getCatalogList({ query: { includeDrafts: '1' }, session: { user: 'u2' } }, mockRes(), mockNext());
+    const where = CatalogSong.findAndCountAll.mock.calls[0][0].where;
+    expect(where[Op.and].some(publishedNotNull)).toBe(true);
+  });
+
+  test('getCatalogEntry: a draft is 404 for a non-curator, returned for a curator', async () => {
+    CatalogSong.findByPk.mockResolvedValue({ uid: UID, title: 'Draft', publishedAt: null });
+    User.findByPk.mockResolvedValue({ uid: 'u2', isCurator: false });
+    const n1 = mockNext();
+    await controller.getCatalogEntry({ params: { uid: UID }, session: { user: 'u2' } }, mockRes(), n1);
+    expect(n1.mock.calls[0][0].status).toBe(404);
+
+    User.findByPk.mockResolvedValue({ uid: 'u1', isCurator: true });
+    const res = mockRes();
+    await controller.getCatalogEntry({ params: { uid: UID }, session: { user: 'u1' } }, res, mockNext());
+    expect(res.json.mock.calls[0][0].uid).toBe(UID);
+  });
+
+  test('addToSonglist -> 404 on a draft (not public)', async () => {
+    CatalogSong.findByPk.mockResolvedValue({ uid: UID, title: 'Draft', publishedAt: null });
+    const next = mockNext();
+    await controller.addToSonglist({ params: { uid: UID }, session: { user: 'u1' } }, mockRes(), next);
+    expect(next.mock.calls[0][0].status).toBe(404);
+    expect(Song.create).not.toHaveBeenCalled();
+  });
+
+  test('publishCatalogEntry sets publishedAt (Date) and returns the entry', async () => {
+    const entry = { uid: UID, title: 'Zombie', artist: 'X', publishedAt: null, update: jest.fn(async (u) => ({ uid: UID, ...u })) };
+    CatalogSong.findByPk.mockResolvedValue(entry);
+    const res = mockRes();
+    await controller.publishCatalogEntry({ params: { uid: UID } }, res, mockNext());
+    expect(entry.update.mock.calls[0][0].publishedAt).toBeInstanceOf(Date);
+    expect(res.json).toHaveBeenCalled();
+  });
+
+  test('publishCatalogEntry -> 409 when a published entry owns the canonical key', async () => {
+    const entry = { uid: UID, title: 'Zombie', artist: 'The Cranberries', publishedAt: null, update: jest.fn().mockRejectedValue({ name: 'SequelizeUniqueConstraintError' }) };
+    CatalogSong.findByPk.mockResolvedValue(entry);
+    CatalogSong.findOne.mockResolvedValue({ uid: 'published-dup', title: 'Zombie', artist: 'The Cranberries' });
+    const res = mockRes();
+    await controller.publishCatalogEntry({ params: { uid: UID } }, res, mockNext());
+    expect(res.status).toHaveBeenCalledWith(409);
+    expect(res.json.mock.calls[0][0].error).toBe('duplicate_catalog_entry');
+  });
+
+  test('publishCatalogEntry -> 400 when the entry has no title', async () => {
+    CatalogSong.findByPk.mockResolvedValue({ uid: UID, title: '', publishedAt: null, update: jest.fn() });
+    const next = mockNext();
+    await controller.publishCatalogEntry({ params: { uid: UID } }, mockRes(), next);
+    expect(next.mock.calls[0][0].status).toBe(400);
+  });
+
+  test('getCatalogFacets scopes every query to published', async () => {
+    CatalogSong.sequelize.query.mockResolvedValue([]);
+    await controller.getCatalogFacets({}, mockRes(), mockNext());
+    const allScoped = CatalogSong.sequelize.query.mock.calls.every(c => /published_at IS NOT NULL/.test(c[0]));
+    expect(allScoped).toBe(true);
+  });
+
+  test('getCatalogFacets ?includeDrafts=1 for a curator drops the published filter', async () => {
+    User.findByPk.mockResolvedValue({ uid: 'u1', isCurator: true });
+    CatalogSong.sequelize.query.mockResolvedValue([]);
+    await controller.getCatalogFacets({ query: { includeDrafts: '1' }, session: { user: 'u1' } }, mockRes(), mockNext());
+    const anyScoped = CatalogSong.sequelize.query.mock.calls.some(c => /published_at IS NOT NULL/.test(c[0]));
+    expect(anyScoped).toBe(false);
+  });
+
+  test('getCatalogFacets ?includeDrafts=1 from a NON-curator stays published-only', async () => {
+    User.findByPk.mockResolvedValue({ uid: 'u2', isCurator: false });
+    CatalogSong.sequelize.query.mockResolvedValue([]);
+    await controller.getCatalogFacets({ query: { includeDrafts: '1' }, session: { user: 'u2' } }, mockRes(), mockNext());
+    const allScoped = CatalogSong.sequelize.query.mock.calls.every(c => /published_at IS NOT NULL/.test(c[0]));
+    expect(allScoped).toBe(true);
   });
 });

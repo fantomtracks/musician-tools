@@ -18,6 +18,7 @@ export type CatalogSong = {
   genre?: string[] | null;
   streamingLinks?: Array<{ label: string; url: string }> | null;
   pitchStandard?: number | null;
+  publishedAt?: string | null; // null = draft (19.6) ; timestamp = published
   createdAt?: string;
   updatedAt?: string;
 };
@@ -40,6 +41,8 @@ export type CatalogFacets = {
   key: string[];
   mode: string[];
   timeSignature: string[];
+  artist?: string[]; // 19.6 — curator form autocomplete (browse pills ignore these)
+  album?: string[];
 };
 
 export type CatalogListParams = {
@@ -51,6 +54,7 @@ export type CatalogListParams = {
   sort?: string;
   page?: number;
   limit?: number;
+  includeDrafts?: boolean; // curator hub only (19.6) — honoured server-side iff isCurator
 };
 
 // Thrown when a detail lookup 404s (deep-link to a removed/unknown entry). Lets the
@@ -90,6 +94,7 @@ export const catalogService = {
     if (params.sort) qs.set('sort', params.sort);
     if (params.page) qs.set('page', String(params.page));
     if (params.limit) qs.set('limit', String(params.limit));
+    if (params.includeDrafts) qs.set('includeDrafts', '1');
     const query = qs.toString();
     const response = await apiFetch(`${API_BASE}/catalog${query ? `?${query}` : ''}`, {
       credentials: 'include',
@@ -102,8 +107,9 @@ export const catalogService = {
   },
 
   // The distinct filterable values across the whole Catalog (for the facet pills).
-  async getFacets(signal?: AbortSignal): Promise<CatalogFacets> {
-    const response = await apiFetch(`${API_BASE}/catalog/facets`, { credentials: 'include', signal });
+  async getFacets(signal?: AbortSignal, includeDrafts = false): Promise<CatalogFacets> {
+    const qs = includeDrafts ? '?includeDrafts=1' : '';
+    const response = await apiFetch(`${API_BASE}/catalog/facets${qs}`, { credentials: 'include', signal });
     if (!response.ok) {
       throw new Error('Failed to load catalog facets');
     }
@@ -207,5 +213,26 @@ export const catalogService = {
     if (!response.ok) {
       throw new Error('Failed to delete catalog entry');
     }
+  },
+
+  // Publish a draft (curator, 19.6). 409 = a PUBLISHED entry owns the canonical key
+  // (CatalogConflictError carries it) ; 404 = gone ; 400 = missing title.
+  async publishCatalogEntry(uid: string): Promise<CatalogSong> {
+    const response = await apiFetch(`${API_BASE}/catalog/${uid}/publish`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      credentials: 'include',
+    });
+    if (response.status === 409) {
+      const body = await response.json().catch(() => ({} as { entry?: CatalogSong }));
+      throw new CatalogConflictError(body.entry ?? undefined);
+    }
+    if (response.status === 404) {
+      throw new CatalogNotFoundError();
+    }
+    if (!response.ok) {
+      throw new Error('Failed to publish catalog entry');
+    }
+    return response.json();
   },
 };

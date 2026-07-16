@@ -5,7 +5,7 @@
 //
 // Story 19.1 scope: curator write CRUD on catalog entries. Read (list/detail)
 // endpoints land in story 19.3; "Add to my songlist" in story 19.4.
-const { CatalogSong, Song } = require('../models');
+const { CatalogSong, Song, User } = require('../models');
 const { Op, fn, col, where: whereFn } = require('sequelize');
 const createError = require('http-errors');
 const logger = require('../logger');
@@ -180,6 +180,34 @@ const deleteCatalogEntry = async (req, res, next) => {
   }
 };
 
+// POST /api/catalog/:uid/publish (curator) — flip a draft to published (19.6).
+// Idempotent (re-publishing keeps the original publishedAt). Uniqueness is GLOBAL (any
+// duplicate is already rejected at create/rename time), so this update cannot introduce
+// a collision — the 23505→409 handler below is a harmless backstop, effectively unreachable.
+const publishCatalogEntry = async (req, res, next) => {
+  let entry;
+  try {
+    if (!isUuid(req.params.uid)) {
+      return next(createError(404, 'Catalog entry not found'));
+    }
+    entry = await CatalogSong.findByPk(req.params.uid);
+    if (!entry) {
+      return next(createError(404, 'Catalog entry not found'));
+    }
+    if (!normalizeText(entry.title)) {
+      return next(createError(400, 'Title is required'));
+    }
+    const updated = await entry.update({ publishedAt: entry.publishedAt || new Date() });
+    res.json(updated);
+  } catch (error) {
+    if (await respondDuplicateCatalogEntry(res, error, entry && entry.title, entry && entry.artist, req.params.uid).catch(() => false)) {
+      return;
+    }
+    logger.error('Error publishing catalog entry:', error);
+    next(createError(500, 'Error publishing catalog entry'));
+  }
+};
+
 // ---- Story 19.3: READ endpoints (list + detail) ----
 // SHARED read — NOT scoped by userUid (principle §3, project-context.md). A Catalog
 // entry is readable by every logged-in user; do NOT add userUid to the where.
@@ -213,6 +241,16 @@ function foldedLike(column, pattern) {
   );
 }
 
+// Is the requester a curator? Looks up the session user's isCurator. Called LAZILY —
+// only on the draft-aware paths (?includeDrafts, or accessing a draft by uid) — so
+// normal public reads pay no extra query. Story 19.6.
+async function isRequestCurator(req) {
+  const userId = req.session && req.session.user;
+  if (!userId) return false;
+  const user = await User.findByPk(userId).catch(() => null);
+  return !!(user && user.isCurator === true);
+}
+
 const getCatalogList = async (req, res, next) => {
   try {
     const q = req.query || {};
@@ -244,6 +282,11 @@ const getCatalogList = async (req, res, next) => {
       const pattern = `%${escaped}%`;
       and.push({ [Op.or]: [foldedLike('title', pattern), foldedLike('artist', pattern)] });
     }
+    // Draft/publish scoping (19.6): browse shows PUBLISHED only. A curator may pass
+    // ?includeDrafts=1 (the manage hub) to also see drafts — honoured only if the
+    // requester really is a curator, so a crafted query never leaks a draft.
+    const includeDrafts = q.includeDrafts === '1' && (await isRequestCurator(req));
+    if (!includeDrafts) and.push({ publishedAt: { [Op.not]: null } });
     const where = and.length ? { [Op.and]: and } : undefined;
 
     // findAndCountAll: `count` is the FILTERED total (what the client paginates over).
@@ -261,20 +304,28 @@ const getCatalogList = async (req, res, next) => {
 const getCatalogFacets = async (req, res, next) => {
   try {
     const sequelize = CatalogSong.sequelize;
-    // Column names are hardcoded literals below (no user input) → no injection.
+    // A curator form may pass ?includeDrafts=1 so the artist/album autocomplete offers
+    // DRAFT values too; the public browse never passes it → published-only. Gated on
+    // isCurator so a crafted query never surfaces a draft's values. `pub` is a literal
+    // (no user input) → no injection.
+    const includeDrafts = (req.query || {}).includeDrafts === '1' && (await isRequestCurator(req));
+    const pub = includeDrafts ? '' : 'AND published_at IS NOT NULL';
     const scalar = async (column) => {
       const rows = await sequelize.query(
-        `SELECT DISTINCT "${column}" AS v FROM "CatalogSongs" WHERE "${column}" IS NOT NULL AND "${column}" <> '' ORDER BY v`,
+        `SELECT DISTINCT "${column}" AS v FROM "CatalogSongs" WHERE "${column}" IS NOT NULL AND "${column}" <> '' ${pub} ORDER BY v`,
         { type: sequelize.QueryTypes.SELECT }
       );
       return rows.map(r => r.v);
     };
     const genreRows = await sequelize.query(
-      `SELECT DISTINCT jsonb_array_elements_text(genre) AS v FROM "CatalogSongs" WHERE genre IS NOT NULL AND jsonb_typeof(genre) = 'array' ORDER BY v`,
+      `SELECT DISTINCT jsonb_array_elements_text(genre) AS v FROM "CatalogSongs" WHERE genre IS NOT NULL AND jsonb_typeof(genre) = 'array' ${pub} ORDER BY v`,
       { type: sequelize.QueryTypes.SELECT }
     );
-    const [key, mode, timeSignature] = await Promise.all([scalar('key'), scalar('mode'), scalar('time_signature')]);
-    res.json({ genre: genreRows.map(r => r.v), key, mode, timeSignature });
+    // artist/album distinct values feed the curator form's autocomplete (19.6 QA).
+    const [key, mode, timeSignature, artist, album] = await Promise.all([
+      scalar('key'), scalar('mode'), scalar('time_signature'), scalar('artist'), scalar('album'),
+    ]);
+    res.json({ genre: genreRows.map(r => r.v), key, mode, timeSignature, artist, album });
   } catch (error) {
     logger.error('Error building catalog facets:', error);
     next(createError(500, 'Error building catalog facets'));
@@ -290,6 +341,11 @@ const getCatalogEntry = async (req, res, next) => {
     }
     const entry = await CatalogSong.findByPk(req.params.uid);
     if (!entry) {
+      return next(createError(404, 'Catalog entry not found'));
+    }
+    // Draft (19.6): a curator sees it (to edit via /catalog/admin/:uid); anyone else
+    // gets the same calm 404 — a draft must not be discoverable by guessing its uid.
+    if (entry.publishedAt == null && !(await isRequestCurator(req))) {
       return next(createError(404, 'Catalog entry not found'));
     }
     res.json(entry); // entité brute (convention normale ; l'enveloppe est réservée à la liste)
@@ -349,7 +405,8 @@ const addToSonglist = async (req, res, next) => {
       return next(createError(404, 'Catalog entry not found'));
     }
     catalog = await CatalogSong.findByPk(req.params.uid);
-    if (!catalog) {
+    if (!catalog || catalog.publishedAt == null) {
+      // Drafts are not public (19.6) → can't be copied, even by guessing the uid.
       return next(createError(404, 'Catalog entry not found'));
     }
 
@@ -377,6 +434,7 @@ module.exports = {
   createCatalogEntry,
   updateCatalogEntry,
   deleteCatalogEntry,
+  publishCatalogEntry,
   getCatalogList,
   getCatalogFacets,
   getCatalogEntry,

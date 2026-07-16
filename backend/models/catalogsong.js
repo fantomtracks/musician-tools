@@ -76,6 +76,16 @@ module.exports = (sequelize, DataTypes) => {
       allowNull: true,
       defaultValue: 440,
       field: 'pitch_standard'
+    },
+    // Story 19.6: draft/publish lifecycle. NULL = draft (invisible to browsing users);
+    // a timestamp = published (public). Uniqueness (title, artist) stays GLOBAL — the
+    // canonical unique index (story 19.1) covers EVERY row, drafts included, so a
+    // duplicate is rejected at write time whether draft or published.
+    publishedAt: {
+      type: DataTypes.DATE,
+      allowNull: true,
+      defaultValue: null,
+      field: 'published_at'
     }
   }, {
     tableName: 'CatalogSongs',
