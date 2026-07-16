@@ -18,6 +18,7 @@ jest.mock('../services/catalogService', () => {
       deleteCatalogEntry: jest.fn(),
       publishCatalogEntry: jest.fn(),
       listCatalog: jest.fn(),
+      checkCatalogExists: jest.fn(),
       getFacets: jest.fn(),
     },
   };
@@ -48,6 +49,7 @@ const renderAt = (path: string) => render(
 beforeEach(() => {
   jest.clearAllMocks();
   cat.listCatalog.mockResolvedValue({ items: [], total: 0, page: 1, limit: 24 });
+  cat.checkCatalogExists.mockResolvedValue({ exists: false });
   cat.getFacets.mockResolvedValue({ genre: [], key: [], mode: [], timeSignature: [], artist: ['Oasis'], album: [] });
 });
 
@@ -123,8 +125,8 @@ test('a duplicate (title, artist) blocks autosave and hides Publish (19.6 revise
   try {
     mockedUseAuth.mockReturnValue({ user: { isCurator: true } });
     cat.getCatalogEntry.mockResolvedValue({ uid: 'c1', title: 'Zombie', artist: 'A', publishedAt: null });
-    // The whole-Catalog check (drafts + published) finds an entry with the target key.
-    cat.listCatalog.mockResolvedValue({ items: [{ uid: 'other', title: 'Zombie', artist: 'B' }], total: 1, page: 1, limit: 24 });
+    // The EXACT server check (drafts + published) reports the key already exists (19.12).
+    cat.checkCatalogExists.mockResolvedValue({ exists: true, entry: { uid: 'other', title: 'Zombie', artist: 'B' } });
     cat.updateCatalogEntry.mockResolvedValue({ uid: 'c1', title: 'Zombie' });
     renderAt('/catalog/admin/c1');
     await act(async () => { await jest.advanceTimersByTimeAsync(0); }); // flush prefill

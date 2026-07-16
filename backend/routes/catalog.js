@@ -21,6 +21,9 @@ router.post('/:uid/publish', authsess, requireCurator, catalogController.publish
 router.get('/', authsess, catalogController.getCatalogList);
 // /facets BEFORE /:uid so it isn't captured as a uid param.
 router.get('/facets', authsess, catalogController.getCatalogFacets);
+// Story 19.12 — EXACT (title, artist) dup-check (curator only: it reveals draft
+// existence). BEFORE /:uid so "exists" isn't captured as a uid param.
+router.get('/exists', authsess, requireCurator, catalogController.getCatalogExists);
 router.get('/:uid', authsess, catalogController.getCatalogEntry);
 
 // Story 19.4 — Add to my songlist. Writes the USER's own Songlist (a Song copy),

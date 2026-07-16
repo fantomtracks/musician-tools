@@ -92,3 +92,37 @@ describe('catalogService.listCatalog includeDrafts', () => {
     expect(fetchMock.mock.calls[0][0] as string).not.toContain('includeDrafts');
   });
 });
+
+describe('catalogService.checkCatalogExists', () => {
+  const originalFetch = global.fetch;
+  afterEach(() => { global.fetch = originalFetch; });
+
+  test('builds the query with title, artist, excludeUid and parses {exists,entry}', async () => {
+    const fetchMock = jest.fn().mockResolvedValue({ ok: true, json: async () => ({ exists: true, entry: { uid: 'dup' } }) });
+    global.fetch = fetchMock as unknown as typeof fetch;
+    const res = await catalogService.checkCatalogExists('Zombie', 'The Cranberries', 'uid-1');
+    expect(res.exists).toBe(true);
+    expect(res.entry).toEqual({ uid: 'dup' });
+    const url = fetchMock.mock.calls[0][0] as string;
+    expect(url).toContain('/api/catalog/exists?');
+    expect(url).toContain('title=Zombie');
+    expect(url).toContain('artist=The+Cranberries');
+    expect(url).toContain('excludeUid=uid-1');
+  });
+
+  test('omits artist and excludeUid when not provided', async () => {
+    const fetchMock = jest.fn().mockResolvedValue({ ok: true, json: async () => ({ exists: false, entry: null }) });
+    global.fetch = fetchMock as unknown as typeof fetch;
+    await catalogService.checkCatalogExists('Solo');
+    const url = fetchMock.mock.calls[0][0] as string;
+    expect(url).toContain('title=Solo');
+    expect(url).not.toContain('artist=');
+    expect(url).not.toContain('excludeUid=');
+  });
+
+  test('throws on a non-ok response', async () => {
+    const fetchMock = jest.fn().mockResolvedValue({ ok: false, status: 500, json: async () => ({}) });
+    global.fetch = fetchMock as unknown as typeof fetch;
+    await expect(catalogService.checkCatalogExists('X')).rejects.toThrow('Failed to check catalog existence');
+  });
+});

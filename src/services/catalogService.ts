@@ -116,6 +116,30 @@ export const catalogService = {
     return response.json();
   },
 
+  // EXACT (title, artist) duplicate check (curator only, story 19.12). Reuses the
+  // server's folded lookup (drafts AND published) — replaces the old best-effort
+  // list+substring+client-fold. Returns { exists, entry }. `excludeUid` skips the row
+  // being edited (rename). `signal` aborts a superseded debounced check.
+  async checkCatalogExists(
+    title: string,
+    artist?: string,
+    excludeUid?: string,
+    signal?: AbortSignal,
+  ): Promise<{ exists: boolean; entry?: CatalogSong | null }> {
+    const qs = new URLSearchParams();
+    qs.set('title', title);
+    if (artist) qs.set('artist', artist);
+    if (excludeUid) qs.set('excludeUid', excludeUid);
+    const response = await apiFetch(`${API_BASE}/catalog/exists?${qs.toString()}`, {
+      credentials: 'include',
+      signal,
+    });
+    if (!response.ok) {
+      throw new Error('Failed to check catalog existence');
+    }
+    return response.json();
+  },
+
   // Fetch one entry (detail). 404 -> CatalogNotFoundError so the page shows a calm
   // not-found (deep-link to a removed entry).
   async getCatalogEntry(uid: string, signal?: AbortSignal): Promise<CatalogSong> {

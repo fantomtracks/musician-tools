@@ -430,6 +430,29 @@ const addToSonglist = async (req, res, next) => {
   }
 };
 
+// GET /api/catalog/exists?title=&artist=&excludeUid= (curator, story 19.12) — EXACT
+// folded (title, artist) existence check, reusing the SAME lookup as the 409
+// (findExistingByTitleArtist: no publishedAt scope → sees drafts AND published). It
+// replaces the front's best-effort substring+limit-10 dup-check (19.6). Curator-only:
+// it reveals whether a (possibly draft) entry exists. `excludeUid` skips the row being
+// edited (rename). Never a mutation → fail-open on the front; the GLOBAL unique index
+// 409 stays the real backstop at save time.
+const getCatalogExists = async (req, res, next) => {
+  try {
+    const title = normalizeText(req.query.title);
+    if (!title) {
+      return res.json({ exists: false, entry: null }); // uniform shape (review 19.12)
+    }
+    const artist = normalizeText(req.query.artist);
+    const excludeUid = req.query.excludeUid && isUuid(req.query.excludeUid) ? req.query.excludeUid : undefined;
+    const entry = await findExistingByTitleArtist(title, artist, excludeUid);
+    res.json({ exists: Boolean(entry), entry: entry || null });
+  } catch (error) {
+    logger.error('Error checking catalog existence:', error);
+    next(createError(500, 'Error checking catalog existence'));
+  }
+};
+
 module.exports = {
   createCatalogEntry,
   updateCatalogEntry,
@@ -438,5 +461,6 @@ module.exports = {
   getCatalogList,
   getCatalogFacets,
   getCatalogEntry,
+  getCatalogExists,
   addToSonglist,
 };

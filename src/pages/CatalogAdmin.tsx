@@ -71,11 +71,6 @@ const mapEntryToForm = (e: CatalogSong): CreateCatalogDTO => ({
   pitchStandard: e.pitchStandard ?? 440,
 });
 
-// Canonical (title, artist) key — matches the server's folded uniqueness. Used to
-// suppress re-firing an autosave PUT that already 409'd on the same key (review F1).
-const foldedKey = (f: { title?: string | null; artist?: string | null }) =>
-  `${(f.title || '').trim().toLowerCase()}|${(f.artist || '').trim().toLowerCase()}`;
-
 export default function CatalogAdmin() {
   const { user } = useAuth();
 
@@ -219,10 +214,11 @@ export default function CatalogAdmin() {
     return () => ctrl.abort();
   }, []);
 
-  // Duplicate guard (19.6 revised): while typing, check the WHOLE Catalog (drafts AND
-  // published, via the curator list) for an existing (title, artist). A match BLOCKS the
-  // autosave (dupRef) and hides Publish — no duplicate can ever be created. The server's
-  // GLOBAL unique index is the backstop.
+  // Duplicate guard (19.12): while typing, ask the server if the EXACT folded
+  // (title, artist) key already exists in the Catalog (drafts AND published — curator
+  // check). A match BLOCKS the autosave (dupRef) and hides Publish. This replaces the
+  // 19.6 best-effort list+substring+client-fold (which could miss a dup past the first
+  // 10 rows). The GLOBAL unique index 409 stays the backstop at save time.
   useEffect(() => {
     // Fail-open on every edit: unblock autosave immediately (review F1). The debounced
     // check below re-sets dupRef if it's still a dup (500ms < the 1200ms autosave); on
@@ -231,16 +227,14 @@ export default function CatalogAdmin() {
     dupRef.current = false;
     const title = (form.title || '').trim();
     if (!title) { setDupMessage(null); return; }
-    const key = foldedKey(form);
+    const artist = (form.artist || '').trim();
     const ctrl = new AbortController();
     const t = setTimeout(() => {
-      catalogService.listCatalog({ search: title, includeDrafts: true, limit: 10 }, ctrl.signal)
+      catalogService.checkCatalogExists(title, artist, workingUid ?? undefined, ctrl.signal)
         .then(res => {
-          const match = res.items.find(e => e.uid !== workingUid && foldedKey(e) === key);
-          if (match) {
-            const a = (form.artist || '').trim();
+          if (res.exists) {
             dupRef.current = true;
-            setDupMessage(a ? `A "${title}" by ${a} already exists in the Catalog.` : `A "${title}" already exists in the Catalog.`);
+            setDupMessage(artist ? `A "${title}" by ${artist} already exists in the Catalog.` : `A "${title}" already exists in the Catalog.`);
           } else {
             dupRef.current = false;
             setDupMessage(null);
@@ -249,7 +243,6 @@ export default function CatalogAdmin() {
         .catch(() => { /* leave state as-is on error/abort */ });
     }, 500);
     return () => { clearTimeout(t); ctrl.abort(); };
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [form.title, form.artist, workingUid]);
 
   // Role gate: a non-curator never sees the form (route is auth-gated; this adds

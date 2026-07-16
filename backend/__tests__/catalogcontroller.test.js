@@ -452,4 +452,57 @@ describe('catalogcontroller', () => {
     const allScoped = CatalogSong.sequelize.query.mock.calls.every(c => /published_at IS NOT NULL/.test(c[0]));
     expect(allScoped).toBe(true);
   });
+
+  // --- getCatalogExists (story 19.12) — EXACT (title, artist) dup-check ---
+
+  test('getCatalogExists -> exists:true with the entry on a folded (title,artist) match', async () => {
+    CatalogSong.findOne.mockResolvedValue({ uid: 'dup', title: 'Zombie', artist: 'The Cranberries', publishedAt: '2026-01-01' });
+    const res = mockRes();
+    await controller.getCatalogExists({ query: { title: '  zombie ', artist: 'the cranberries' } }, res, mockNext());
+    expect(CatalogSong.findOne).toHaveBeenCalledTimes(1);
+    expect(res.json).toHaveBeenCalledWith({ exists: true, entry: expect.objectContaining({ uid: 'dup' }) });
+  });
+
+  test('getCatalogExists -> exists:true even when the match is a DRAFT (publishedAt null)', async () => {
+    CatalogSong.findOne.mockResolvedValue({ uid: 'draft-dup', title: 'Zombie', artist: 'X', publishedAt: null });
+    const res = mockRes();
+    await controller.getCatalogExists({ query: { title: 'Zombie', artist: 'X' } }, res, mockNext());
+    expect(res.json).toHaveBeenCalledWith({ exists: true, entry: expect.objectContaining({ uid: 'draft-dup' }) });
+  });
+
+  test('getCatalogExists -> exists:false when there is no match', async () => {
+    CatalogSong.findOne.mockResolvedValue(null);
+    const res = mockRes();
+    await controller.getCatalogExists({ query: { title: 'Unique', artist: 'Nobody' } }, res, mockNext());
+    expect(res.json).toHaveBeenCalledWith({ exists: false, entry: null });
+  });
+
+  test('getCatalogExists -> exists:false WITHOUT a DB lookup when no title', async () => {
+    const res = mockRes();
+    await controller.getCatalogExists({ query: { artist: 'Someone' } }, res, mockNext());
+    expect(CatalogSong.findOne).not.toHaveBeenCalled();
+    expect(res.json).toHaveBeenCalledWith({ exists: false, entry: null });
+  });
+
+  test('getCatalogExists passes a valid excludeUid to skip the row being edited (rename)', async () => {
+    CatalogSong.findOne.mockResolvedValue(null);
+    await controller.getCatalogExists({ query: { title: 'Zombie', excludeUid: UID } }, mockRes(), mockNext());
+    const and = CatalogSong.findOne.mock.calls[0][0].where[Op.and];
+    expect(and).toHaveLength(3); // foldedTitle + foldedArtist + uid != excludeUid
+    expect(and[2]).toEqual({ uid: { [Op.ne]: UID } });
+  });
+
+  test('getCatalogExists ignores a non-uuid excludeUid (no exclude clause)', async () => {
+    CatalogSong.findOne.mockResolvedValue(null);
+    await controller.getCatalogExists({ query: { title: 'Zombie', excludeUid: 'not-a-uuid' } }, mockRes(), mockNext());
+    const and = CatalogSong.findOne.mock.calls[0][0].where[Op.and];
+    expect(and).toHaveLength(2); // no uid clause
+  });
+
+  test('getCatalogExists -> 500 when the lookup throws', async () => {
+    CatalogSong.findOne.mockRejectedValue(new Error('db down'));
+    const next = mockNext();
+    await controller.getCatalogExists({ query: { title: 'Zombie' } }, mockRes(), next);
+    expect(next.mock.calls[0][0].status).toBe(500);
+  });
 });
