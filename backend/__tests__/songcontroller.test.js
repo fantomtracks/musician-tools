@@ -100,6 +100,22 @@ describe('songcontroller', () => {
     expect(Song.create.mock.calls[1][0].durationSeconds).toBeNull();
   });
 
+  test('createSong normalizes bpm/pitchStandard (story 19.8): valid kept, invalid/out-of-range -> null (no 500)', async () => {
+    await controller.createSong({ session: { user: 'user-1' }, body: { title: 'Good', bpm: 120, pitchStandard: 432 } }, mockRes(), mockNext());
+    expect(Song.create.mock.calls[0][0].bpm).toBe(120);
+    expect(Song.create.mock.calls[0][0].pitchStandard).toBe(432);
+
+    // decimal, non-numeric, and beyond-bounds all fold to null instead of hitting the INTEGER column
+    await controller.createSong({ session: { user: 'user-1' }, body: { title: 'Bad bpm', bpm: 3.5 } }, mockRes(), mockNext());
+    expect(Song.create.mock.calls[1][0].bpm).toBeNull();
+    await controller.createSong({ session: { user: 'user-1' }, body: { title: 'Huge bpm', bpm: 9999999999 } }, mockRes(), mockNext());
+    expect(Song.create.mock.calls[2][0].bpm).toBeNull();
+    await controller.createSong({ session: { user: 'user-1' }, body: { title: 'Bad pitch', pitchStandard: 'x' } }, mockRes(), mockNext());
+    expect(Song.create.mock.calls[3][0].pitchStandard).toBeNull();
+    await controller.createSong({ session: { user: 'user-1' }, body: { title: 'Wild pitch', pitchStandard: 900 } }, mockRes(), mockNext());
+    expect(Song.create.mock.calls[4][0].pitchStandard).toBeNull();
+  });
+
   test('createSong without a JSON body → 400, not 500 (story 7.5 req.body guard)', async () => {
     const next = mockNext();
     await controller.createSong({ session: { user: 'user-1' } }, mockRes(), next); // req.body undefined

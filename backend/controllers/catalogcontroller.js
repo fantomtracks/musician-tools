@@ -10,6 +10,9 @@ const { Op, fn, col, where: whereFn } = require('sequelize');
 const createError = require('http-errors');
 const logger = require('../logger');
 const { isUuid } = require('../utils/uuid');
+// Story 19.8 — shared normalizers (bpm/pitchStandard reject-to-null on the INTEGER
+// columns ; language title-cased like the Song form ; durationSeconds factored out).
+const { normalizeInt, normalizeDurationSeconds, normalizeLanguage } = require('../utils/normalize');
 
 // Trim a free-text field before persisting (title/artist/album). undefined = field
 // absent from the payload -> leave it untouched on update. Whitespace-only -> null.
@@ -23,17 +26,6 @@ const normalizeText = (value) => {
   return trimmed === '' ? null : trimmed;
 };
 
-// Story 19.1 review: coerce durationSeconds like songcontroller.normalizeDurationSeconds
-// (whole seconds, 1..86400). undefined = field absent (leave untouched on update);
-// out-of-range / non-integer -> cleared (null) rather than a 500 from the INTEGER
-// column or a negative duration silently copied 1:1 into personal songlists (19.4).
-const normalizeDurationSeconds = (value) => {
-  if (value === undefined) return undefined;
-  if (value === null || value === '') return null;
-  const parsed = Number(value);
-  if (!Number.isInteger(parsed) || parsed < 1 || parsed > 86400) return null;
-  return parsed;
-};
 
 // The intrinsic subset copied 1:1 from CatalogSong to a personal Song (story 19.4).
 // Instrument/personal fields are NOT part of the Catalog (decision DL-17).
@@ -80,6 +72,9 @@ function pickIntrinsic(body) {
     if (body[f] !== undefined) out[f] = body[f];
   }
   if (out.durationSeconds !== undefined) out.durationSeconds = normalizeDurationSeconds(out.durationSeconds);
+  if (out.bpm !== undefined) out.bpm = normalizeInt(out.bpm, { min: 1, max: 1000 });
+  if (out.pitchStandard !== undefined) out.pitchStandard = normalizeInt(out.pitchStandard, { min: 380, max: 500 });
+  if (out.language !== undefined) out.language = normalizeLanguage(out.language); // title-case parity with Song (19.8)
   return out;
 }
 

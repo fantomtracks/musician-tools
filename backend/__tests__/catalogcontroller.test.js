@@ -61,6 +61,22 @@ describe('catalogcontroller', () => {
     expect(CatalogSong.create).not.toHaveBeenCalled();
   });
 
+  test('createCatalogEntry normalizes bpm/pitchStandard/language (story 19.8)', async () => {
+    CatalogSong.create.mockImplementation(async (data) => ({ ...data, uid: 'c-norm' }));
+    // valid values kept; language title-cased (parity with the Song form)
+    await controller.createCatalogEntry({ body: { title: 'Zombie', bpm: 84, pitchStandard: 432, language: ['english', 'irish'] } }, mockRes(), mockNext());
+    let arg = CatalogSong.create.mock.calls[0][0];
+    expect(arg.bpm).toBe(84);
+    expect(arg.pitchStandard).toBe(432);
+    expect(arg.language).toEqual(['English', 'Irish']);
+
+    // invalid / out-of-range fold to null instead of hitting the INTEGER columns (no 500)
+    await controller.createCatalogEntry({ body: { title: 'Bad', bpm: 3.5, pitchStandard: 900 } }, mockRes(), mockNext());
+    arg = CatalogSong.create.mock.calls[1][0];
+    expect(arg.bpm).toBeNull();
+    expect(arg.pitchStandard).toBeNull();
+  });
+
   test('createCatalogEntry without a JSON body -> 400, not 500', async () => {
     const next = mockNext();
     await controller.createCatalogEntry({}, mockRes(), next);

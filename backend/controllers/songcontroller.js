@@ -6,19 +6,9 @@ const { fetchSongMetadata } = require('../services/songMetadataService');
 // Shared FR19 day-validation helpers (same definition as the session controller)
 const { DATE_PATTERN, MIN_DATE, isValidCalendarDate, maxAllowedDate } = require('../utils/sessionDates');
 const { isUuid } = require('../utils/uuid');
-
-// FR24: an optional song duration in whole seconds (the client sends seconds,
-// parsed from m:ss or decimal-minutes input). Nullable for backward
-// compatibility (a song without a duration stays valid). undefined means "field
-// absent from the payload" (leave it untouched on update); anything out of range
-// is treated as cleared (null) rather than rejected, mirroring normalizeCapo.
-const normalizeDurationSeconds = (value) => {
-  if (value === undefined) return undefined;
-  if (value === null || value === '') return null;
-  const parsed = Number(value);
-  if (!Number.isInteger(parsed) || parsed < 1 || parsed > 86400) return null;
-  return parsed;
-};
+// Story 19.8 — shared normalizers (reject-to-null; INTEGER columns can't 500 on a
+// decimal / non-numeric / out-of-INT4 input). normalizeLanguage moved here too.
+const { normalizeInt, normalizeDurationSeconds, normalizeLanguage } = require('../utils/normalize');
 
 const normalizeCapo = (value) => {
   if (value === undefined) return undefined;
@@ -26,35 +16,6 @@ const normalizeCapo = (value) => {
   const parsed = Number(value);
   if (!Number.isInteger(parsed) || parsed < 1 || parsed > 12) return null;
   return parsed;
-};
-
-const normalizeLanguage = (value) => {
-  if (value === undefined) return undefined;
-  if (value === null) return null;
-  
-  // Handle array of languages
-  if (Array.isArray(value)) {
-    const normalized = value
-      .map(lang => {
-        if (!lang) return null;
-        const trimmed = String(lang).trim();
-        if (!trimmed) return null;
-        return trimmed
-          .split(/\s+/)
-          .map(part => part.charAt(0).toUpperCase() + part.slice(1).toLowerCase())
-          .join(' ');
-      })
-      .filter(lang => lang !== null);
-    return normalized.length > 0 ? normalized : null;
-  }
-  
-  // Handle single language string
-  const trimmed = String(value).trim();
-  if (!trimmed) return null;
-  return trimmed
-    .split(/\s+/)
-    .map(part => part.charAt(0).toUpperCase() + part.slice(1).toLowerCase())
-    .join(' ');
 };
 
 // Trim a free-text field before persisting (title/artist/album). undefined =
@@ -175,11 +136,13 @@ const createSong = async (req, res, next) => {
     const normalizedDuration = normalizeDurationSeconds(durationSeconds);
 
     const normalizedLanguage = normalizeLanguage(language);
+    const normalizedBpm = normalizeInt(bpm, { min: 1, max: 1000 });
+    const normalizedPitch = normalizeInt(pitchStandard, { min: 380, max: 500 });
 
     const song = await Song.create({
       userUid: userId,
       title: normalizedTitle,
-      bpm: bpm !== undefined ? bpm : null,
+      bpm: normalizedBpm !== undefined ? normalizedBpm : null,
       durationSeconds: normalizedDuration !== undefined ? normalizedDuration : null,
       key,
       capo: normalizedCapo !== undefined ? normalizedCapo : null,
@@ -192,7 +155,10 @@ const createSong = async (req, res, next) => {
       album: normalizedAlbum !== undefined ? normalizedAlbum : null,
       language: normalizedLanguage !== undefined ? normalizedLanguage : null,
       genre,
-      pitchStandard,
+      // undefined (absent) -> the column default (440); a present-but-invalid value
+      // folds to null (reject-to-null); a valid value is kept. Mirrors the old bare
+      // `pitchStandard` shorthand, now normalized (story 19.8).
+      pitchStandard: normalizedPitch,
       technique,
       myInstrumentUid,
       lastPlayed: lastPlayed ? new Date(lastPlayed) : null,
@@ -247,13 +213,15 @@ const updateSong = async (req, res, next) => {
     const normalizedDuration = normalizeDurationSeconds(durationSeconds);
 
     const normalizedLanguage = normalizeLanguage(language);
+    const normalizedBpm = normalizeInt(bpm, { min: 1, max: 1000 });
+    const normalizedPitch = normalizeInt(pitchStandard, { min: 380, max: 500 });
 
     await song.update({
       // normalizeText -> undefined (absent) / null (whitespace-only) / trimmed
       // string. `||` keeps the existing title for both undefined and null,
       // preserving the old `title || song.title` semantics on the trimmed value.
       title: normalizedTitle || song.title,
-      bpm: bpm !== undefined ? bpm : song.bpm,
+      bpm: normalizedBpm !== undefined ? normalizedBpm : song.bpm,
       durationSeconds: normalizedDuration !== undefined ? normalizedDuration : song.durationSeconds,
       key: key !== undefined ? key : song.key,
       capo: normalizedCapo !== undefined ? normalizedCapo : song.capo,
@@ -263,7 +231,7 @@ const updateSong = async (req, res, next) => {
       album: normalizedAlbum !== undefined ? normalizedAlbum : song.album,
       language: normalizedLanguage !== undefined ? normalizedLanguage : song.language,
       genre: genre !== undefined ? genre : song.genre,
-      pitchStandard: pitchStandard !== undefined ? pitchStandard : song.pitchStandard,
+      pitchStandard: normalizedPitch !== undefined ? normalizedPitch : song.pitchStandard,
       instrumentTuning: instrumentTuning !== undefined ? instrumentTuning : song.instrumentTuning,
       technique: technique !== undefined ? technique : song.technique,
       instrumentLinks: instrumentLinks !== undefined ? instrumentLinks : song.instrumentLinks,
