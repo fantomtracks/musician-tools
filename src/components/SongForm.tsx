@@ -9,6 +9,7 @@ import { DuplicateBanner } from './DuplicateBanner';
 // Shared option lists (story 19.5) — single source used by the Catalog curator form too.
 import { keyOptions, timeSignatureOptions, modeOptions, genreOptions, languageOptions } from '../utils/songFieldOptions';
 import { handleComboKeyDown, useScrollHighlightIntoView, comboboxInputAria, comboboxOptionAria } from '../utils/comboboxKeyboard';
+import { AutocompleteInput } from './AutocompleteInput';
 
 type Mode = 'add' | 'edit';
 
@@ -86,12 +87,8 @@ export function SongForm(props: SongFormProps) {
   // Keep the keyboard-highlighted option scrolled into view in the dropdowns.
   const genreListRef = useRef<HTMLDivElement>(null);
   const languageListRef = useRef<HTMLDivElement>(null);
-  const artistListRef = useRef<HTMLDivElement>(null);
-  const albumListRef = useRef<HTMLDivElement>(null);
-  const [albumSearchOpen, setAlbumSearchOpen] = useState(false);
-  const [selectedAlbumIndex, setSelectedAlbumIndex] = useState(-1);
-  const [artistSearchOpen, setArtistSearchOpen] = useState(false);
-  const [selectedArtistIndex, setSelectedArtistIndex] = useState(-1);
+  // artist/album comboboxes are now the shared <AutocompleteInput> (story 19.11) —
+  // their open/highlight state + scroll-into-view live inside that component.
   // removed unused availableTechniques and filteredMyInstruments
   const allInstrumentLinks = Object.entries(form.instrumentLinks || {}).flatMap(([type, arr]) => (arr || []).map(l => ({ type, url: l.url, label: l.label })));
 
@@ -116,8 +113,6 @@ export function SongForm(props: SongFormProps) {
 
   useScrollHighlightIntoView(genreListRef, selectedGenreIndex, genreSearchOpen);
   useScrollHighlightIntoView(languageListRef, selectedLanguageIndex, languageSearchOpen);
-  useScrollHighlightIntoView(artistListRef, selectedArtistIndex, artistSearchOpen);
-  useScrollHighlightIntoView(albumListRef, selectedAlbumIndex, albumSearchOpen);
 
   // Lifted so the keyboard handler and the rendered dropdown index the SAME list.
   const filteredGenreOptions = genreOptions.filter(
@@ -188,98 +183,16 @@ export function SongForm(props: SongFormProps) {
       )}
       <div>
         <label htmlFor="song-artist" className="block text-sm font-medium text-gray-700 dark:text-gray-100">Artist</label>
-        <div className="relative">
-          <input
-            id="song-artist"
-            className="mt-1 block w-full rounded-md border border-gray-300 dark:border-gray-600 p-2 focus:outline-none focus:ring-2 focus:ring-brand-500 dark:bg-gray-700 dark:text-gray-100"
-            name="artist"
-            value={form.artist}
-            onChange={(e) => {
-              onChange(e);
-              if (e.target.value.length === 0) {
-                setArtistSearchOpen(suggestedArtists.length > 0);
-              } else {
-                const filteredArtists = suggestedArtists.filter(artist => 
-                  artist.toLowerCase().includes(e.target.value.toLowerCase())
-                );
-                const hasMatch = filteredArtists.length > 0;
-                const isSingleExactMatch = filteredArtists.length === 1 && filteredArtists[0] === e.target.value;
-                setArtistSearchOpen(hasMatch && !isSingleExactMatch);
-              }
-              setSelectedArtistIndex(-1);
-            }}
-            onKeyDown={(e) => {
-              const filteredArtists = suggestedArtists.filter(artist => 
-                !form.artist || artist.toLowerCase().includes(form.artist.toLowerCase())
-              );
-              
-              if (e.key === 'ArrowDown') {
-                e.preventDefault();
-                setArtistSearchOpen(true);
-                setSelectedArtistIndex(prev => 
-                  prev < filteredArtists.length - 1 ? prev + 1 : prev
-                );
-              } else if (e.key === 'ArrowUp') {
-                e.preventDefault();
-                setSelectedArtistIndex(prev => prev > 0 ? prev - 1 : -1);
-              } else if (e.key === 'Enter') {
-                e.preventDefault();
-                if (selectedArtistIndex >= 0 && filteredArtists[selectedArtistIndex]) {
-                  onChange({
-                    target: { name: 'artist', value: filteredArtists[selectedArtistIndex] }
-                  } as React.ChangeEvent<HTMLInputElement>);
-                  setArtistSearchOpen(false);
-                  setSelectedArtistIndex(-1);
-                }
-              } else if (e.key === 'Escape') {
-                setArtistSearchOpen(false);
-                setSelectedArtistIndex(-1);
-              } else if (e.key === 'Tab') {
-                setArtistSearchOpen(false); // close now so Tab doesn't linger over the list
-                setSelectedArtistIndex(-1);
-              }
-            }}
-            onFocus={() => {
-              const filteredArtists = suggestedArtists.filter(artist => 
-                !form.artist || artist.toLowerCase().includes(form.artist.toLowerCase())
-              );
-              const isSingleExactMatch = filteredArtists.length === 1 && filteredArtists[0] === form.artist;
-              setArtistSearchOpen(filteredArtists.length > 0 && !isSingleExactMatch);
-            }}
-            onBlur={() => setTimeout(() => setArtistSearchOpen(false), 200)}
-            disabled={loading}
-            autoComplete="off"
-            {...comboboxInputAria('song-artist-list', artistSearchOpen, selectedArtistIndex)}
-          />
-          {artistSearchOpen && suggestedArtists.length > 0 && (
-            <div ref={artistListRef} id="song-artist-list" role="listbox" className="absolute top-full left-0 right-0 mt-1 bg-white dark:bg-gray-700 border border-gray-300 dark:border-gray-600 rounded-md shadow-lg z-10 max-h-64 overflow-y-auto">
-              {suggestedArtists
-                .filter(artist =>
-                  !form.artist || artist.toLowerCase().includes(form.artist.toLowerCase())
-                )
-                .map((artist, index) => (
-                <button
-                  key={artist}
-                  type="button"
-                  {...comboboxOptionAria('song-artist-list', index, selectedArtistIndex)}
-                  className={`w-full text-left px-3 py-2 text-sm text-gray-900 dark:text-gray-100 border-b border-gray-200 dark:border-gray-600 last:border-b-0 ${
-                    index === selectedArtistIndex ? 'bg-brand-100 dark:bg-brand-900/40' : ''
-                  }`}
-                  onMouseEnter={() => setSelectedArtistIndex(index)}
-                  onClick={() => {
-                    onChange({
-                      target: { name: 'artist', value: artist }
-                    } as React.ChangeEvent<HTMLInputElement>);
-                    setArtistSearchOpen(false);
-                    setSelectedArtistIndex(-1);
-                  }}
-                >
-                  {artist}
-                </button>
-              ))}
-            </div>
-          )}
-        </div>
+        <AutocompleteInput
+          id="song-artist"
+          name="artist"
+          value={form.artist}
+          onValueChange={(v) => onChange({ target: { name: 'artist', value: v } } as React.ChangeEvent<HTMLInputElement>)}
+          suggestions={suggestedArtists}
+          inputClassName="mt-1 block w-full rounded-md border border-gray-300 dark:border-gray-600 p-2 focus:outline-none focus:ring-2 focus:ring-brand-500 dark:bg-gray-700 dark:text-gray-100"
+          disabled={loading}
+          autoComplete="off"
+        />
       </div>
       <div>
         <label htmlFor="song-title" className="block text-sm font-medium text-gray-700 dark:text-gray-100">Title</label>
@@ -404,100 +317,17 @@ export function SongForm(props: SongFormProps) {
             </div>
             <div>
               <label htmlFor="song-album" className="block text-sm font-medium text-gray-700 dark:text-gray-100">Album</label>
-              {/* z-[25] keeps the album dropdown above the Languages block (z-20) below it, while
-                  staying below the Genres block (z-30) above it so the Genres dropdown still wins */}
-              <div className="relative z-[25]">
-                <input
-                  id="song-album"
-                  className="mt-1 block w-full rounded-md border border-gray-300 dark:border-gray-600 p-2 focus:outline-none focus:ring-2 focus:ring-brand-500 dark:bg-gray-700 dark:text-gray-100"
-                  name="album"
-                  value={typeof form.album === 'string' ? form.album : ''}
-                  onChange={(e) => {
-                    onChange(e);
-                    if (e.target.value.length === 0) {
-                      setAlbumSearchOpen(suggestedAlbums.length > 0);
-                    } else {
-                      const filteredAlbums = suggestedAlbums.filter(album => 
-                        album.toLowerCase().includes(e.target.value.toLowerCase())
-                      );
-                      const hasMatch = filteredAlbums.length > 0;
-                      const isSingleExactMatch = filteredAlbums.length === 1 && filteredAlbums[0] === e.target.value;
-                      setAlbumSearchOpen(hasMatch && !isSingleExactMatch);
-                    }
-                    setSelectedAlbumIndex(-1);
-                  }}
-                  onKeyDown={(e) => {
-                    const filteredAlbums = suggestedAlbums.filter(album => 
-                      !form.album || album.toLowerCase().includes(form.album.toLowerCase())
-                    );
-                    
-                    if (e.key === 'ArrowDown') {
-                      e.preventDefault();
-                      setAlbumSearchOpen(true);
-                      setSelectedAlbumIndex(prev => 
-                        prev < filteredAlbums.length - 1 ? prev + 1 : prev
-                      );
-                    } else if (e.key === 'ArrowUp') {
-                      e.preventDefault();
-                      setSelectedAlbumIndex(prev => prev > 0 ? prev - 1 : -1);
-                    } else if (e.key === 'Enter') {
-                      e.preventDefault();
-                      if (selectedAlbumIndex >= 0 && filteredAlbums[selectedAlbumIndex]) {
-                        onChange({
-                          target: { name: 'album', value: filteredAlbums[selectedAlbumIndex] }
-                        } as React.ChangeEvent<HTMLInputElement>);
-                        setAlbumSearchOpen(false);
-                        setSelectedAlbumIndex(-1);
-                      }
-                    } else if (e.key === 'Escape') {
-                      setAlbumSearchOpen(false);
-                      setSelectedAlbumIndex(-1);
-                    } else if (e.key === 'Tab') {
-                      setAlbumSearchOpen(false); // close now so Tab doesn't linger over the list
-                      setSelectedAlbumIndex(-1);
-                    }
-                  }}
-                  onFocus={() => {
-                    const filteredAlbums = suggestedAlbums.filter(album => 
-                      !form.album || album.toLowerCase().includes(form.album.toLowerCase())
-                    );
-                    const isSingleExactMatch = filteredAlbums.length === 1 && filteredAlbums[0] === form.album;
-                    setAlbumSearchOpen(filteredAlbums.length > 0 && !isSingleExactMatch);
-                  }}
-                  onBlur={() => setTimeout(() => setAlbumSearchOpen(false), 200)}
-                  disabled={loading}
-                  autoComplete="off"
-                  {...comboboxInputAria('song-album-list', albumSearchOpen, selectedAlbumIndex)}
-                />
-                {albumSearchOpen && suggestedAlbums.length > 0 && (
-                  <div ref={albumListRef} id="song-album-list" role="listbox" className="absolute top-full left-0 right-0 mt-1 bg-white dark:bg-gray-700 border border-gray-300 dark:border-gray-600 rounded-md shadow-lg z-50 max-h-64 overflow-y-auto">
-                    {suggestedAlbums
-                      .filter(album =>
-                        !form.album || album.toLowerCase().includes(form.album.toLowerCase())
-                      )
-                      .map((album, index) => (
-                      <button
-                        key={album}
-                        type="button"
-                        {...comboboxOptionAria('song-album-list', index, selectedAlbumIndex)}
-                        className={`w-full text-left px-3 py-2 text-sm text-gray-900 dark:text-gray-100 border-b border-gray-200 dark:border-gray-600 last:border-b-0 ${
-                          index === selectedAlbumIndex ? 'bg-brand-100 dark:bg-brand-900/40' : ''
-                        }`}
-                        onMouseEnter={() => setSelectedAlbumIndex(index)}
-                        onClick={() => {
-                          onChange({
-                            target: { name: 'album', value: album }
-                          } as React.ChangeEvent<HTMLInputElement>);
-                          setAlbumSearchOpen(false);
-                          setSelectedAlbumIndex(-1);
-                        }}
-                      >
-                        {album}
-                      </button>
-                    ))}
-                  </div>
-                )}
-              </div>
+              <AutocompleteInput
+                id="song-album"
+                name="album"
+                value={typeof form.album === 'string' ? form.album : ''}
+                onValueChange={(v) => onChange({ target: { name: 'album', value: v } } as React.ChangeEvent<HTMLInputElement>)}
+                suggestions={suggestedAlbums}
+                inputClassName="mt-1 block w-full rounded-md border border-gray-300 dark:border-gray-600 p-2 focus:outline-none focus:ring-2 focus:ring-brand-500 dark:bg-gray-700 dark:text-gray-100"
+                wrapperClassName="relative z-[25]"
+                disabled={loading}
+                autoComplete="off"
+              />
             </div>
             <div>
               <label htmlFor="language-search" className="block text-sm font-medium text-gray-700 dark:text-gray-100 mb-2">Languages</label>

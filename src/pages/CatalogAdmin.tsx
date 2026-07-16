@@ -5,6 +5,7 @@ import { catalogService, CatalogConflictError, CatalogNotFoundError } from '../s
 import type { CreateCatalogDTO, CatalogSong, CatalogFacets } from '../services/catalogService';
 import { useAutosave, type SaveStatus } from '../hooks/useAutosave';
 import { StickyActionBar } from '../components/StickyActionBar';
+import { AutocompleteInput } from '../components/AutocompleteInput';
 import { songService } from '../services/songService';
 import { parseDurationToSeconds, formatSecondsToMmss } from '../utils/duration';
 import { keyOptions, modeOptions, timeSignatureOptions, genreOptions, languageOptions } from '../utils/songFieldOptions';
@@ -448,10 +449,13 @@ export default function CatalogAdmin() {
         {/* Artist first (DL-18), then Title — same field order as the Song edit form. */}
         <div>
           <label className="label-base" htmlFor="cat-artist">Artist</label>
-          <input id="cat-artist" className="input-base" list="cat-artist-list" value={form.artist ?? ''} onChange={e => setField('artist', e.target.value)} />
-          <datalist id="cat-artist-list">
-            {(facets?.artist ?? []).map(a => <option key={a} value={a} />)}
-          </datalist>
+          <AutocompleteInput
+            id="cat-artist"
+            value={form.artist ?? ''}
+            onValueChange={(v) => setField('artist', v)}
+            suggestions={facets?.artist ?? []}
+            inputClassName="input-base"
+          />
         </div>
 
         <div>
@@ -489,10 +493,13 @@ export default function CatalogAdmin() {
 
         <div>
           <label className="label-base" htmlFor="cat-album">Album</label>
-          <input id="cat-album" className="input-base" list="cat-album-list" value={form.album ?? ''} onChange={e => setField('album', e.target.value)} />
-          <datalist id="cat-album-list">
-            {(facets?.album ?? []).map(a => <option key={a} value={a} />)}
-          </datalist>
+          <AutocompleteInput
+            id="cat-album"
+            value={form.album ?? ''}
+            onValueChange={(v) => setField('album', v)}
+            suggestions={facets?.album ?? []}
+            inputClassName="input-base"
+          />
         </div>
 
         {renderMulti('language', 'Language', languageOptions)}
