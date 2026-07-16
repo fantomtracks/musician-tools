@@ -4,6 +4,7 @@ import { useAuth } from '../contexts/AuthContext';
 import { catalogService, CatalogConflictError, CatalogNotFoundError } from '../services/catalogService';
 import type { CreateCatalogDTO, CatalogSong, CatalogFacets } from '../services/catalogService';
 import { useAutosave, type SaveStatus } from '../hooks/useAutosave';
+import { StickyActionBar } from '../components/StickyActionBar';
 import { songService } from '../services/songService';
 import { parseDurationToSeconds, formatSecondsToMmss } from '../utils/duration';
 import { keyOptions, modeOptions, timeSignatureOptions, genreOptions, languageOptions } from '../utils/songFieldOptions';
@@ -423,10 +424,9 @@ export default function CatalogAdmin() {
 
   return (
     <div className="max-w-3xl mx-auto px-4 py-6">
-      {/* Sticky action bar (like the Song form's "Back to songlist" header). Autosave
-          means there's nothing to cancel — just leave. Lives outside any glass card so
-          position:sticky works; top-16 sits under the app header (h-16). */}
-      <div className="sticky top-16 z-20 mb-4 px-4 py-3 rounded-lg bg-white/90 dark:bg-gray-800/90 backdrop-blur border border-gray-200 dark:border-gray-700 shadow-sm flex items-center justify-between gap-3">
+      {/* Sticky action bar (autosave means there's nothing to cancel — just leave).
+          Must stay OUTSIDE the glass card (see StickyActionBar's gotcha note). */}
+      <StickyActionBar>
         <button type="button" className="btn-secondary" onClick={() => navigate('/catalog/manage')}>
           <span aria-hidden="true">←</span> Back to list
         </button>
@@ -440,7 +440,7 @@ export default function CatalogAdmin() {
             </button>
           )}
         </div>
-      </div>
+      </StickyActionBar>
       <h1 className="text-2xl font-semibold text-gray-900 dark:text-gray-100 mb-1">{isEdit ? 'Edit catalog entry' : 'Curate the Catalog'}</h1>
       <p className="text-sm text-gray-500 dark:text-gray-400 mb-6">{isEdit ? 'Update this shared song entry. Only intrinsic song fields — no instrument settings.' : 'Add a shared song entry. Only intrinsic song fields — no instrument settings.'}</p>
 

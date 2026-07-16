@@ -12,6 +12,7 @@ import { applySongFilters, countActiveFilters, NO_INSTRUMENT } from '../utils/so
 import { handleComboKeyDown, useScrollHighlightIntoView, comboboxInputAria, comboboxOptionAria } from '../utils/comboboxKeyboard';
 import { useAutosave } from '../hooks/useAutosave';
 import { useRowSelection } from '../hooks/useRowSelection';
+import { StickyActionBar } from '../components/StickyActionBar';
 import { findDuplicateSong } from '../utils/songDuplicate';
 import { formatLocalDate } from '../utils/heatmap';
 
@@ -1948,7 +1949,7 @@ function Songs() {
               uses backdrop-filter, which makes the card a containing block and
               would break `position: sticky` for a child (it would stick to the
               card, which scrolls away, instead of the viewport). */}
-          <div className="sticky top-16 z-20 mb-4 px-4 py-3 rounded-lg bg-white/90 dark:bg-gray-800/90 backdrop-blur border border-gray-200 dark:border-gray-700 shadow-sm flex items-center justify-between gap-3">
+          <StickyActionBar>
             <button
               type="button"
               className="btn-secondary text-sm"
@@ -1978,7 +1979,7 @@ function Songs() {
                 )}
               </span>
             )}
-          </div>
+          </StickyActionBar>
           <div className="card-base glass-effect p-6">
             <h1 className="mb-6 text-2xl font-semibold text-gray-900 dark:text-gray-100">
               {editingUid ? 'Edit song' : 'Add song'}
