@@ -3,6 +3,7 @@ import { Navigate, Link, useParams, useNavigate } from 'react-router-dom';
 import { useAuth } from '../contexts/AuthContext';
 import { catalogService, CatalogConflictError, CatalogNotFoundError } from '../services/catalogService';
 import type { CreateCatalogDTO, CatalogSong, CatalogFacets } from '../services/catalogService';
+import { useAutosave, type SaveStatus } from '../hooks/useAutosave';
 import { songService } from '../services/songService';
 import { parseDurationToSeconds, formatSecondsToMmss } from '../utils/duration';
 import { keyOptions, modeOptions, timeSignatureOptions, genreOptions, languageOptions } from '../utils/songFieldOptions';
@@ -108,13 +109,18 @@ export default function CatalogAdmin() {
   // drives the Publish button. Refs guard re-entrancy / self-clobber (StrictMode-safe).
   const [workingUid, setWorkingUid] = useState<string | null>(uid ?? null);
   const [isDraft, setIsDraft] = useState(true); // a fresh entry is a draft until published
-  const [saveStatus, setSaveStatus] = useState<'idle' | 'saving' | 'saved' | 'error'>('idle');
+  // saveStatus is owned here (rendered in the sticky bar); the shared useAutosave hook
+  // only DRIVES it. Widened to the hook's SaveStatus union — 'conflict' is never used here.
+  const [saveStatus, setSaveStatus] = useState<SaveStatus>('idle');
   const [publishing, setPublishing] = useState(false);
   const [dupMessage, setDupMessage] = useState<string | null>(null); // duplicate exists → block save + hide Publish
-  const savingRef = useRef(false);
-  const creatingRef = useRef(false);
+  const creatingRef = useRef(false); // domain double-create guard (workingUid state lags the lazy create)
   const justCreatedRef = useRef(false);
-  const baselineRef = useRef<string>(JSON.stringify(emptyForm)); // form JSON as last loaded/saved (review F3)
+  // form JSON as last loaded/saved (review F3). INVARIANT: every write to
+  // baselineRef.current MUST be paired with a setState in the same tick — useAutosave
+  // reads `baseline` at render time (not the live ref), so a write without a re-render
+  // would silently leave the hook's no-op check comparing against a stale baseline.
+  const baselineRef = useRef<string>(JSON.stringify(emptyForm));
   const dupRef = useRef(false); // a duplicate (title, artist) already exists → block autosave (19.6 revised)
 
   // Pre-fill the form from the existing entry. `active` guard makes it StrictMode-
@@ -155,65 +161,52 @@ export default function CatalogAdmin() {
     return () => { active = false; };
   }, [uid]);
 
-  // Autosave (19.6): the FIRST non-empty change in create mode lazily POSTs a draft,
-  // then we switch to edit mode (navigate replace); afterwards every change PUTs. No
-  // manual Save button. Kept in a ref so the debounce always calls the latest closure.
-  const autoSave = async () => {
-    if (savingRef.current) return;
-    const title = (form.title || '').trim();
-    if (!title) return; // a title is the entry's identity — never autosave without one (F2)
-    const snapshot = JSON.stringify(form);
-    if (snapshot === baselineRef.current) return; // nothing changed since last save/load (F3)
-    if (dupRef.current) { setSaveStatus('idle'); return; } // a duplicate exists → never persist it (19.6 revised)
-    savingRef.current = true;
-    setSaveStatus('saving');
-    try {
-      if (workingUid) {
-        await catalogService.updateCatalogEntry(workingUid, form);
-      } else if (!creatingRef.current) {
+  // Autosave (19.6) via the shared useAutosave engine (story 19.7). The FIRST non-empty
+  // change in create mode lazily POSTs a draft, then we switch to edit mode (navigate
+  // replace); afterwards every change PUTs. No manual Save button. The hook owns the
+  // debounce / in-flight lock / baseline no-op / unmount flush; the callbacks below are
+  // the Catalog-specific bits (the network call, the add→edit navigate, the dup rule).
+  useAutosave<CreateCatalogDTO>({
+    form,
+    editingUid: workingUid,
+    baseline: baselineRef.current, // owned here (loaded/saved snapshots), read for the no-op skip (F3)
+    deps: [form],
+    unmount: 'edit-only-save', // never CREATE a draft on unmount (F2) — only flush an edit
+    scheduleWhen: () => !loading && !!(form.title || '').trim(), // no title / still loading → nothing to persist (F2)
+    flushWhen: () => true, // unused (no manual flush) — the unmount path is edit-only
+    blockedStatus: () => {
+      if (!(form.title || '').trim()) return 'block'; // a title is the entry's identity — never autosave without one (F2)
+      if (dupRef.current) return 'idle'; // a duplicate exists → never persist it (19.6 revised)
+      return null;
+    },
+    setSaveStatus,
+    onCreate: async (f, snapshot) => {
+      if (!creatingRef.current) {
         creatingRef.current = true;
-        const created = await catalogService.createCatalogEntry(form);
+        const created = await catalogService.createCatalogEntry(f);
         justCreatedRef.current = true;
         setWorkingUid(created.uid);
         navigate(`/catalog/admin/${created.uid}`, { replace: true });
       }
       baselineRef.current = snapshot; // this content is now persisted (F3)
-      setSaveStatus('saved');
-    } catch (err) {
+      return { finalize: true };
+    },
+    onUpdate: async (uidToSave, f, snapshot) => {
+      await catalogService.updateCatalogEntry(uidToSave, f);
+      baselineRef.current = snapshot; // this content is now persisted (F3)
+    },
+    onError: (err) => {
+      creatingRef.current = false; // allow the next change to retry
       if (err instanceof CatalogConflictError) {
         // Backstop: the client dup-check missed a race → the GLOBAL unique index rejected
         // it. Block + surface (don't hammer the server on every keystroke).
         dupRef.current = true;
         setDupMessage('This title and artist already exist in the Catalog.');
-        setSaveStatus('idle');
-      } else {
-        setSaveStatus('error');
+        return 'idle';
       }
-      creatingRef.current = false; // allow the next change to retry
-    } finally {
-      savingRef.current = false;
-    }
-  };
-  const autoSaveRef = useRef(autoSave);
-  autoSaveRef.current = autoSave;
-  const workingUidRef = useRef(workingUid);
-  workingUidRef.current = workingUid;
-
-  // Debounce form changes into an autosave (never while the initial prefill loads).
-  useEffect(() => {
-    if (loading) return;
-    if (!(form.title || '').trim()) return; // no title yet → nothing to persist (F2)
-    const t = setTimeout(() => { void autoSaveRef.current(); }, 1200);
-    return () => clearTimeout(t);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [form]);
-
-  // Flush a pending change on unmount (review F4): navigating away (a header link, the
-  // browser Back button) within the debounce window must not silently drop the last
-  // edits. Only in EDIT mode (workingUid set) — never lazily CREATE a draft on unmount
-  // (review F2, else "Back to list" mid-typing would leave an abandoned draft + a
-  // navigate race). autoSave no-ops if nothing changed (baseline guard).
-  useEffect(() => () => { if (workingUidRef.current) void autoSaveRef.current(); }, []);
+      return 'error';
+    },
+  });
 
   // Distinct catalog artists/albums for the field autocomplete (19.6 QA — parity with
   // the Song form). Optional: degrades to a plain input on failure.

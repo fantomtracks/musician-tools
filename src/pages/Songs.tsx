@@ -10,6 +10,7 @@ import { ConfirmDialog } from '../components/ConfirmDialog';
 import { instrumentTechniquesMap, instrumentTuningsMap, instrumentTypeOptions } from '../constants/instrumentTypes';
 import { applySongFilters, countActiveFilters, NO_INSTRUMENT } from '../utils/songFilters';
 import { handleComboKeyDown, useScrollHighlightIntoView, comboboxInputAria, comboboxOptionAria } from '../utils/comboboxKeyboard';
+import { useAutosave } from '../hooks/useAutosave';
 import { findDuplicateSong } from '../utils/songDuplicate';
 import { formatLocalDate } from '../utils/heatmap';
 
@@ -912,19 +913,18 @@ function Songs() {
     }
   };
 
-  // Story 13.1 + 17.2 — Auto-persist the current form WITHOUT leaving the screen.
-  // ADD mode (editingUid === null) auto-CREATES at the debounce; EDIT mode
-  // auto-UPDATES. The same in-flight guard (savingRef) + shared debounce timer
-  // (saveTimerRef) cover both, so a create and an update can never overlap and a
-  // pending save is always cancellable.
+  // Story 13.1 + 17.2 + 19.7 — Auto-persist the current form WITHOUT leaving the screen,
+  // via the shared useAutosave engine. ADD mode (editingUid === null) auto-CREATEs at the
+  // debounce; EDIT mode auto-UPDATEs. The hook owns the in-flight guard + shared debounce
+  // timer (a create and an update can never overlap, a pending save is always cancellable)
+  // + the baseline no-op + the unmount flush; the callbacks below are the Song-specific
+  // bits (payload shaping, the invisible add→edit transition, list reconciliation, the
+  // duplicate rule, the server-409 handling).
   //   • Empty (trimmed) title  -> never persisted (a titleless form is not a song).
   //   • Duplicate (title+artist, client guard OR server 409) -> BLOCKED entirely,
-  //     no create and no partial update (17.2 hardens 13.1, which used to freeze
-  //     identity but save the rest). status 'conflict' + the SongForm banner tell
-  //     the user nothing was written.
+  //     no create and no partial update (17.2 hardens 13.1). status 'conflict' + the
+  //     SongForm banner tell the user nothing was written.
   //   • `lastPlayed` is server-managed -> never sent (HIGH from 13.1).
-  const savingRef = useRef(false);
-  const saveTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   // Story 17.2: the folded (title|artist) key that last hit a server 409. Suppresses
   // re-firing a create on every keystroke when the 409 body carried no existing song
   // (so the client-side liveDuplicate guard couldn't pick it up). Cleared implicitly
@@ -933,71 +933,75 @@ function Songs() {
   const foldedTitleArtistKey = (): string =>
     `${(form.title || '').trim().toLowerCase()}|${(form.artist || '').trim().toLowerCase()}`;
 
-  const autoSaveSong = async (): Promise<boolean> => {
-    if (savingRef.current) return false; // a create/update is already in flight
-    // Never persist a titleless form — an empty title is a transient state; the
-    // cleanup (delete / popup) happens on exit, not here. Clear the stale "Saved ✓"
-    // so the pill doesn't claim the emptied title was persisted.
-    if (!form.title?.trim()) {
-      setSaveStatus('idle');
-      return false;
-    }
-    // Symmetric duplicate block (17.2): refuse to write on collision. Never delete
-    // or corrupt — the song keeps its last valid value; the banner + status show it.
-    // A server 409 with no echoed song lands here on the next attempt via conflictKeyRef.
-    if (liveDuplicate || conflictKeyRef.current === foldedTitleArtistKey()) {
-      setSaveStatus('conflict');
-      return false;
-    }
-    const uid = editingUid;
+  // `lastPlayed` is server-managed → never sent; empty collections normalized (HIGH 13.1).
+  const buildAutosavePayload = (f: CreateSongDTO): UpdateSongDTO => {
     const payload: UpdateSongDTO = {
-      ...form,
-      instrument: form.instrument && form.instrument.length > 0 ? form.instrument : null,
-      technique: form.technique && form.technique.length > 0 ? form.technique : [],
-      genre: form.genre && form.genre.length > 0 ? form.genre : [],
-      myInstrumentUid: form.myInstrumentUid ? form.myInstrumentUid : undefined,
-      instrumentDifficulty: form.instrumentDifficulty || {},
-      instrumentTuning: form.instrumentTuning || {},
+      ...f,
+      instrument: f.instrument && f.instrument.length > 0 ? f.instrument : null,
+      technique: f.technique && f.technique.length > 0 ? f.technique : [],
+      genre: f.genre && f.genre.length > 0 ? f.genre : [],
+      myInstrumentUid: f.myInstrumentUid ? f.myInstrumentUid : undefined,
+      instrumentDifficulty: f.instrumentDifficulty || {},
+      instrumentTuning: f.instrumentTuning || {},
     };
     delete payload.lastPlayed;
-    const snapshot = JSON.stringify(form);
-    savingRef.current = true;
-    const startedAt = Date.now();
-    try {
-      setSaveStatus('saving');
-      if (uid === null) {
-        // Auto-create, then the INVISIBLE add->edit transition: inject the song,
-        // flip to edit mode, seed the baseline. The panel stays, no reload — every
-        // later keystroke flows through the same edit-mode path below.
-        const created = await songService.createSong(payload as CreateSongDTO);
-        setSongs(prev => (prev.some(s => s.uid === created.uid) ? prev : [created, ...prev]));
-        if (!isMountedRef.current || pathnameRef.current !== '/songs/new') {
-          // The user left /songs/new while this create was in flight (quitter = garder):
-          // keep the created song in the list, but DON'T yank them back to it. Checked
-          // against the LIVE location/mount (refs), not the frozen closure value — else
-          // leaving via a header link / browser Back would drag them into the new song.
-          return true;
-        }
-        // Invisible add->edit transition via the URL: seed the baseline + mark the form
-        // as representing the new uid BEFORE navigating, so the build-form effect skips
-        // reloading (no clobber of live typing), then replace /songs/new → /songs/:uid.
-        setEditBaselineJson(snapshot);
-        loadedFormUidRef.current = created.uid;
-        setFormReady(true); // now a real editing session (empty-title guards may arm)
-        setPlaylistFilter(''); // parity with the old create flow: keep the new song visible
-        navigate('/songs/' + created.uid, { replace: true });
-      } else {
-        const updatedSong = await songService.updateSong(uid, payload);
-        setSongs(prev => prev.map(song => (song.uid === uid ? updatedSong : song)));
-        setEditBaselineJson(snapshot);
+    return payload;
+  };
+
+  const { flush: flushAutoSave, savingRef } = useAutosave<CreateSongDTO>({
+    form,
+    editingUid,
+    baseline: editBaselineJson,
+    deps: [form, editingUid, editBaselineJson],
+    minVisibleMs: 500, // keep "Saving…" perceptible even on an instant (local) save
+    unmount: 'flush', // add mode CAN create on unmount (quitter = garder — the created song is kept)
+    scheduleWhen: () =>
+      editingUid === null
+        ? !!form.title?.trim() // add: nothing to create until a (trimmed) title
+        : editBaselineJson === null || JSON.stringify(form) !== editBaselineJson, // edit: only when diverged
+    flushWhen: () =>
+      editingUid === null
+        ? !!(form.title?.trim() && JSON.stringify(form) !== JSON.stringify(initialSong))
+        : editBaselineJson !== null && JSON.stringify(form) !== editBaselineJson,
+    blockedStatus: () => {
+      // Emptied title → clear the stale "Saved ✓" (nothing is persisted for a titleless form).
+      if (!form.title?.trim()) return 'idle';
+      // Symmetric duplicate block (17.2): a client-side live dup OR a remembered server 409.
+      if (liveDuplicate || conflictKeyRef.current === foldedTitleArtistKey()) return 'conflict';
+      return null;
+    },
+    setSaveStatus,
+    onCreate: async (f, snapshot) => {
+      // Auto-create, then the INVISIBLE add→edit transition: inject the song, flip to edit
+      // mode, seed the baseline. The panel stays, no reload — later keystrokes UPDATE.
+      const created = await songService.createSong(buildAutosavePayload(f) as CreateSongDTO);
+      setSongs(prev => (prev.some(s => s.uid === created.uid) ? prev : [created, ...prev]));
+      if (!isMountedRef.current || pathnameRef.current !== '/songs/new') {
+        // The user left /songs/new while this create was in flight (quitter = garder):
+        // keep the created song in the list, but DON'T yank them back to it. Checked
+        // against the LIVE location/mount (refs), not the frozen closure value — else
+        // leaving via a header link / browser Back would drag them into the new song.
+        return { finalize: false };
       }
-      // Keep "Saving…" perceptible even on an instant (local) save.
-      const elapsed = Date.now() - startedAt;
-      if (elapsed < 500) await new Promise(res => setTimeout(res, 500 - elapsed));
+      // Seed the baseline + mark the form as representing the new uid BEFORE navigating,
+      // so the build-form effect skips reloading (no clobber of live typing), then replace
+      // /songs/new → /songs/:uid.
+      setEditBaselineJson(snapshot);
+      loadedFormUidRef.current = created.uid;
+      setFormReady(true); // now a real editing session (empty-title guards may arm)
+      setPlaylistFilter(''); // parity with the old create flow: keep the new song visible
+      navigate('/songs/' + created.uid, { replace: true });
+      return { finalize: true };
+    },
+    onUpdate: async (uid, f, snapshot) => {
+      const updatedSong = await songService.updateSong(uid, buildAutosavePayload(f));
+      setSongs(prev => prev.map(song => (song.uid === uid ? updatedSong : song)));
+      setEditBaselineJson(snapshot);
+    },
+    onStatusSaved: () => {
       setLastSavedAt(new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }));
-      setSaveStatus('saved');
-      return true;
-    } catch (err) {
+    },
+    onError: (err) => {
       // Server-authoritative duplicate (stale client list raced the unique index):
       // block, reconcile the local list so the client guard now sees it too, and
       // surface the conflict — retrying wouldn't help until the user differentiates.
@@ -1009,59 +1013,12 @@ function Songs() {
         // Remember this collision so we don't re-fire a create/update on every
         // keystroke — even when the 409 body carried no song to reconcile locally.
         conflictKeyRef.current = foldedTitleArtistKey();
-        setSaveStatus('conflict');
-        return false;
+        return 'conflict';
       }
       console.error(err);
-      setSaveStatus('error'); // ⚠️ Not saved — retrying — retried on the next edit
-      return false;
-    } finally {
-      savingRef.current = false;
-    }
-  };
-
-  // Always call the latest autoSaveSong from effects/handlers without re-subscribing.
-  const autoSaveRef = useRef(autoSaveSong);
-  autoSaveRef.current = autoSaveSong;
-
-  // Debounced auto-persist (~1.2 s). Add mode CREATES once there's a non-empty
-  // title; edit mode UPDATES once the form diverges from the baseline. The timer
-  // lives in a ref so flush can cancel it.
-  useEffect(() => {
-    if (editingUid === null) {
-      // Add mode: nothing to create until the user gives it a (trimmed) title.
-      if (!form.title?.trim()) return;
-    } else {
-      if (editBaselineJson !== null && JSON.stringify(form) === editBaselineJson) return;
-    }
-    if (saveTimerRef.current) clearTimeout(saveTimerRef.current);
-    saveTimerRef.current = setTimeout(() => { void autoSaveRef.current(); }, 1200);
-    return () => { if (saveTimerRef.current) { clearTimeout(saveTimerRef.current); saveTimerRef.current = null; } };
-  }, [form, editingUid, editBaselineJson]);
-
-  // Flush a pending auto-save (Back / Enter / Mark / navigation / unmount). Cancels
-  // the debounce timer first so it can't fire a second, overlapping save. Returns
-  // false only when a save was attempted and FAILED.
-  const flushAutoSave = async (): Promise<boolean> => {
-    if (saveTimerRef.current) { clearTimeout(saveTimerRef.current); saveTimerRef.current = null; }
-    if (editingUid === null) {
-      // Add mode: flush a pending create if there's a titled, non-empty draft.
-      if (form.title?.trim() && JSON.stringify(form) !== JSON.stringify(initialSong)) {
-        return autoSaveRef.current();
-      }
-      return true;
-    }
-    if (editBaselineJson !== null && JSON.stringify(form) !== editBaselineJson) {
-      return autoSaveRef.current();
-    }
-    return true;
-  };
-
-  // Flush the latest pending edit on unmount — covers the "Musician Tools" link and
-  // any route change that doesn't go through Back/Cancel.
-  const flushOnUnmountRef = useRef(flushAutoSave);
-  flushOnUnmountRef.current = flushAutoSave;
-  useEffect(() => () => { void flushOnUnmountRef.current(); }, []);
+      return 'error'; // ⚠️ Not saved — retried on the next edit
+    },
+  });
 
   // Story 17.2 — Seuil 1: a song is "fresh" if the only thing that ever happened to
   // it is the (now-emptied) title — no other field filled, no practice, no playlist.

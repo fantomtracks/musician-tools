@@ -1,6 +1,10 @@
+---
+baseline_commit: c5d325429d5802ac549caa3dd1f0628d918c2aed
+---
+
 # Story 19.7: Hook `useAutosave` partagé (Songlist ↔ Catalog)
 
-Status: ready-for-dev
+Status: done
 
 <!-- Note: Validation is optional. Run validate-create-story for quality check before dev-story. -->
 
@@ -35,15 +39,15 @@ Promu à la **revue `deferred-work.md` du 2026-07-16** (dette DRY Catalog↔Song
 
 ## Tasks / Subtasks
 
-- [ ] **Task 1 — Concevoir + créer `useAutosave`** (AC: 1, 2)
-  - [ ] Lire EXHAUSTIVEMENT l'autosave de `Songs.tsx` (`autoSaveSong` ~L936-1021, `autoSaveRef` L1024, effet débounce L1030-1040, `flushAutoSave` L1045+, refs `savingRef`/`saveTimerRef`/`conflictKeyRef`, `foldedTitleArtistKey`) ET la copie de `CatalogAdmin.tsx` (autoSave + effets débounce/flush/dup). Établir la **frontière générique↔domaine** (ce qui est identique vs spécifique).
-  - [ ] Écrire `src/hooks/useAutosave.ts` (générique) : refs, débounce, baseline, create-lazy, flush (edit-only au démontage), transitions de `saveStatus`. Domaine par callbacks. `src/hooks/useAutosave.test.ts` (unitaire, timers fake) : débounce déclenche 1 save ; baseline skip ; create-lazy 1 seule fois ; flush annule le timer + persiste ; démontage ne crée pas.
-- [ ] **Task 2 — Migrer CatalogAdmin (le plus simple d'abord)** (AC: 3)
-  - [ ] Remplacer la copie locale par `useAutosave` ; brancher onCreate/onUpdate/navigate/canSave (dupRef) ; garder Publish masqué sur doublon. Vérifier `CatalogAdmin.test.tsx` vert **sans changer les assertions** (adapter seulement le câblage si nécessaire).
-- [ ] **Task 3 — Migrer Songs (le plus risqué)** (AC: 4)
-  - [ ] Remplacer `autoSaveSong`/effets par `useAutosave` ; garder dans la page la transition add→edit, la réconciliation liste, `playlistFilter`, `conflictKeyRef`/`liveDuplicate`, min-500 ms, `lastPlayed` exclu. **Lancer la suite `Songs*.test.tsx` après CHAQUE sous-étape** ; zéro assertion modifiée. Si un comportement ne rentre pas dans le hook, l'y ajouter proprement (option) plutôt que le dupliquer.
-- [ ] **Task 4 — Validation globale** (AC: 5)
-  - [ ] Front (411) + back verts, tsc + eslint. Diff comportemental = néant (revue manuelle des deux flux : add→edit, conflit, flush au Back/nav, statut).
+- [x] **Task 1 — Concevoir + créer `useAutosave`** (AC: 1, 2)
+  - [x] Lire EXHAUSTIVEMENT l'autosave de `Songs.tsx` (`autoSaveSong` ~L936-1021, `autoSaveRef` L1024, effet débounce L1030-1040, `flushAutoSave` L1045+, refs `savingRef`/`saveTimerRef`/`conflictKeyRef`, `foldedTitleArtistKey`) ET la copie de `CatalogAdmin.tsx` (autoSave + effets débounce/flush/dup). Établir la **frontière générique↔domaine** (ce qui est identique vs spécifique).
+  - [x] Écrire `src/hooks/useAutosave.ts` (générique) : refs, débounce, baseline, create-lazy, flush (edit-only au démontage), transitions de `saveStatus`. Domaine par callbacks. `src/hooks/useAutosave.test.ts` (unitaire, timers fake) : débounce déclenche 1 save ; baseline skip ; create-lazy 1 seule fois ; flush annule le timer + persiste ; démontage ne crée pas. **→ 11 tests unitaires verts.**
+- [x] **Task 2 — Migrer CatalogAdmin (le plus simple d'abord)** (AC: 3)
+  - [x] Remplacer la copie locale par `useAutosave` ; brancher onCreate/onUpdate/navigate/canSave (dupRef) ; garder Publish masqué sur doublon. Vérifier `CatalogAdmin.test.tsx` vert **sans changer les assertions**. **→ 11 tests Catalog verts, 0 assertion touchée.**
+- [x] **Task 3 — Migrer Songs (le plus risqué)** (AC: 4)
+  - [x] Remplacer `autoSaveSong`/effets par `useAutosave` ; garder dans la page la transition add→edit, la réconciliation liste, `playlistFilter`, `conflictKeyRef`/`liveDuplicate`, min-500 ms, `lastPlayed` exclu. **→ 92 tests Songs verts, 0 assertion modifiée.** Deux comportements Songs-only ajoutés PROPREMENT au hook plutôt que dupliqués : sentinel `'block'` (bloquer sans toucher le statut, écart Catalog vs Songs sur titre vide) + option `unmount: 'flush' | 'edit-only-save'` (Songs crée au démontage = quitter/garder ; Catalog jamais = F2).
+- [x] **Task 4 — Validation globale** (AC: 5)
+  - [x] Front **422** (411 + 11 hook) + back **305** verts, tsc + eslint clean. Diff comportemental = néant (les ~100 tests Songs autosave/add→edit/conflit/flush/beforeunload + les 11 Catalog sont le filet, tous verts sans réécriture).
 
 ## Dev Notes
 
@@ -74,18 +78,48 @@ Le domaine (dans la page) : l'appel réseau réel (`onCreate`/`onUpdate` = songS
 - [Source: `src/pages/CatalogAdmin.tsx` — copie divergée à aligner (patches 19.6 F1-F4 à préserver via le hook)]
 - [Source: `_bmad-output/implementation-artifacts/19-6-catalog-draft-publish-autosave.md` — Review Findings F1-F4 (les gardes que le hook doit porter)]
 
+### Review Findings
+
+Code review 2026-07-16 (3 couches adversariales : Blind Hunter / Edge Case Hunter / Acceptance Auditor). Convergence : **aucune régression de comportement, aucune violation d'AC, aucune assertion de test modifiée** (front 422 / back 305 / tsc / eslint verts confirmés indépendamment). 4 findings écartés comme non-atteignables/pré-existants, 1 durcissement retenu.
+
+- [x] [Review][Patch] Invariant `baselineRef` ↔ setState non documenté — le hook lit `opts.baseline` au rendu ; Catalog passe `baselineRef.current` (ref mutée impérativement). Non-observable aujourd'hui (chaque écriture est appariée à un setState + garde `savingRef`), mais un futur write sans re-render casserait le no-op en silence. Ajouter un commentaire d'invariant près des écritures `baselineRef.current`. [src/pages/CatalogAdmin.tsx]
+
+**Écartés (dismiss)** : (a) `savingRef` référencé ailleurs dans CatalogAdmin → faux positif, tsc exit 0 ; (b) reorder dup-vs-baseline Catalog → prouvé non-atteignable (dup ⇒ form≠baseline) par les 3 couches ; (c) `setState('saved')` post-démontage pendant le délai 500 ms → pré-existant + no-op React 18, non introduit ; (d) no-op baseline ajouté côté Songs → prouvé inerte (exclu en amont par `scheduleWhen`/`flushWhen`).
+
 ## Dev Agent Record
 
 ### Agent Model Used
 
+claude-opus-4-8[1m] (dev-story)
+
 ### Debug Log References
+
+- `npx jest src/hooks/useAutosave.test.ts` → 11/11.
+- `npx jest CatalogAdmin catalogService` → 19/19.
+- `npx jest Songs SongForm SongDeletion songDuplicate` → 92/92 (dont SongsAutoSave 21).
+- Front complet `npx jest` → **422/422** (46 suites). Back `npm test` → **305/305**. `tsc --noEmit` clean. `eslint` (fichiers touchés) clean.
 
 ### Completion Notes List
 
+- **Frontière générique↔domaine.** Le hook `useAutosave` possède le **cycle de vie** : `savingRef` (anti-réentrance), timer de débounce partagé + annulable, **baseline anti-no-op** (skip si `JSON(form)===baseline`), **dispatch create-lazy** (`editingUid===null` → `onCreate`, sinon `onUpdate`), **min-visible** optionnel, **flush** (annule le timer + persiste), **flush au démontage** paramétrable, et le **séquençage du statut** (`saving`→`saved`/`error`, gate de blocage). Le **domaine** est injecté par callbacks : `onCreate`/`onUpdate` (appel réseau + payload + transition add→edit + réconciliation liste + écriture baseline), `onError` (conflit/erreur → statut + effets), `blockedStatus` (titre vide / doublon), `scheduleWhen`/`flushWhen`, `setSaveStatus`, `onStatusSaved`. La page garde la **propriété** de son `saveStatus` (rendu) et de sa **baseline** (Songs = `editBaselineJson` state ; Catalog = `baselineRef`) — le hook les pilote/lit, il ne les stocke pas → aucun couplage page ne fuit dans le hook.
+- **Deux écarts réels préservés sans les gommer** (ajoutés au hook, pas dupliqués) :
+  1. `blockedStatus` peut renvoyer le sentinel **`'block'`** = bloquer SANS toucher le statut (Catalog laisse le statut tel quel sur titre vidé ; Songs met `'idle'`).
+  2. **`unmount: 'flush' | 'edit-only-save' | 'none'`** : Songs = `'flush'` (le mode add PEUT créer au démontage — *quitter = garder*, la chanson créée est conservée) ; Catalog = `'edit-only-save'` (jamais de create au démontage — leçon 19.6 F2).
+- **Patches 19.6 F1–F4 portés par le hook** : F1 (conflit surfacé) via `onError`/`blockedStatus` ; F2 (jamais de create au démontage côté Catalog) via `unmount:'edit-only-save'` ; F3 (baseline anti-no-op) dans le hook ; F4 (flush au démontage) dans le hook.
+- **Iso-fonctionnel** : aucune assertion de test réécrite des deux côtés ; aucun changement backend, UX ou visuel. Les copies locales (`autoSaveSong`, `autoSave`, refs `savingRef`/`saveTimerRef`/`workingUidRef`, effets débounce + unmount, `flushAutoSave`) sont supprimées au profit d'un seul appel `useAutosave`.
+- **Dette DRY 19.7 (autosave) soldée** ; restent 19-9 (multi-select), 19-10 (sticky + combobox + check exact), 19-8 (normalisation).
+
 ### File List
+
+- **NEW** `src/hooks/useAutosave.ts` — moteur d'autosave partagé (générique + callbacks domaine).
+- **NEW** `src/hooks/useAutosave.test.ts` — 11 tests unitaires (timers fake) du cycle de vie.
+- **UPDATE** `src/pages/CatalogAdmin.tsx` — migré sur `useAutosave` (retrait de la copie locale) ; `saveStatus` élargi au type `SaveStatus`.
+- **UPDATE** `src/pages/Songs.tsx` — migré sur `useAutosave` (retrait de `autoSaveSong`/effets/`flushAutoSave`/unmount) ; domaine conservé dans la page (transition add→edit, réconciliation, `conflictKeyRef`, payload/lastPlayed, min-500 ms).
+- **UPDATE** `_bmad-output/implementation-artifacts/sprint-status.yaml` — 19-7 in-progress → review.
 
 ## Change Log
 
 | Date | Version | Description | Author |
 |------|---------|-------------|--------|
 | 2026-07-16 | 0.1 | Story créée (create-story) — extraction `useAutosave` partagé (Songs+Catalog), refacto iso-fonctionnel ; cluster découpé (19-9 multi-select, 19-10 sticky+combobox+check-exact, 19-8 normalisation) | northwood |
+| 2026-07-16 | 1.0 | dev-story — hook `useAutosave` créé (11 tests) + CatalogAdmin & Songs migrés. Iso-fonctionnel : front 422, back 305, tsc+eslint clean, 0 assertion touchée. Sentinel `'block'` + option `unmount` pour préserver les 2 écarts Songs↔Catalog. | northwood |
