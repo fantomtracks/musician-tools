@@ -186,7 +186,8 @@ const loginUser = async (req, res, next) => {
         handle: user.getHandle(), // story 7.8: AuthContext holds the handle
         email: user.email,
         emailVerified: user.emailVerified, // story 7.9: drives the verify-email banner
-        isAdmin: user.isAdmin
+        isAdmin: user.isAdmin,
+        isCurator: user.isCurator // story 19.2: gates the Catalog curator admin
       }
     });
   } catch (err) {
@@ -259,7 +260,8 @@ const verifyEmail = async (req, res, next) => {
         handle: user.getHandle(),
         email: user.email,
         emailVerified: true,
-        isAdmin: user.isAdmin
+        isAdmin: user.isAdmin,
+        isCurator: user.isCurator // story 19.2
       }
     });
   } catch (err) {

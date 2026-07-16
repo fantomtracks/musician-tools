@@ -1,0 +1,188 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Catalog song detail — /catalog/:uid</title>
+<style>
+/* =========================================================================
+   SPINE GOVERNANCE — this screen renders /catalog/:uid (read-only detail)
+   DESIGN.md   → "Catalog detail route layout (/catalog/:uid)": single centered
+                 column, metadata grid mirroring SongForm, external YouTube/Spotify
+                 links, one Add block (3 states), NO save-bar (nothing to save).
+                 .text-gradient accent allowed on the title.
+   EXPERIENCE.md → IA (/catalog/:uid vraie route), Component Patterns: Inline Add,
+                 Duplicate calm state; State Patterns: Row/carte/fiche Ajout & doublon.
+   Decision log → DL-9 (real route, read-only + CTA), DL-8 (Add on the detail),
+                 DL-11 (duplicate = calm green, never red),
+                 DL-18 (hero leads with the artist, song title alongside/below).
+   Hex values = real Tailwind theme (tailwind.config.ts + src/index.css).
+   ========================================================================= */
+
+:root{
+  --brand-500:#4f6cff; --brand-600:#3a52cc; --brand-700:#2c3ea3; --brand-100:#e9eeff; --brand-400:#7a93ff;
+  --green-100:#dcfce7; --green-700:#15803d;
+  --page-grad: linear-gradient(135deg,#f9fafb 0%,#eff6ff 50%,#faf5ff 100%);
+  --surface:#ffffff; --border:#f3f4f6; --divider:#e5e7eb;
+  --text:#111827; --muted:#6b7280; --label:#374151;
+  --tile:#f9fafb; --tile-border:#eef0f3;
+  --glass:rgba(255,255,255,0.8); --glass-border:#e5e7eb;
+  --grad-text: linear-gradient(90deg,#3a52cc,#9333ea);
+  --btn-sec-bg:#f3f4f6; --btn-sec-text:#111827;
+}
+.dark{
+  --page-grad: linear-gradient(135deg,#111827 0%,#1f2937 50%,#030712 100%);
+  --surface:#1f2937; --border:#374151; --divider:#374151;
+  --text:#f3f4f6; --muted:#9ca3af; --label:#d1d5db;
+  --tile:#111827; --tile-border:#374151;
+  --glass:rgba(31,41,55,0.8); --glass-border:#374151;
+  --grad-text: linear-gradient(90deg,#7a93ff,#c084fc);
+  --btn-sec-bg:#374151; --btn-sec-text:#f3f4f6;
+}
+*{box-sizing:border-box;}
+body{margin:0;background:#8b8f9a;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI','Roboto','Helvetica Neue',sans-serif;-webkit-font-smoothing:antialiased;}
+.wrap{max-width:1160px;margin:0 auto;padding:28px 20px 60px;}
+.caption{color:#e8e9ef;font-size:13px;margin:22px 4px 8px;font-weight:600;letter-spacing:.02em;}
+
+.browser{border-radius:12px;overflow:hidden;box-shadow:0 18px 50px -12px rgba(0,0,0,.5);border:1px solid rgba(0,0,0,.25);}
+.chrome{display:flex;align-items:center;gap:10px;background:#e6e7eb;padding:9px 12px;border-bottom:1px solid #d3d4d9;}
+.dark-chrome{background:#20242c;border-bottom:1px solid #333842;}
+.dots{display:flex;gap:7px;} .dot{width:12px;height:12px;border-radius:50%;}
+.d1{background:#ff5f57;} .d2{background:#febc2e;} .d3{background:#28c840;}
+.urlbar{flex:1;background:#fff;border-radius:7px;padding:5px 12px;font-size:12.5px;color:#4b5563;text-align:center;}
+.dark-chrome .urlbar{background:#11141a;color:#9ca3af;}
+
+.page{background:var(--page-grad);color:var(--text);}
+.appbar{position:sticky;top:0;background:var(--glass);backdrop-filter:blur(16px);border-bottom:1px solid var(--glass-border);box-shadow:0 1px 2px rgba(0,0,0,.05);}
+.appbar-in{max-width:1120px;margin:0 auto;height:64px;display:flex;align-items:center;justify-content:space-between;padding:0 24px;}
+.brand{display:flex;align-items:center;}
+.logo{width:32px;height:32px;border-radius:9px;background:linear-gradient(135deg,#4f6cff,#9333ea);display:flex;align-items:center;justify-content:center;color:#fff;font-weight:700;font-size:18px;}
+.brandname{font-size:20px;font-weight:700;background:var(--grad-text);-webkit-background-clip:text;background-clip:text;color:transparent;margin-left:10px;}
+.nav{display:flex;align-items:center;gap:30px;margin-left:38px;}
+.nav a{color:var(--label);text-decoration:none;font-weight:500;font-size:15px;}
+.nav a.active{color:var(--brand-600);font-weight:600;}
+.dark .nav a.active{color:var(--brand-400);}
+.appbar-right{display:flex;align-items:center;gap:14px;}
+.iconbtn{width:36px;height:36px;border-radius:9px;background:#f3f4f6;border:none;display:flex;align-items:center;justify-content:center;font-size:17px;cursor:pointer;}
+.dark .iconbtn{background:#374151;}
+
+/* read-only single centered column */
+.main{max-width:680px;margin:0 auto;padding:34px 24px 56px;}
+.back{display:inline-flex;align-items:center;gap:6px;color:var(--muted);font-size:13.5px;text-decoration:none;margin-bottom:18px;}
+.detail-head{margin-bottom:26px;}
+/* DL-18: artist leads (prominent line), song title alongside/below — "The Cranberries — Zombie" reads artist-first. */
+.detail-artist{font-size:20px;font-weight:600;color:var(--label);margin:0 0 4px;letter-spacing:-.01em;}
+.detail-title{font-size:36px;font-weight:700;letter-spacing:-.02em;margin:0;background:var(--grad-text);-webkit-background-clip:text;background-clip:text;color:transparent;line-height:1.1;}
+
+.card{background:var(--surface);border:1px solid var(--border);border-radius:14px;box-shadow:0 4px 12px -2px rgba(0,0,0,.08);padding:24px;}
+.metagrid{display:grid;grid-template-columns:repeat(3,1fr);gap:2px;background:var(--divider);border-radius:12px;overflow:hidden;border:1px solid var(--divider);}
+.metacell{background:var(--surface);padding:14px 16px;}
+.metak{font-size:11px;text-transform:uppercase;letter-spacing:.05em;color:var(--muted);font-weight:600;}
+.metav{font-size:16px;font-weight:600;margin-top:4px;}
+
+.links{display:flex;gap:12px;margin-top:22px;}
+.btn-secondary{display:inline-flex;align-items:center;gap:8px;padding:10px 16px;border-radius:10px;background:var(--btn-sec-bg);color:var(--btn-sec-text);font-weight:500;font-size:14px;border:none;cursor:pointer;text-decoration:none;}
+.yt{color:#ef4444;} .sp{color:#22c55e;}
+
+.cta-wrap{margin-top:26px;display:flex;justify-content:center;}
+.btn-primary{display:inline-flex;align-items:center;justify-content:center;gap:8px;padding:13px 26px;border-radius:12px;background:var(--brand-500);color:#fff;font-weight:600;font-size:16px;border:none;cursor:pointer;box-shadow:0 4px 12px -2px rgba(79,108,255,.4);}
+.btn-primary:hover{background:var(--brand-600);}
+.readonly-note{text-align:center;color:var(--muted);font-size:12.5px;margin-top:12px;}
+</style>
+</head>
+<body>
+<div class="wrap">
+
+  <!-- ================= LIGHT ================= -->
+  <div class="caption">/catalog/:uid · Catalog song detail (read-only) — light</div>
+  <div class="browser">
+    <div class="chrome"><div class="dots"><span class="dot d1"></span><span class="dot d2"></span><span class="dot d3"></span></div><div class="urlbar">musiciantools.app/catalog/zombie-the-cranberries</div></div>
+    <div class="page">
+      <header class="appbar"><div class="appbar-in">
+        <div class="brand"><div class="logo">♪</div><span class="brandname">Musician Tools</span>
+          <nav class="nav"><a href="#">Songlist</a><a href="#" class="active">Catalog</a><a href="#">Heatmap</a><a href="#">Sessions</a><a href="#">Playlists</a><a href="#">Topics</a><a href="#">Instruments</a></nav>
+        </div>
+        <div class="appbar-right"><button class="iconbtn">🌙</button><button class="iconbtn">👤</button></div>
+      </div></header>
+
+      <main class="main">
+        <a class="back" href="#">← Back to Catalog</a>
+        <div class="detail-head">
+          <p class="detail-artist">The Cranberries</p>
+          <h1 class="detail-title">Zombie</h1>
+        </div>
+
+        <div class="card">
+          <!-- DL-17: intrinsic Catalog fields ONLY — no Instrument/Difficulty/Tuning/Capo/Technique/Instrument links (those are personal, instrument-scoped, and live on the copied Song). -->
+          <div class="metagrid">
+            <div class="metacell"><div class="metak">Key</div><div class="metav">Em</div></div>
+            <div class="metacell"><div class="metak">BPM</div><div class="metav">84</div></div>
+            <div class="metacell"><div class="metak">Mode</div><div class="metav">Minor</div></div>
+            <div class="metacell"><div class="metak">Time signature</div><div class="metav">4/4</div></div>
+            <div class="metacell"><div class="metak">Duration</div><div class="metav">5:06</div></div>
+            <div class="metacell"><div class="metak">Genre</div><div class="metav">Alt Rock</div></div>
+            <div class="metacell"><div class="metak">Language</div><div class="metav">English</div></div>
+            <div class="metacell"><div class="metak">Album</div><div class="metav">No Need to Argue</div></div>
+            <div class="metacell"><div class="metak">Pitch standard</div><div class="metav">440 Hz</div></div>
+          </div>
+
+          <div class="links">
+            <a class="btn-secondary" href="#"><span class="yt">▶</span> YouTube</a>
+            <a class="btn-secondary" href="#"><span class="sp">●</span> Spotify</a>
+          </div>
+
+          <div class="cta-wrap"><button class="btn-primary">Add to my songlist</button></div>
+          <p class="readonly-note">Read-only Catalog entry · adding creates your own editable copy</p>
+        </div>
+      </main>
+    </div>
+  </div>
+
+  <!-- ================= DARK ================= -->
+  <div class="caption">/catalog/:uid · Catalog song detail (read-only) — dark (load-bearing)</div>
+  <div class="browser dark">
+    <div class="chrome dark-chrome"><div class="dots"><span class="dot d1"></span><span class="dot d2"></span><span class="dot d3"></span></div><div class="urlbar">musiciantools.app/catalog/zombie-the-cranberries</div></div>
+    <div class="page">
+      <header class="appbar"><div class="appbar-in">
+        <div class="brand"><div class="logo">♪</div><span class="brandname">Musician Tools</span>
+          <nav class="nav"><a href="#">Songlist</a><a href="#" class="active">Catalog</a><a href="#">Heatmap</a><a href="#">Sessions</a><a href="#">Playlists</a><a href="#">Topics</a><a href="#">Instruments</a></nav>
+        </div>
+        <div class="appbar-right"><button class="iconbtn">☀️</button><button class="iconbtn">👤</button></div>
+      </div></header>
+
+      <main class="main">
+        <a class="back" href="#">← Back to Catalog</a>
+        <div class="detail-head">
+          <p class="detail-artist">The Cranberries</p>
+          <h1 class="detail-title">Zombie</h1>
+        </div>
+
+        <div class="card">
+          <!-- DL-17: intrinsic Catalog fields ONLY — no Instrument/Difficulty/Tuning/Capo/Technique/Instrument links (those are personal, instrument-scoped, and live on the copied Song). -->
+          <div class="metagrid">
+            <div class="metacell"><div class="metak">Key</div><div class="metav">Em</div></div>
+            <div class="metacell"><div class="metak">BPM</div><div class="metav">84</div></div>
+            <div class="metacell"><div class="metak">Mode</div><div class="metav">Minor</div></div>
+            <div class="metacell"><div class="metak">Time signature</div><div class="metav">4/4</div></div>
+            <div class="metacell"><div class="metak">Duration</div><div class="metav">5:06</div></div>
+            <div class="metacell"><div class="metak">Genre</div><div class="metav">Alt Rock</div></div>
+            <div class="metacell"><div class="metak">Language</div><div class="metav">English</div></div>
+            <div class="metacell"><div class="metak">Album</div><div class="metav">No Need to Argue</div></div>
+            <div class="metacell"><div class="metak">Pitch standard</div><div class="metav">440 Hz</div></div>
+          </div>
+
+          <div class="links">
+            <a class="btn-secondary" href="#"><span class="yt">▶</span> YouTube</a>
+            <a class="btn-secondary" href="#"><span class="sp">●</span> Spotify</a>
+          </div>
+
+          <div class="cta-wrap"><button class="btn-primary">Add to my songlist</button></div>
+          <p class="readonly-note">Read-only Catalog entry · adding creates your own editable copy</p>
+        </div>
+      </main>
+    </div>
+  </div>
+
+</div>
+</body>
+</html>

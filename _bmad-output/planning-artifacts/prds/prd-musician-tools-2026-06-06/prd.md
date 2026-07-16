@@ -74,6 +74,8 @@ Fin de mois, Léa ouvre la heatmap : trois semaines denses, une semaine creuse (
 - Santé du répertoire (fraîcheur 🟢/🟡/🔴, menu du jour).
 - Vue de progression par sujet (historique daté des notes contextuelles : « à 30 BPM » → « à 60 BPM »).
 - Répartition du temps de pratique par sujet/chanson (« où va mon temps ») — projection des récaps futurs.
+- **Catalog** — pool **partagé** de chansons prêtes, pré-remplies (clé, BPM, mode, accordages…) qu'on **parcourt** et **copie** dans sa Songlist perso (verbes : _Browse catalog_, _Add to my songlist_ ; cf. vocab `CLAUDE.md`). Distinct de la **Songlist** (collection perso existante). Gros chantier produit — mériterait **son propre PRD** (`bmad-prd`) plutôt que cette ligne. Débloque la landing page (matière à montrer).
+- **Vraie landing page non-connecté** — vitrine produit (sections valeur/features : suivi songs/tempos/tonalités, heatmap de pratique, playlists ; visuels/captures ; social proof éventuel ; CTA _Create account_ / _Sign in_ répétés) en place de la HomePage actuelle (logo + pitch d'une ligne). **Séquencée après le Catalog** (collection partagée de chansons prêtes) — décision 2026-07-12 : attendre d'avoir de la matière à montrer avant de construire la vitrine. Produit + design-avant-code (brainstorm/UX avant stories). Englobe le placement des CTA non-connecté (ex-item « Header non connecté qui déborde »). Promue depuis `deferred-work.md`. [`src/App.tsx` HomePage → probablement `LandingPage.tsx`]
 
 ## 5. Exigences fonctionnelles
 

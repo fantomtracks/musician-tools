@@ -12,6 +12,16 @@ project adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+<!-- v2 line — the Catalog is a multi-epic feature (browse/add/curate + drafts +
+     song↔catalog link + curated content). It ships as 2.0.0 when complete, NOT
+     piecemeal. Keep its entries here until the v2 release. -->
+
+### Added
+- **A shared Catalog of ready-made songs you can add to your songlist in one tap.**
+  - **Browse & search** a shared pool of pre-filled songs — title, artist, key, mode, time signature — with filters, and open any entry to see its details.
+  - **Add to my songlist** copies a catalog song straight into your own songlist with its details pre-filled; if it's already there, you're told instead of ending up with a duplicate.
+  - **Curators** get a dedicated area to build and maintain the shared Catalog — add, edit, and remove entries (including removing several at once) — kept cleanly separate from everyone's personal songlists.
+
 ## [1.14.0] — 2026-07-11
 
 ### Changed

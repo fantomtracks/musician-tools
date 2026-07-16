@@ -9,6 +9,7 @@ export type Profile = {
   pendingEmail: string | null;
   emailVerified: boolean;
   isAdmin: boolean;
+  isCurator?: boolean; // story 19.2: rehydrated into the auth user on profile load
 };
 
 export type NameUpdate = {

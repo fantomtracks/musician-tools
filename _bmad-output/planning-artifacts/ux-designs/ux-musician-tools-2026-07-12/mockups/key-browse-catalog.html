@@ -1,0 +1,397 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Browse Catalog — /catalog</title>
+<style>
+/* =========================================================================
+   SPINE GOVERNANCE — this screen renders /catalog "Browse Catalog"
+   DESIGN.md   → Layout & Spacing (Search→Collections→Recently added→list),
+                 Components: Collection card, Recently-added card, Catalog list row,
+                 Add button 3 states, rail_scroll_container / rail_edge_peek
+   EXPERIENCE.md → Component Patterns: Browse landing, Collection card, Recently-added
+                 card, Catalog list row, Inline Add, Duplicate calm state
+                 State Patterns: Row/carte doublon; Responsive (≥lg sidebar filters)
+   Decision log → DL-2, DL-3, DL-5, DL-7, DL-8, DL-11, DL-15, DL-18 (Artist before Title), DL-Nav
+   Inherited    → ux-2026-07-04: lg=1024 breakpoint, sticky opaque table header, min-w-0
+   All hex values are the real Tailwind theme (tailwind.config.ts + src/index.css).
+   ========================================================================= */
+
+:root{
+  --brand-500:#4f6cff; --brand-600:#3a52cc; --brand-700:#2c3ea3; --brand-100:#e9eeff; --brand-400:#7a93ff;
+  --purple-600:#9333ea; --purple-700:#7e22ce; --purple-300:#c084fc;
+  --green-100:#dcfce7; --green-700:#15803d; --green-500:#22c55e;
+  /* light theme surfaces */
+  --page-grad: linear-gradient(135deg,#f9fafb 0%,#eff6ff 50%,#faf5ff 100%);
+  --surface:#ffffff; --surface-2:#f9fafb; --border:#f3f4f6; --divider:#e5e7eb;
+  --text:#111827; --muted:#6b7280; --label:#374151;
+  --input-bg:#ffffff; --input-border:#d1d5db;
+  --glass:rgba(255,255,255,0.8); --glass-border:#e5e7eb;
+  --row-border:#f3f4f6;
+  --grad-tile: linear-gradient(135deg,#4f6cff,#9333ea);
+  --grad-text: linear-gradient(90deg,#3a52cc,#9333ea);
+}
+.dark{
+  --page-grad: linear-gradient(135deg,#111827 0%,#1f2937 50%,#030712 100%);
+  --surface:#1f2937; --surface-2:#111827; --border:#374151; --divider:#374151;
+  --text:#f3f4f6; --muted:#9ca3af; --label:#d1d5db;
+  --input-bg:#374151; --input-border:#4b5563;
+  --glass:rgba(31,41,55,0.8); --glass-border:#374151;
+  --row-border:#374151;
+  --grad-tile: linear-gradient(135deg,#3a52cc,#7e22ce);
+  --grad-text: linear-gradient(90deg,#7a93ff,#c084fc);
+}
+
+*{box-sizing:border-box;}
+body{margin:0;background:#8b8f9a;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI','Roboto','Helvetica Neue',sans-serif;-webkit-font-smoothing:antialiased;}
+.wrap{max-width:1320px;margin:0 auto;padding:28px 20px 60px;}
+.caption{color:#e8e9ef;font-size:13px;margin:22px 4px 8px;font-weight:600;letter-spacing:.02em;}
+
+/* ---- browser chrome frame ---- */
+.browser{border-radius:12px;overflow:hidden;box-shadow:0 18px 50px -12px rgba(0,0,0,.5);border:1px solid rgba(0,0,0,.25);}
+.chrome{display:flex;align-items:center;gap:10px;background:#e6e7eb;padding:9px 12px;border-bottom:1px solid #d3d4d9;}
+.dark-chrome{background:#20242c;border-bottom:1px solid #333842;}
+.dots{display:flex;gap:7px;}
+.dot{width:12px;height:12px;border-radius:50%;}
+.d1{background:#ff5f57;} .d2{background:#febc2e;} .d3{background:#28c840;}
+.urlbar{flex:1;background:#fff;border-radius:7px;padding:5px 12px;font-size:12.5px;color:#4b5563;text-align:center;}
+.dark-chrome .urlbar{background:#11141a;color:#9ca3af;}
+
+/* ---- app page ---- */
+.page{background:var(--page-grad);color:var(--text);}
+.appbar{position:sticky;top:0;background:var(--glass);backdrop-filter:blur(16px);border-bottom:1px solid var(--glass-border);box-shadow:0 1px 2px rgba(0,0,0,.05);}
+.appbar-in{max-width:1240px;margin:0 auto;height:64px;display:flex;align-items:center;justify-content:space-between;padding:0 24px;}
+.brand{display:flex;align-items:center;gap:10px;}
+.logo{width:32px;height:32px;border-radius:9px;background:linear-gradient(135deg,#4f6cff,#9333ea);display:flex;align-items:center;justify-content:center;color:#fff;font-weight:700;font-size:18px;}
+.brandname{font-size:20px;font-weight:700;background:var(--grad-text);-webkit-background-clip:text;background-clip:text;color:transparent;}
+.nav{display:flex;align-items:center;gap:30px;margin-left:38px;}
+.nav a{color:var(--label);text-decoration:none;font-weight:500;font-size:15px;}
+.nav a:hover{color:var(--brand-600);}
+.nav a.active{color:var(--brand-600);font-weight:600;}
+.dark .nav a.active{color:var(--brand-400);}
+.iconbtn{width:36px;height:36px;border-radius:9px;background:#f3f4f6;border:none;display:flex;align-items:center;justify-content:center;font-size:17px;cursor:pointer;}
+.dark .iconbtn{background:#374151;}
+.appbar-right{display:flex;align-items:center;gap:14px;}
+
+.main{max-width:1240px;margin:0 auto;padding:28px 24px 48px;}
+h1.title{font-size:34px;font-weight:600;letter-spacing:-.02em;margin:0 0 4px;}
+.subtitle{color:var(--muted);font-size:15px;margin:0 0 22px;}
+
+/* search — emphasized, on top */
+.searchwrap{position:relative;margin-bottom:30px;}
+.searchwrap .mag{position:absolute;left:16px;top:50%;transform:translateY(-50%);color:var(--muted);font-size:17px;}
+.search{width:100%;padding:15px 16px 15px 46px;font-size:16px;border-radius:12px;border:1px solid var(--input-border);background:var(--input-bg);color:var(--text);box-shadow:0 4px 12px -2px rgba(0,0,0,.08);}
+.search::placeholder{color:var(--muted);}
+.search:focus{outline:none;border-color:var(--brand-500);box-shadow:0 0 0 3px rgba(79,108,255,.2);}
+.clearbtn{position:absolute;right:12px;top:50%;transform:translateY(-50%);width:28px;height:28px;border-radius:9999px;border:none;background:rgba(120,120,140,.16);color:var(--muted);font-size:13px;cursor:pointer;display:flex;align-items:center;justify-content:center;}
+.clearbtn:hover{background:rgba(120,120,140,.28);}
+
+.section-label{font-size:13px;font-weight:600;text-transform:uppercase;letter-spacing:.06em;color:var(--muted);margin:0 0 12px;}
+.section{margin-bottom:32px;}
+
+/* rails */
+.rail{display:flex;gap:16px;overflow-x:auto;padding-bottom:8px;scroll-snap-type:x mandatory;}
+.rail::-webkit-scrollbar{height:8px;}
+.rail::-webkit-scrollbar-thumb{background:rgba(120,120,140,.35);border-radius:4px;}
+
+/* collection tiles (DL-7 gradient marque, aspect 4/3) */
+.tile{scroll-snap-align:start;flex:0 0 auto;width:184px;height:138px;border-radius:12px;background:var(--grad-tile);color:#fff;padding:16px;display:flex;flex-direction:column;justify-content:flex-end;box-shadow:0 4px 12px -2px rgba(0,0,0,.18);cursor:pointer;}
+.tile .tname{font-weight:700;font-size:16px;}
+.tile .tcount{font-size:12.5px;opacity:.85;margin-top:2px;}
+
+/* recently-added song cards */
+.scard{scroll-snap-align:start;flex:0 0 auto;width:232px;border-radius:12px;background:var(--surface);border:1px solid var(--border);box-shadow:0 4px 12px -2px rgba(0,0,0,.08);padding:16px;display:flex;flex-direction:column;gap:10px;}
+.scard .st{font-weight:500;font-size:15px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;}
+.scard .sa{color:var(--muted);font-size:13.5px;}
+.chips{display:flex;gap:6px;flex-wrap:wrap;}
+.badge{display:inline-flex;align-items:center;gap:4px;border-radius:9999px;font-size:11.5px;font-weight:500;padding:5px 9px;}
+.badge-primary{background:var(--brand-100);color:var(--brand-700);}
+.badge-success{background:var(--green-100);color:var(--green-700);}
+.btn-primary{display:inline-flex;align-items:center;justify-content:center;gap:8px;padding:9px 14px;border-radius:10px;background:var(--brand-500);color:#fff;font-weight:500;font-size:13.5px;border:none;cursor:pointer;}
+.btn-primary:hover{background:var(--brand-600);}
+.btn-add-already{display:inline-flex;align-items:center;gap:6px;border-radius:9999px;background:var(--green-100);color:var(--green-700);font-weight:500;font-size:13px;padding:8px 13px;border:none;cursor:pointer;}
+
+/* All songs = sidebar filters + list */
+.allsongs{display:grid;grid-template-columns:230px 1fr;gap:24px;align-items:start;}
+.filters{background:var(--surface);border:1px solid var(--border);border-radius:12px;padding:16px;box-shadow:0 4px 12px -2px rgba(0,0,0,.08);}
+.filters h4{margin:0 0 12px;font-size:14px;font-weight:600;}
+.fgroup{margin-bottom:14px;}
+.fgroup .flabel{display:block;font-size:12px;font-weight:600;color:var(--label);margin-bottom:6px;}
+.fselect{width:100%;padding:8px 10px;border-radius:9px;border:1px solid var(--input-border);background:var(--input-bg);color:var(--text);font-size:13px;}
+
+.listcard{background:var(--surface);border:1px solid var(--border);border-radius:12px;box-shadow:0 4px 12px -2px rgba(0,0,0,.08);overflow:hidden;}
+.listmeta{display:flex;align-items:center;justify-content:space-between;padding:12px 16px;border-bottom:1px solid var(--divider);}
+.listmeta .lm-sort{font-size:12.5px;color:var(--muted);}
+.thead,.trow{display:grid;grid-template-columns:2fr 2.4fr 0.9fr 0.9fr 200px;align-items:center;gap:12px;padding:12px 16px;}
+.thead{position:sticky;top:0;background:var(--surface);border-bottom:1px solid var(--divider);font-size:11.5px;text-transform:uppercase;letter-spacing:.05em;color:var(--muted);font-weight:600;}
+.trow{border-bottom:1px solid var(--row-border);font-size:14.5px;}
+.trow:last-child{border-bottom:none;}
+.trow .r-title{font-weight:500;}
+.trow .r-artist{color:var(--muted);}
+.r-action{justify-self:end;}
+.mono{font-variant-numeric:tabular-nums;}
+</style>
+</head>
+<body>
+<div class="wrap">
+
+  <!-- ================= LIGHT ================= -->
+  <div class="caption">Discovery (empty search) · /catalog · Browse Catalog — light</div>
+  <div class="browser">
+    <div class="chrome"><div class="dots"><span class="dot d1"></span><span class="dot d2"></span><span class="dot d3"></span></div><div class="urlbar">musiciantools.app/catalog</div></div>
+    <div class="page">
+      <header class="appbar"><div class="appbar-in">
+        <div class="brand" style="display:flex;align-items:center;">
+          <div class="logo">♪</div><span class="brandname">Musician Tools</span>
+          <nav class="nav">
+            <a href="#">Songlist</a><a href="#" class="active">Catalog</a><a href="#">Heatmap</a>
+            <a href="#">Sessions</a><a href="#">Playlists</a><a href="#">Topics</a><a href="#">Instruments</a>
+          </nav>
+        </div>
+        <div class="appbar-right"><button class="iconbtn">🌙</button><button class="iconbtn">👤</button></div>
+      </div></header>
+
+      <main class="main">
+        <h1 class="title">Catalog</h1>
+        <p class="subtitle">Browse ready-made songs — add them to your Songlist</p>
+
+        <div class="searchwrap"><span class="mag">🔍</span>
+          <input class="search" placeholder="Search the Catalog by title, artist, key…">
+        </div>
+
+        <div class="section">
+          <p class="section-label">Collections</p>
+          <div class="rail">
+            <div class="tile"><div class="tname">Rock 90</div><div class="tcount">Rock 90 · 20</div></div>
+            <div class="tile"><div class="tname">Pop 2000</div><div class="tcount">Pop 2000 · 18</div></div>
+            <div class="tile"><div class="tname">90s Chill</div><div class="tcount">90s Chill · 12</div></div>
+            <div class="tile"><div class="tname">Acoustic</div><div class="tcount">Acoustic · 9</div></div>
+            <div class="tile"><div class="tname">Indie Night</div><div class="tcount">Indie Night · 14</div></div>
+          </div>
+        </div>
+
+        <div class="section">
+          <p class="section-label">Recently added</p>
+          <div class="rail">
+            <div class="scard"><div class="sa">The Cranberries</div><div class="st">Zombie</div>
+              <div class="chips"><span class="badge badge-primary">Em</span><span class="badge badge-primary">84 BPM</span></div>
+              <button class="btn-primary">Add to my songlist</button></div>
+            <div class="scard"><div class="sa">Radiohead</div><div class="st">Creep</div>
+              <div class="chips"><span class="badge badge-primary">G</span><span class="badge badge-primary">92 BPM</span></div>
+              <button class="btn-primary">Add to my songlist</button></div>
+            <div class="scard"><div class="sa">Green Day</div><div class="st">Boulevard of Broken Dreams</div>
+              <div class="chips"><span class="badge badge-primary">Fm</span><span class="badge badge-primary">82 BPM</span></div>
+              <button class="btn-primary">Add to my songlist</button></div>
+            <div class="scard"><div class="sa">Oasis</div><div class="st">Wonderwall</div>
+              <div class="chips"><span class="badge badge-primary">Em</span><span class="badge badge-primary">87 BPM</span></div>
+              <button class="btn-add-already">✓ Already in your songlist</button></div>
+          </div>
+        </div>
+
+        <div class="section">
+          <p class="section-label">All songs</p>
+          <div class="allsongs">
+            <aside class="filters">
+              <h4>Filters</h4>
+              <div class="fgroup"><span class="flabel">Key</span><select class="fselect"><option>Any key</option><option>Em</option><option>G</option></select></div>
+              <div class="fgroup"><span class="flabel">Genre</span><select class="fselect"><option>Any genre</option><option>Rock</option><option>Indie</option></select></div>
+              <div class="fgroup"><span class="flabel">Mode</span><select class="fselect"><option>Any mode</option><option>Major</option><option>Minor</option></select></div>
+              <div class="fgroup" style="margin-bottom:0;"><span class="flabel">Time signature</span><select class="fselect"><option>Any signature</option><option>4/4</option><option>3/4</option></select></div>
+            </aside>
+
+            <div class="listcard">
+              <div class="listmeta"><span style="font-weight:600;font-size:14px;">248 songs</span><span class="lm-sort">Sorted by artist → title</span></div>
+              <div class="thead"><span>Artist</span><span>Title</span><span>Key</span><span>BPM</span><span></span></div>
+              <div class="trow"><span class="r-artist">Green Day</span><span class="r-title">Boulevard of Broken Dreams</span><span class="mono">Fm</span><span class="mono">82</span><span class="r-action"><button class="btn-primary">Add to my songlist</button></span></div>
+              <div class="trow"><span class="r-artist">Oasis</span><span class="r-title">Wonderwall</span><span class="mono">Em</span><span class="mono">87</span><span class="r-action"><button class="btn-add-already">✓ Already in your songlist</button></span></div>
+              <div class="trow"><span class="r-artist">Radiohead</span><span class="r-title">Creep</span><span class="mono">G</span><span class="mono">92</span><span class="r-action"><button class="btn-primary">Add to my songlist</button></span></div>
+              <div class="trow"><span class="r-artist">The Cranberries</span><span class="r-title">Zombie</span><span class="mono">Em</span><span class="mono">84</span><span class="r-action"><button class="btn-primary">Add to my songlist</button></span></div>
+            </div>
+          </div>
+        </div>
+      </main>
+    </div>
+  </div>
+
+  <!-- ================= DARK ================= -->
+  <div class="caption">Discovery (empty search) · /catalog · Browse Catalog — dark (load-bearing)</div>
+  <div class="browser dark">
+    <div class="chrome dark-chrome"><div class="dots"><span class="dot d1"></span><span class="dot d2"></span><span class="dot d3"></span></div><div class="urlbar">musiciantools.app/catalog</div></div>
+    <div class="page">
+      <header class="appbar"><div class="appbar-in">
+        <div class="brand">
+          <div class="logo">♪</div><span class="brandname">Musician Tools</span>
+          <nav class="nav">
+            <a href="#">Songlist</a><a href="#" class="active">Catalog</a><a href="#">Heatmap</a>
+            <a href="#">Sessions</a><a href="#">Playlists</a><a href="#">Topics</a><a href="#">Instruments</a>
+          </nav>
+        </div>
+        <div class="appbar-right"><button class="iconbtn">☀️</button><button class="iconbtn">👤</button></div>
+      </div></header>
+
+      <main class="main">
+        <h1 class="title">Catalog</h1>
+        <p class="subtitle">Browse ready-made songs — add them to your Songlist</p>
+
+        <div class="searchwrap"><span class="mag">🔍</span>
+          <input class="search" placeholder="Search the Catalog by title, artist, key…">
+        </div>
+
+        <div class="section">
+          <p class="section-label">Collections</p>
+          <div class="rail">
+            <div class="tile"><div class="tname">Rock 90</div><div class="tcount">Rock 90 · 20</div></div>
+            <div class="tile"><div class="tname">Pop 2000</div><div class="tcount">Pop 2000 · 18</div></div>
+            <div class="tile"><div class="tname">90s Chill</div><div class="tcount">90s Chill · 12</div></div>
+            <div class="tile"><div class="tname">Acoustic</div><div class="tcount">Acoustic · 9</div></div>
+            <div class="tile"><div class="tname">Indie Night</div><div class="tcount">Indie Night · 14</div></div>
+          </div>
+        </div>
+
+        <div class="section">
+          <p class="section-label">Recently added</p>
+          <div class="rail">
+            <div class="scard"><div class="sa">The Cranberries</div><div class="st">Zombie</div>
+              <div class="chips"><span class="badge badge-primary">Em</span><span class="badge badge-primary">84 BPM</span></div>
+              <button class="btn-primary">Add to my songlist</button></div>
+            <div class="scard"><div class="sa">Radiohead</div><div class="st">Creep</div>
+              <div class="chips"><span class="badge badge-primary">G</span><span class="badge badge-primary">92 BPM</span></div>
+              <button class="btn-primary">Add to my songlist</button></div>
+            <div class="scard"><div class="sa">Green Day</div><div class="st">Boulevard of Broken Dreams</div>
+              <div class="chips"><span class="badge badge-primary">Fm</span><span class="badge badge-primary">82 BPM</span></div>
+              <button class="btn-primary">Add to my songlist</button></div>
+            <div class="scard"><div class="sa">Oasis</div><div class="st">Wonderwall</div>
+              <div class="chips"><span class="badge badge-primary">Em</span><span class="badge badge-primary">87 BPM</span></div>
+              <button class="btn-add-already">✓ Already in your songlist</button></div>
+          </div>
+        </div>
+
+        <div class="section">
+          <p class="section-label">All songs</p>
+          <div class="allsongs">
+            <aside class="filters">
+              <h4>Filters</h4>
+              <div class="fgroup"><span class="flabel">Key</span><select class="fselect"><option>Any key</option><option>Em</option><option>G</option></select></div>
+              <div class="fgroup"><span class="flabel">Genre</span><select class="fselect"><option>Any genre</option><option>Rock</option><option>Indie</option></select></div>
+              <div class="fgroup"><span class="flabel">Mode</span><select class="fselect"><option>Any mode</option><option>Major</option><option>Minor</option></select></div>
+              <div class="fgroup" style="margin-bottom:0;"><span class="flabel">Time signature</span><select class="fselect"><option>Any signature</option><option>4/4</option><option>3/4</option></select></div>
+            </aside>
+
+            <div class="listcard">
+              <div class="listmeta"><span style="font-weight:600;font-size:14px;">248 songs</span><span class="lm-sort">Sorted by artist → title</span></div>
+              <div class="thead"><span>Artist</span><span>Title</span><span>Key</span><span>BPM</span><span></span></div>
+              <div class="trow"><span class="r-artist">Green Day</span><span class="r-title">Boulevard of Broken Dreams</span><span class="mono">Fm</span><span class="mono">82</span><span class="r-action"><button class="btn-primary">Add to my songlist</button></span></div>
+              <div class="trow"><span class="r-artist">Oasis</span><span class="r-title">Wonderwall</span><span class="mono">Em</span><span class="mono">87</span><span class="r-action"><button class="btn-add-already">✓ Already in your songlist</button></span></div>
+              <div class="trow"><span class="r-artist">Radiohead</span><span class="r-title">Creep</span><span class="mono">G</span><span class="mono">92</span><span class="r-action"><button class="btn-primary">Add to my songlist</button></span></div>
+              <div class="trow"><span class="r-artist">The Cranberries</span><span class="r-title">Zombie</span><span class="mono">Em</span><span class="mono">84</span><span class="r-action"><button class="btn-primary">Add to my songlist</button></span></div>
+            </div>
+          </div>
+        </div>
+      </main>
+    </div>
+  </div>
+
+  <!-- ================= SEARCH ACTIVE — FILTER IN PLACE (DL-6) — LIGHT ================= -->
+  <div class="caption">Search active — filter in place (DL-6) · /catalog?q=zombie — light · rails erased, list heading = “Results (3)”</div>
+  <div class="browser">
+    <div class="chrome"><div class="dots"><span class="dot d1"></span><span class="dot d2"></span><span class="dot d3"></span></div><div class="urlbar">musiciantools.app/catalog?q=zombie</div></div>
+    <div class="page">
+      <header class="appbar"><div class="appbar-in">
+        <div class="brand" style="display:flex;align-items:center;">
+          <div class="logo">♪</div><span class="brandname">Musician Tools</span>
+          <nav class="nav">
+            <a href="#">Songlist</a><a href="#" class="active">Catalog</a><a href="#">Heatmap</a>
+            <a href="#">Sessions</a><a href="#">Playlists</a><a href="#">Topics</a><a href="#">Instruments</a>
+          </nav>
+        </div>
+        <div class="appbar-right"><button class="iconbtn">🌙</button><button class="iconbtn">👤</button></div>
+      </div></header>
+
+      <main class="main">
+        <h1 class="title">Catalog</h1>
+        <p class="subtitle">Browse ready-made songs — add them to your Songlist</p>
+
+        <div class="searchwrap"><span class="mag">🔍</span>
+          <input class="search" value="zombie" aria-label="Search the Catalog">
+          <button class="clearbtn" aria-label="Clear search">✕</button>
+        </div>
+
+        <!-- DL-6: rails (Collections + Recently added) are ERASED, not pushed down.
+             Nothing is inserted between the search field and where the Collections were.
+             The "All songs" list rises directly under the search + filters, heading → "Results (3)". -->
+        <div class="section">
+          <div class="allsongs">
+            <aside class="filters">
+              <h4>Filters</h4>
+              <div class="fgroup"><span class="flabel">Key</span><select class="fselect"><option>Any key</option><option>Em</option><option>G</option></select></div>
+              <div class="fgroup"><span class="flabel">Genre</span><select class="fselect"><option>Any genre</option><option>Rock</option><option>Indie</option></select></div>
+              <div class="fgroup"><span class="flabel">Mode</span><select class="fselect"><option>Any mode</option><option>Major</option><option>Minor</option></select></div>
+              <div class="fgroup" style="margin-bottom:0;"><span class="flabel">Time signature</span><select class="fselect"><option>Any signature</option><option>4/4</option><option>3/4</option></select></div>
+            </aside>
+
+            <div class="listcard">
+              <div class="listmeta"><span style="font-weight:600;font-size:14px;">Results (3)</span><span class="lm-sort">Sorted by artist → title</span></div>
+              <div class="thead"><span>Artist</span><span>Title</span><span>Key</span><span>BPM</span><span></span></div>
+              <div class="trow"><span class="r-artist">Bad Wolves</span><span class="r-title">Zombie</span><span class="mono">Em</span><span class="mono">75</span><span class="r-action"><button class="btn-primary">Add to my songlist</button></span></div>
+              <div class="trow"><span class="r-artist">Miley Cyrus</span><span class="r-title">Zombie</span><span class="mono">Em</span><span class="mono">84</span><span class="r-action"><button class="btn-primary">Add to my songlist</button></span></div>
+              <div class="trow"><span class="r-artist">The Cranberries</span><span class="r-title">Zombie</span><span class="mono">Em</span><span class="mono">84</span><span class="r-action"><button class="btn-primary">Add to my songlist</button></span></div>
+            </div>
+          </div>
+        </div>
+      </main>
+    </div>
+  </div>
+
+  <!-- ================= SEARCH ACTIVE — FILTER IN PLACE (DL-6) — DARK ================= -->
+  <div class="caption">Search active — filter in place (DL-6) · /catalog?q=zombie — dark (load-bearing)</div>
+  <div class="browser dark">
+    <div class="chrome dark-chrome"><div class="dots"><span class="dot d1"></span><span class="dot d2"></span><span class="dot d3"></span></div><div class="urlbar">musiciantools.app/catalog?q=zombie</div></div>
+    <div class="page">
+      <header class="appbar"><div class="appbar-in">
+        <div class="brand">
+          <div class="logo">♪</div><span class="brandname">Musician Tools</span>
+          <nav class="nav">
+            <a href="#">Songlist</a><a href="#" class="active">Catalog</a><a href="#">Heatmap</a>
+            <a href="#">Sessions</a><a href="#">Playlists</a><a href="#">Topics</a><a href="#">Instruments</a>
+          </nav>
+        </div>
+        <div class="appbar-right"><button class="iconbtn">☀️</button><button class="iconbtn">👤</button></div>
+      </div></header>
+
+      <main class="main">
+        <h1 class="title">Catalog</h1>
+        <p class="subtitle">Browse ready-made songs — add them to your Songlist</p>
+
+        <div class="searchwrap"><span class="mag">🔍</span>
+          <input class="search" value="zombie" aria-label="Search the Catalog">
+          <button class="clearbtn" aria-label="Clear search">✕</button>
+        </div>
+
+        <!-- DL-6: rails erased (not pushed); list rises directly under search + filters, heading → "Results (3)". -->
+        <div class="section">
+          <div class="allsongs">
+            <aside class="filters">
+              <h4>Filters</h4>
+              <div class="fgroup"><span class="flabel">Key</span><select class="fselect"><option>Any key</option><option>Em</option><option>G</option></select></div>
+              <div class="fgroup"><span class="flabel">Genre</span><select class="fselect"><option>Any genre</option><option>Rock</option><option>Indie</option></select></div>
+              <div class="fgroup"><span class="flabel">Mode</span><select class="fselect"><option>Any mode</option><option>Major</option><option>Minor</option></select></div>
+              <div class="fgroup" style="margin-bottom:0;"><span class="flabel">Time signature</span><select class="fselect"><option>Any signature</option><option>4/4</option><option>3/4</option></select></div>
+            </aside>
+
+            <div class="listcard">
+              <div class="listmeta"><span style="font-weight:600;font-size:14px;">Results (3)</span><span class="lm-sort">Sorted by artist → title</span></div>
+              <div class="thead"><span>Artist</span><span>Title</span><span>Key</span><span>BPM</span><span></span></div>
+              <div class="trow"><span class="r-artist">Bad Wolves</span><span class="r-title">Zombie</span><span class="mono">Em</span><span class="mono">75</span><span class="r-action"><button class="btn-primary">Add to my songlist</button></span></div>
+              <div class="trow"><span class="r-artist">Miley Cyrus</span><span class="r-title">Zombie</span><span class="mono">Em</span><span class="mono">84</span><span class="r-action"><button class="btn-primary">Add to my songlist</button></span></div>
+              <div class="trow"><span class="r-artist">The Cranberries</span><span class="r-title">Zombie</span><span class="mono">Em</span><span class="mono">84</span><span class="r-action"><button class="btn-primary">Add to my songlist</button></span></div>
+            </div>
+          </div>
+        </div>
+      </main>
+    </div>
+  </div>
+
+</div>
+</body>
+</html>

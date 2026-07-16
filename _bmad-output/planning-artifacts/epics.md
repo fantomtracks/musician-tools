@@ -24,6 +24,15 @@ epic17:
 epic18:
   source: 'issu rétro Epic 17 + QA 17.2 (fiche chanson = état local, pas une route) — cadré en ADR architecture-song-route-2026-07-11.md (décision northwood : migrer vers data-router). Ferme 3 items nav (refresh, back-button, guard maison 17.2). Découpage tranché : 2 stories (migration pure → route-ify + swap guard).'
   added: 2026-07-11
+epic19:
+  source: 'Catalog — pool partagé de chansons. Source = prd-musician-tools-2026-07-12 (FR-1..13, NFR-1..6) + addendum + ux-musician-tools-2026-07-12 (DESIGN/EXPERIENCE, DL-*) + architecture-catalog-2026-07-12.md. Première donnée partagée non-scopée userUid ; rôle isCurator (403) ; Add snapshot+provenance ; Collections + playlist miroir.'
+  added: 2026-07-15
+  inputDocuments:
+    - _bmad-output/planning-artifacts/prds/prd-musician-tools-2026-07-12/prd.md
+    - _bmad-output/planning-artifacts/prds/prd-musician-tools-2026-07-12/addendum.md
+    - _bmad-output/planning-artifacts/ux-designs/ux-musician-tools-2026-07-12/DESIGN.md
+    - _bmad-output/planning-artifacts/ux-designs/ux-musician-tools-2026-07-12/EXPERIENCE.md
+    - _bmad-output/planning-artifacts/architecture-catalog-2026-07-12.md
 ---
 
 # musician-tools - Epic Breakdown
@@ -225,7 +234,18 @@ L'auto-création exclue d'Epic 16, cadrée après brainstorm (First Principles +
 ### Epic 18: Fiche chanson = vraie route (migration data-router)
 Issu de la rétro Epic 17 + QA 17.2 : la fiche chanson est un **état local** (`page:'form'` + `editingUid`), pas une route → 3 symptômes de même racine (refresh sur une chanson → songlist ; back-button navigateur non gardé ; `useBlocker` indispo → guard de nav **maison** construit en 17.2). Cadré en **ADR** (`architecture-song-route-2026-07-11.md`, décision northwood) : **migrer `<BrowserRouter>` → `createBrowserRouter`/`<RouterProvider>` (data-router)** et **router-ifier le form** (`/songs`, `/songs/new`, `/songs/:uid`). Débloque `useBlocker` qui **remplace intégralement** le guard maison → **dette nette réduite**. Stories : 18.1 migration data-router **pure** (aucun changement de comportement, toutes routes à l'identique), 18.2 route-ify le form + swap guard→`useBlocker` (ferme refresh + back-button + 404 scopé deep-link). ⚠️ **Révise du code shippé** (guard 17.2, v1.13.0) : le remplacement `useBlocker` doit préserver l'UX validée en QA 17.2. _Détail § Epic 18 ci-dessous._
 
-**Dépendances :** E1 → E2 → (E3 ∥ E4). Les epics 3 et 4 sont indépendants l'un de l'autre. E6 dépend d'E4 (pont Mark as Played). E5 est transverse ; E9 (confort UI, post-rétro) est autonome et se solde avant E7 ; E7 (compte + sécurité, hors-PRD) est autonome — ne dépend d'aucun épic PRD et n'en bloque aucun. E10–E17 (confort/dette/sécu post-rétro) sont de même autonomes, sans dépendance inter-epics, en exécution légère (E15 s'adosse à l'auth durcie d'E7 mais ne dépend d'aucun autre épic). **Intra-E17 :** 17.2 (front) dépend de 17.1 (garde serveur + 409) ; ordre imposé 17.1 → 17.2. E17 durcit rétroactivement la politique doublon posée par 13.1 (édition) mais ne dépend d'aucun autre épic. **Intra-E18 :** 18.2 (route-ify + swap guard) dépend de 18.1 (migration data-router) ; ordre imposé 18.1 → 18.2. E18 révise rétroactivement le guard de nav livré par 17.2 (le supprime au profit de `useBlocker`) mais ne dépend d'aucun autre épic. Les NFR1-NFR6 et NFR-S1-S4 transverses s'appliquent aux critères d'acceptation des stories concernées.
+### Epic 19: Catalog — Browse & Add (pool partagé, cadré 2026-07-12)
+Le **Catalog** — première donnée **partagée non-scopée `userUid`** de l'app : un utilisateur trouve une chanson **déjà remplie** et l'ajoute à sa Songlist en secondes (copie **snapshot + provenance**, éditable, garde de doublon 409), et le **curateur** (`isCurator`) crée/édite des fiches (auto-fill, unicité canonique **globale**) pour que le Catalog ait du contenu. Pose les fondations : modèle `CatalogSong` + index canonique global, `requireCurator`/403, `sourceCatalogUid` (référence **souple**), endpoint liste **paginé à enveloppe**, mécanique **Add dédiée**, front URL-as-state + flag doublon **client-side**, crochet Songlist-vide (CTA). Cadré en `architecture-catalog-2026-07-12.md` (PRD Catalog `prd-musician-tools-2026-07-12` FR-1..13). _Livre SM-2 (time-to-first-song)._
+**FRs couverts (espace Catalog) :** FR-1, FR-2, FR-3, FR-4, FR-5, FR-6, FR-7, FR-10, FR-11, FR-13 — **NFRs :** NFR-1..6. _Détail § Epic 19 ci-dessous._
+
+### Epic 19 — Story 19.5 : Curateur — gérer les fiches (ajoutée en QA 2026-07-15)
+Découvert en QA de l'Epic 19 : l'admin curateur (19-2) est **création-only** ; le curateur ne peut pas **lister / éditer / supprimer** les fiches existantes depuis l'app (seulement via SQL). Or le backend a déjà tout le CRUD (19-1 : `PUT`/`DELETE /api/catalog/:uid`, 409 rename). Story de suivi : un **écran de gestion** dans `/catalog/admin` — liste des fiches + **édition in-place** (réutilise le form de 19-2 en mode edit, `updateCatalogEntry` déjà exposé au service) + **suppression** (`ConfirmDialog` + delete ; le découplage `sourceCatalogUid` souple garantit que les Songs perso copiées survivent). Décision northwood (2026-07-15) : story de suivi, à faire avant ou après le merge de l'epic (TBD). Réutilise 19-1/19-2/19-3.
+
+### Epic 20: Catalog — Collections (peuplement thématique, cadré 2026-07-12)
+Un utilisateur **importe une Collection** curée (« Rock 90 ») d'un geste → chansons dans sa Songlist + **Playlist perso miroir** idempotente ; le curateur **compose** des Collections. Bâtit sur Epic 19 (modèle fiche + mécanique Add stables) : tables `CatalogCollection` + jointure, import **non-atomique** best-effort, enrichit le crochet Songlist-vide (aperçu Collections).
+**FRs couverts (espace Catalog) :** FR-8, FR-9, FR-12. _Détail § Epic 20 ci-dessous._
+
+**Dépendances :** E1 → E2 → (E3 ∥ E4). Les epics 3 et 4 sont indépendants l'un de l'autre. E6 dépend d'E4 (pont Mark as Played). E5 est transverse ; E9 (confort UI, post-rétro) est autonome et se solde avant E7 ; E7 (compte + sécurité, hors-PRD) est autonome — ne dépend d'aucun épic PRD et n'en bloque aucun. E10–E17 (confort/dette/sécu post-rétro) sont de même autonomes, sans dépendance inter-epics, en exécution légère (E15 s'adosse à l'auth durcie d'E7 mais ne dépend d'aucun autre épic). **Intra-E17 :** 17.2 (front) dépend de 17.1 (garde serveur + 409) ; ordre imposé 17.1 → 17.2. E17 durcit rétroactivement la politique doublon posée par 13.1 (édition) mais ne dépend d'aucun autre épic. **Intra-E18 :** 18.2 (route-ify + swap guard) dépend de 18.1 (migration data-router) ; ordre imposé 18.1 → 18.2. E18 révise rétroactivement le guard de nav livré par 17.2 (le supprime au profit de `useBlocker`) mais ne dépend d'aucun autre épic. **E19 → E20** : E19 (Browse & Add + curation de fiches) pose le modèle `CatalogSong` + la mécanique Add dont E20 (Collections) dépend — ordre imposé E19 → E20. E19/E20 (Catalog) sont autonomes vis-à-vis des epics journal ; ils réutilisent SANS les modifier l'unicité Epic 17, les playlists Epic 10, l'auto-fill 8.1 et le data-router Epic 18 (additif strict). Les NFR1-NFR6 et NFR-S1-S4 transverses s'appliquent aux critères d'acceptation des stories concernées ; les NFR-1..6 **Catalog** (espace propre) s'appliquent à E19/E20.
 
 ## Epic 1: Ma bibliothèque de sujets de travail
 
@@ -1498,3 +1518,317 @@ So that rafraîchir reste sur la chanson, le bouton back du navigateur soit gér
 **Then** `getSong` renvoie **404 scopé** (invariant 7.5 : « pas à toi » indistinguable de « n'existe pas ») → écran **« Song not found »** + lien retour `/songs` ; aucun oracle d'existence
 
 **And** ⚠️ **révise le guard livré en 17.2 (prod v1.13.0)** : le comportement UX (popup titre-vide, fresh-delete silencieux, symétrie du blocage doublon) doit être **préservé à l'identique** — validé par la QA nav app-wide (comme 17.2) ; UI/messages en anglais ; suites vertes (tests route/param, deep-link 404, `useBlocker` popup fresh vs à-valeur, auto-création `navigate(replace)`) ; tsc + lint clean ; mettre à jour `deferred-work.md` (les 2 defer nav de 17.2 → **fermés**). `[src/pages/Songs.tsx, src/components/Header.tsx, DELETE src/contexts/LeaveGuardContext.ts + src/contexts/LeaveGuardProvider.tsx]`
+
+---
+
+# Catalog (Epic 19+) — Requirements
+
+_Ajouté 2026-07-15. Source : PRD Catalog `prd-musician-tools-2026-07-12` (espace de FR PROPRE — FR-1..13, ne pas confondre avec les FR1..26 du journal), UX `ux-musician-tools-2026-07-12`, architecture `architecture-catalog-2026-07-12.md`. Découpage en epics/stories ci-dessous._
+
+## Functional Requirements (Catalog)
+
+- **FR-1** — Parcourir le Catalog (connecté ; non connecté → 401 ; liste paginée/virtualisée).
+- **FR-2** — Rechercher (titre/artiste, casse+accents pliés) et filtrer par métadonnées intrinsèques : `key · mode · timeSignature · genre` (combinables ; état « aucun résultat »).
+- **FR-3** — Consulter le détail d'une fiche (tous champs intrinsèques + liens cliquables) ; CTA unique `Add to my songlist` ou état doublon.
+- **FR-4** — `Add to my songlist` : copie snapshot des champs canoniques (deep-clone) + `sourceCatalogUid` inerte ; champs perso vierges.
+- **FR-5** — La copie est pleinement éditable et indépendante (aucune synchro Catalog ↔ copie).
+- **FR-6** — Garde de doublon à l'ajout : clé canonique déjà en Songlist → bloqué (409), pointe l'existante.
+- **FR-7** — Garde-fou unidirectionnel : aucun chemin utilisateur n'écrit dans le Catalog.
+- **FR-8** — Parcourir les Collections et voir leurs fiches (nom + description éventuelle + compteur).
+- **FR-9** — Importer une Collection : garde de doublon par fiche + crée/réutilise une Playlist perso miroir du nom ; best-effort ; récap `{added, skipped, failed}`.
+- **FR-10** — Rôle Curator (`isCurator`) : écriture Catalog réservée ; sinon 403 explicite.
+- **FR-11** — Gérer les fiches (create/edit in-place uid stable/delete) ; titre requis ; auto-fill sans écraser.
+- **FR-12** — Composer des Collections (une fiche dans plusieurs Collections ; suppression fiche → retrait des Collections).
+- **FR-13** — Unicité canonique GLOBALE (title+artist) : 409 sur create ET rename.
+
+## Non-Functional Requirements (Catalog)
+
+- **NFR-1** — Donnée partagée non-scopée `userUid` (lecture aux connectés, écriture Curator).
+- **NFR-2** — Performance/scalabilité : pagination/virtualisation, index clé canonique + axes de filtre.
+- **NFR-3** — Sécurité/autorisation : rôle Curator, écriture → 403 (exception nommée au 404 anti-oracle 7.5).
+- **NFR-4** — Intégrité/découplage : suppression/édition fiche ne casse jamais une Song copiée (référence souple, pas de FK).
+- **NFR-5** — Cohérence UI : réutilise le design system, comboboxes, confirm/toast (aucune primitive neuve).
+- **NFR-6** — i18n de contenu : chaînes UI en anglais.
+
+## Additional Requirements (Architecture)
+
+- **AR-1** — Migration-first : `CatalogSong` (sous-ensemble intrinsèque, sans `userUid`) + index unique canonique GLOBAL `(lower(title), COALESCE(lower(artist),''))` créé par migration, absent du modèle (discipline Epic 17, 23505→409).
+- **AR-2** — `Users.isCurator` (bool) + middleware `requireCurator` (403) ; lecture non-scopée via `catalogcontroller` nommé + commentaire d'ancrage.
+- **AR-3** — `Songs.sourceCatalogUid` référence SOUPLE (aucune FK vive) ; dangling délibéré (crochet popularité).
+- **AR-4** — Tables Collections (`CatalogCollection` + jointure `CatalogCollectionSongs`) ; nettoyage DUR des jointures à la suppression d'une fiche.
+- **AR-5** — Endpoint liste paginé à ENVELOPPE `{items,total,page,limit}` (exception nommée) ; `ORDER BY artist,title,uid` ; `catalogService` séparé, type `CatalogSong` distinct.
+- **AR-6** — Mécanique Add = endpoint dédié `POST /api/catalog/:uid/add-to-songlist` (réutilise `Song.create` + `respondDuplicateSong`).
+- **AR-7** — Import NON-ATOMIQUE (best-effort, pas de transaction englobante ; playlist miroir idempotente).
+- **AR-8** — Flag doublon CLIENT-SIDE (réutilise `songDuplicate.ts`) ; URL-as-state (`useSearchParams`) + debounce/`AbortController`.
+- **AR-9** — 4 gaps à fermer en story 1-2 : whitelist `sort`, cap `limit`, CSRF sur writes, folding `unaccent` (extension déjà présente).
+- **AR-10** — Écrire principe §3 + exceptions dans `project-context.md` AVANT la 1ʳᵉ code-review Catalog ; séquencement seed (curation → seed → exposition).
+
+## UX Design Requirements (Catalog)
+
+- **UX-DR1** — Ordre Browse fixe : Search → rail Collections → strip Recently added → liste filtrable (DL-5).
+- **UX-DR2** — Search-to-collapse : filtre en place, rails effacés, titre `All songs`→`Results(n)` (DL-6).
+- **UX-DR3** — Tuile Collection = gradient marque + scrim de contraste (compteur ≥4.5:1) (DL-7).
+- **UX-DR4** — Bouton Add 3 états : default / flash `✓ Added` / `✓ Already in your songlist` (DL-8).
+- **UX-DR5** — État doublon = vert calme cliquable vers l'existante, jamais rouge (DL-11).
+- **UX-DR6** — Import Collection : `ConfirmDialog` (N + playlist créée/réutilisée) + toast récap (DL-12).
+- **UX-DR7** — URL-as-state (search+filtres en query params) + retour du focus sur back-nav (DL-10).
+- **UX-DR8** — Admin curateur utilitaire : entry form structure SongForm restreinte + composer search Add/Remove (pas de drag) (DL-14).
+- **UX-DR9** — Crochet Songlist-vide → CTA `Browse the Catalog` + aperçu Collections, dégradation propre (DL-13).
+- **UX-DR10** — Stretched-link a11y partout (titre = lien, Add/badge = frères, pas d'imbrication).
+- **UX-DR11** — Filtres intrinsèques SEULEMENT (Key·Genre·Mode·Time signature), aucun instrument/difficulté/accordage (DL-17).
+- **UX-DR12** — Artiste d'abord dans rows/cartes/détail (DL-18).
+- **UX-DR13** — Nav = 7e lien `Catalog` après Songlist ; entrée admin `Curate` dans le dropdown compte si `isCurator` (DL-4/Nav).
+- **UX-DR14** — Accessibility floor : live-regions (nombre de résultats, toasts), rails = listes nommées, cibles ≥44px.
+- **UX-DR15** — Responsive : deltas hérités (lg layout, sm grilles, rails scroll horizontal), dark mode partout.
+
+## FR Coverage Map (Catalog)
+
+| FR | Epic | Note |
+|---|---|---|
+| FR-1 Browse | 19 | liste paginée |
+| FR-2 Search/filter | 19 | key·mode·timeSig·genre + texte |
+| FR-3 Détail | 19 | lecture seule + CTA |
+| FR-4 Add snapshot | 19 | endpoint dédié |
+| FR-5 Éditable/indépendant | 19 | Song séparée |
+| FR-6 Garde doublon | 19 | 409 + badge |
+| FR-7 Unidirectionnel | 19 | requireCurator |
+| FR-8 Browse Collections | 20 | |
+| FR-9 Import Collection | 20 | + playlist miroir |
+| FR-10 Rôle Curator | 19 | isCurator/403 |
+| FR-11 Gérer fiches | 19 | in-place + auto-fill |
+| FR-12 Composer Collections | 20 | jointure multi |
+| FR-13 Unicité canonique | 19 | index global 409 |
+
+**Couverture UX-DR :** UX-DR1-7, 9-15 → Epic 19 (browse/add/admin fiches/fondations) ; UX-DR3 (tuile Collection), UX-DR6 (import confirm/toast), UX-DR8 (composer) → Epic 20. Aucun FR/UX-DR non couvert.
+
+---
+
+## Epic 19: Catalog — Browse & Add
+
+Première donnée **partagée non-scopée `userUid`** de l'app. Un utilisateur trouve une chanson déjà remplie et l'ajoute à sa Songlist en secondes ; le curateur crée/édite les fiches pour alimenter le Catalog. Fondations : modèle `CatalogSong` + index canonique global, `isCurator`/`requireCurator` (403), `sourceCatalogUid` (référence souple), endpoint liste paginé, mécanique Add dédiée. Réutilise SANS modifier : unicité Epic 17 (`respondDuplicateSong`), auto-fill 8.1, data-router Epic 18, `songDuplicate.ts`. Cadré en `architecture-catalog-2026-07-12.md`.
+
+### Story 19.1: Fondation Catalog + le curateur gère les fiches (backend)
+
+En tant que **curateur**,
+je veux créer, éditer et supprimer des fiches Catalog via une API protégée,
+afin que le Catalog dispose de contenu canonique unique, sans écrire de SQL.
+
+**Acceptance Criteria:**
+
+**Given** les migrations Catalog
+**When** elles s'exécutent
+**Then** une table `CatalogSong` existe (sous-ensemble intrinsèque : `title` NOT NULL, `artist`, `album`, `key`, `bpm`, `mode`, `timeSignature`, `durationSeconds`, `language` JSONB, `genre` JSONB, `streamingLinks` JSONB, `pitchStandard` ; PK `uid` UUID, `timestamps` ; `field:'snake_case'`), **sans** `userUid` ni aucun champ instrument/perso
+**And** un **index unique fonctionnel GLOBAL** `(lower(title), COALESCE(lower(artist), ''))` est créé **par migration** (`CREATE UNIQUE INDEX IF NOT EXISTS`), **absent du modèle** Sequelize (`sync()` ne le touche pas)
+**And** une colonne `Users.isCurator` (bool, défaut `false`) est ajoutée
+**And** chaque migration est **idempotente** (`showAllTables`/`describeTable`) et testée en local
+
+**Given** un utilisateur `isCurator = true`
+**When** `POST /api/catalog` avec un `title`
+**Then** 201 + fiche créée (entité brute) ; sans titre → **400** « Title is required »
+
+**Given** un utilisateur **non-curateur** (ou anonyme)
+**When** `POST` / `PUT` / `DELETE /api/catalog`
+**Then** **403** explicite « You don't have curator access. » via `requireCurator` — **jamais** 404 (la ressource est lisible, aucun secret d'énumération)
+
+**Given** une fiche `(title + artist)` existe déjà au Catalog
+**When** on crée **ou** on renomme une autre fiche vers la même **clé canonique** (casse pliée, accents gardés : « Beyoncé » ≠ « Beyonce »)
+**Then** **409** typé `{ error:'duplicate_catalog_entry', message, entry }` (via le mapping `23505`, mécanique Epic 17 sans `user_uid`)
+
+**Given** une fiche potentiellement référencée
+**When** le curateur la corrige (`PUT`)
+**Then** c'est un `UPDATE` **in-place**, `uid` **préservé** (jamais delete+recreate)
+
+**And** les routes d'écriture passent par la CSRF app-wide ; tests backend (`jest.mock('../models')`) : `requireCurator` (403/passe), 409 create ET rename, 400 titre requis
+`[backend/migrations/*-create-catalog-songs.js, *-add-is-curator-to-users.js, backend/models/catalogsong.js, backend/models/user.js, backend/middleware/requirecurator.js, backend/routes/catalog.js, backend/controllers/catalogcontroller.js]`
+
+### Story 19.2: Écran d'administration — saisir une fiche (front)
+
+En tant que **curateur**,
+je veux un formulaire d'administration pour saisir une fiche avec auto-fill,
+afin d'enrichir le Catalog sans toucher à la base (UJ-3).
+
+**Acceptance Criteria:**
+
+**Given** un utilisateur `isCurator`
+**When** il ouvre le dropdown compte
+**Then** une entrée « Curate » apparaît → `/catalog/admin` ; pour un `!isCurator` elle est **absente** et la route est protégée
+
+**Given** l'écran `/catalog/admin`
+**When** le curateur saisit une fiche
+**Then** le formulaire réutilise la **structure `SongForm`** mais **restreinte aux champs intrinsèques** (DL-17 : **pas** de instrument/difficulté/accordage/capo/technique/instrumentLinks) ; titre requis
+
+**Given** un titre + artiste saisis
+**When** l'auto-fill SongBPM est déclenché (réutilise `/api/songs/lookup`)
+**Then** BPM/durée sont proposés **sans écraser** une saisie existante (FR-11)
+
+**Given** une fiche `(title + artist)` déjà au Catalog
+**When** le curateur enregistre
+**Then** message inline « A "{title}" by {artist} is already in the Catalog. » (409, pas d'erreur rouge générique)
+
+**And** UI en anglais, dark mode, posture utilitaire ; `catalogService` porte les méthodes d'écriture
+`[src/pages/CatalogAdmin.tsx, src/services/catalogService.ts, src/components/Header.tsx, src/router.tsx]`
+
+### Story 19.3: Browse — parcourir, rechercher, filtrer, voir le détail
+
+En tant qu'**utilisateur connecté**,
+je veux parcourir, rechercher et filtrer le Catalog puis ouvrir une fiche,
+afin de trouver une chanson déjà remplie (UJ-1).
+
+**Acceptance Criteria:**
+
+**Given** un utilisateur **non connecté**
+**When** il atteint `/api/catalog` ou `/catalog`
+**Then** 401 / redirection, **aucune** fuite de contenu
+
+**Given** un utilisateur connecté
+**When** `GET /api/catalog?search=&key=&mode=&timeSignature=&genre=&sort=&page=&limit=`
+**Then** réponse **à enveloppe** `{ items, total, page, limit }` ; `ORDER BY artist, title, uid` (tiebreaker obligatoire) ; filtres combinés en ET ; `sort` limité à une **whitelist** ; `limit` **plafonné** (défaut + max)
+**And** la requête est **non scopée `userUid`** (contrôleur `catalog*` + commentaire d'ancrage au principe partagé) — jamais rescopée
+
+**Given** une recherche « beyonce »
+**When** elle s'exécute
+**Then** elle matche « Beyoncé » (folding `unaccent` serveur, réutilise le pattern topics) ; 0 résultat → « No songs match your search. » titre `Results (0)` ; le nombre est annoncé via `aria-live`
+
+**Given** je tape dans la recherche / change un filtre
+**When** l'UI réagit
+**Then** l'état vit dans l'**URL** (`useSearchParams`, source unique), avec **debounce** (~250-300ms) et **annulation** des requêtes périmées (`AbortController`) ; les rails se replient ; le back-button restaure la vue filtrée
+
+**Given** un deep-link `/catalog/:uid` inconnu/supprimé
+**When** la page charge
+**Then** **404 calme** « This song is no longer in the Catalog. » + lien `Browse the Catalog` (data-router Epic 18) ; le détail n'affiche que les champs **intrinsèques** + liens YouTube/Spotify cliquables, sans édition
+
+**And** un 7e lien `Catalog` est ajouté à la nav (après Songlist) ; états chargement (skeleton) / erreur (Retry) calmes
+`[backend/controllers/catalogcontroller.js, backend/routes/catalog.js, src/services/catalogService.ts, src/pages/Catalog.tsx, src/components/CatalogList.tsx, src/pages/CatalogEntry.tsx, src/components/Header.tsx, src/router.tsx]`
+
+### Story 19.4: Add to my songlist — copie snapshot en un geste
+
+En tant qu'**utilisateur**,
+je veux ajouter une fiche à ma Songlist en un clic,
+afin qu'elle atterrisse complète sans aucune saisie (climax UJ-1).
+
+**Acceptance Criteria:**
+
+**Given** la migration
+**When** elle s'exécute
+**Then** `Songs.sourceCatalogUid` (nullable UUID, `field:'source_catalog_uid'`) est ajoutée en **référence souple** — **aucune FK vive** ; idempotente
+
+**Given** une fiche pas encore dans ma Songlist
+**When** je clique `Add to my songlist` (`POST /api/catalog/:uid/add-to-songlist`)
+**Then** une `Song` perso est créée en **deep-clone** des JSON (`structuredClone`, aucun partage de référence) + `userUid` + `sourceCatalogUid` ; champs perso vierges (`lastPlayed=null`, aucun SongPlay/playlist) ; 201 entité brute ; toast « Added to your songlist » (annoncé)
+
+**Given** une clé canonique déjà présente dans ma Songlist
+**When** j'ajoute (ou à l'affichage de la ligne)
+**Then** le bouton **naît/bascule** en « ✓ Already in your songlist » (vert, cliquable → la Song existante) ; **aucune** insertion (`23505` → `respondDuplicateSong` → 409) ; jamais rouge (FR-6). Le flag est calculé **côté client** en réutilisant `songDuplicate.ts` contre les clés de ma Songlist (la lecture Catalog reste purement partagée)
+
+**Given** le curateur supprime la fiche Catalog source
+**When** j'ouvre ma Song copiée
+**Then** elle reste **intacte** (référence souple, dangling toléré)
+
+**Given** ma Songlist est vide
+**When** j'ouvre la page Songs
+**Then** un crochet « Your songlist is empty — Browse the Catalog to fill it in seconds » + CTA `/catalog` s'affiche ; si le fetch Catalog échoue → **CTA seul** (dégradation propre)
+
+**And** le bouton a 3 états (default / flash `✓ Added` / `Already`), inline sur row/carte/fiche, optimiste, re-tentable ; cible ≥44px ; stretched-link (bouton = frère du lien titre)
+`[backend/migrations/*-add-source-catalog-uid-to-songs.js, backend/controllers/catalogcontroller.js, backend/routes/catalog.js, src/components/CatalogAddButton.tsx, src/pages/Catalog.tsx, src/pages/CatalogEntry.tsx, src/pages/Songs.tsx, src/services/catalogService.ts]`
+
+---
+
+## Epic 20: Catalog — Collections
+
+Un utilisateur importe une Collection curée d'un geste (chansons + Playlist perso miroir) ; le curateur compose les Collections. Bâtit sur Epic 19 (modèle fiche + mécanique Add stables). Réutilise SANS modifier : `createPlaylist`/`PlaylistConflictError` (Epic 10), la mécanique Add (19.4).
+
+### Story 20.1: Fondation Collections + composition (backend)
+
+En tant que **curateur**,
+je veux créer des Collections et y ajouter/retirer des fiches via API,
+afin de regrouper des chansons par thème.
+
+**Acceptance Criteria:**
+
+**Given** les migrations
+**When** elles s'exécutent
+**Then** une table `CatalogCollection` (`uid`, `name`, `description` nullable, `timestamps`) et une jointure `CatalogCollectionSongs` `(collection_uid, catalog_song_uid)` **composite unique** existent ; idempotentes
+
+**Given** un curateur
+**When** il crée une Collection puis y ajoute des fiches
+**Then** 201 ; une fiche peut appartenir à **plusieurs** Collections (FR-12)
+
+**Given** une fiche référencée par des Collections
+**When** le curateur **supprime** la fiche Catalog
+**Then** les lignes de jointure sont **nettoyées** (nettoyage DUR, pas de référence morte) — **étend** le `DELETE` de la story 19.1 (régime opposé à `sourceCatalogUid` souple)
+
+**Given** un non-curateur
+**When** il tente une écriture Collection
+**Then** **403**
+
+**And** `GET /api/catalog/collections` (nom, description, compteur) et `GET /api/catalog/collections/:uid` (détail + fiches) ; `/:uid` inconnu → 404 calme
+`[backend/migrations/*-create-catalog-collections.js, *-create-catalog-collection-songs.js, backend/models/catalogcollection.js, backend/models/catalogcollectionsong.js, backend/controllers/catalogcontroller.js, backend/routes/catalog.js]`
+
+### Story 20.2: Composer des Collections (admin front)
+
+En tant que **curateur**,
+je veux un composer pour bâtir une Collection par recherche + Add/Remove,
+afin de monter un répertoire thématique sans drag-and-drop.
+
+**Acceptance Criteria:**
+
+**Given** le composer sur `/catalog/admin`
+**When** je cherche une fiche et clique `Add`
+**Then** elle rejoint la Collection ; `Remove` la retire ; **pas de drag** (DL-14) ; navigation **clavier** accessible (réutilise `comboboxKeyboard`)
+
+**Given** une fiche
+**When** je l'ajoute à deux Collections
+**Then** c'est autorisé (multi-appartenance)
+
+**And** UI en anglais, posture utilitaire ; `catalogService` porte les méthodes Collections curateur
+`[src/pages/CatalogAdmin.tsx, src/services/catalogService.ts]`
+
+### Story 20.3: Import endpoint — non-atomique + playlist miroir (backend)
+
+En tant qu'**utilisateur**,
+je veux importer toutes les fiches d'une Collection en une action,
+afin de peupler ma Songlist par thème (UJ-2).
+
+**Acceptance Criteria:**
+
+**Given** une Collection de N fiches
+**When** `POST /api/catalog/collections/:uid/add-to-songlist`
+**Then** une Playlist perso du **nom de la Collection** est **créée ou réutilisée** (`lower(name)`, réutilise Epic 10) ; chaque fiche est traitée comme **unité autonome** (réutilise la mécanique Add 19.4) ; les fiches déjà présentes sont **skippées à l'insert** mais **toutes** les chansons du lot sont **rattachées** à la Playlist miroir (attache idempotente sur `(playlist_uid, song_uid)`)
+
+**Given** un échec sur une fiche
+**When** l'import se poursuit
+**Then** le lot **n'est pas annulé** — **best-effort**, **pas** de transaction englobante ; réponse `{ added, skipped, failed, playlistUid }`
+
+**Given** un ré-import de la même Collection
+**When** il s'exécute
+**Then** **idempotent** : ni chanson ni entrée de playlist dupliquée
+
+**And** CSRF sur la route ; tests backend : skip doublon + rattachement playlist, best-effort avec échec, idempotence
+`[backend/controllers/catalogcontroller.js, backend/routes/catalog.js]`
+
+### Story 20.4: Browse & importer des Collections (front)
+
+En tant qu'**utilisateur**,
+je veux voir les Collections et en importer une avec confirmation et récapitulatif,
+afin de peupler ma Songlist d'un geste (UJ-2).
+
+**Acceptance Criteria:**
+
+**Given** `/catalog` avec des Collections
+**When** la page charge (champ de recherche vide)
+**Then** un **rail Collections** (tuiles **gradient marque** + scrim de contraste, stretched-link vers le détail) s'affiche **au-dessus** de la liste (ordre DL-5) et **se replie** dès la saisie
+
+**Given** la page détail d'une Collection `/catalog/collections/:uid`
+**When** elle s'affiche
+**Then** nom + **description éventuelle** + compteur + liste des fiches (Artist · Title · Key · BPM) + bouton `Add collection to my songlist` ; `/:uid` inconnu → 404 calme
+
+**Given** je clique `Add collection to my songlist`
+**When** l'action se déclenche
+**Then** un **ConfirmDialog** annonce « Add N songs to your Songlist? A "X" playlist will be created or reused. » → à la confirmation, import → **toast récap** « Added 18 · 2 already in your songlist » (annoncé `role="status"`)
+
+**Given** ma Songlist est vide
+**When** le crochet s'affiche
+**Then** il **enrichit** la story 19.4 avec un aperçu de **2-3 Collections** ; si le fetch échoue → CTA seul (dégradation propre)
+
+**And** a11y : stretched-link, cibles ≥44px, live-region pour le récap ; UI en anglais, dark mode
+`[src/pages/Catalog.tsx, src/components/CollectionCard.tsx, src/pages/CatalogCollection.tsx, src/pages/Songs.tsx, src/services/catalogService.ts, src/router.tsx]`

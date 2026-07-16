@@ -1896,6 +1896,18 @@ function Songs() {
             <span aria-hidden="true">←</span> Back to songlist
           </button>
         </div>
+      ) : page === 'list' && songs.length === 0 && !loading && !error ? (
+        // Story 19.4 (DL-13): a genuinely empty songlist points to the Catalog. Only
+        // when loaded with no error (degrades to the normal list/error UI otherwise).
+        <div className="max-w-3xl mx-auto px-4 sm:px-6 lg:px-8 py-16 text-center">
+          <h1 className="mb-2 text-xl font-semibold text-gray-900 dark:text-gray-100">Your songlist is empty</h1>
+          <p className="mb-6 text-gray-600 dark:text-gray-300">Browse the Catalog to fill it in seconds.</p>
+          <button type="button" className="btn-primary" onClick={() => navigate('/catalog')}>Browse the Catalog</button>
+          <p className="mt-4 text-sm text-gray-500 dark:text-gray-400">
+            or{' '}
+            <button type="button" className="text-brand-600 dark:text-brand-400 hover:underline" onClick={() => navigate('/songs/new')}>add a song manually</button>
+          </p>
+        </div>
       ) : page === 'list' ? (
         <SongsList
           songs={songs}

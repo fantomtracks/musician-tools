@@ -10,6 +10,10 @@ import MyTopicsPage from './pages/MyTopicsPage';
 import MySessionsPage from './pages/MySessionsPage';
 import MyHeatmapPage from './pages/MyHeatmapPage';
 import ProfilePage from './pages/ProfilePage';
+import CatalogAdmin from './pages/CatalogAdmin';
+import CatalogManage from './pages/CatalogManage';
+import Catalog from './pages/Catalog';
+import CatalogEntry from './pages/CatalogEntry';
 import VerifyEmailPage from './pages/VerifyEmailPage';
 import ForgotPasswordPage from './pages/ForgotPasswordPage';
 import ResetPasswordPage from './pages/ResetPasswordPage';
@@ -44,6 +48,17 @@ export const routes: RouteObject[] = [
             { path: 'my-sessions', element: <MySessionsPage /> },
             { path: 'my-heatmap', element: <MyHeatmapPage /> },
             { path: 'profile', element: <ProfilePage /> },
+            // Story 19.3 — Catalog browse (list) + detail. Read surface, auth-gated.
+            { path: 'catalog', element: <Catalog /> },
+            // Story 19.5 — Catalog curator management hub (list + edit + delete).
+            { path: 'catalog/manage', element: <CatalogManage /> },
+            // Story 19.5 — edit an existing fiche (CatalogAdmin in edit mode). Static
+            // `admin` segment outranks :uid; this stays above catalog/:uid too.
+            { path: 'catalog/admin/:uid', element: <CatalogAdmin /> },
+            // Story 19.2 — Catalog curator admin. Static path outranks :uid, but keep
+            // it before the dynamic detail route for clarity. Role check in-component.
+            { path: 'catalog/admin', element: <CatalogAdmin /> },
+            { path: 'catalog/:uid', element: <CatalogEntry /> },
           ],
         },
         // Public — reached from the email link, possibly while signed out (story 7.9/7.10)

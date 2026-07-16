@@ -1,0 +1,218 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Collection import — /catalog/collections/:uid + ConfirmDialog</title>
+<style>
+/* =========================================================================
+   SPINE GOVERNANCE — Collection detail /catalog/collections/:uid + import moment
+   DESIGN.md   → "Add collection button" (btn-primary), Collection card gradient tile,
+                 reuse of ConfirmDialog + toast (Do's & Don'ts). Catalog list rows.
+   EXPERIENCE.md → Component Patterns: Collection import (DL-12) — confirm before,
+                 recap toast after; State Patterns: Import doublon / best-effort.
+                 Key Flow 2 (Marc imports "Rock 90").
+   Decision log → DL-12 (ConfirmDialog before + recap toast after; asymmetry with the
+                 unit add), DL-3/DL-7 (Collections keep detail pages, gradient tile),
+                 DL-18 (Artist before Title in the collection song list).
+   ConfirmDialog markup mirrors src/components/ConfirmDialog.tsx (overlay bg-black/50,
+   white/gray-800 rounded-lg shadow-lg p-6 max-w-sm; Cancel grey / Confirm brand-500,
+   NON-dangerous → brand, not red). Toast mirrors setToastMessage (2500ms).
+   Hex values = real Tailwind theme (tailwind.config.ts + src/index.css).
+   ========================================================================= */
+
+:root{
+  --brand-500:#4f6cff; --brand-600:#3a52cc; --brand-700:#2c3ea3; --brand-100:#e9eeff; --brand-400:#7a93ff;
+  --green-100:#dcfce7; --green-700:#15803d;
+  --page-grad: linear-gradient(135deg,#f9fafb 0%,#eff6ff 50%,#faf5ff 100%);
+  --surface:#ffffff; --border:#f3f4f6; --divider:#e5e7eb; --row-border:#f3f4f6;
+  --text:#111827; --muted:#6b7280; --label:#374151;
+  --glass:rgba(255,255,255,0.8); --glass-border:#e5e7eb;
+  --grad-text: linear-gradient(90deg,#3a52cc,#9333ea);
+  --grad-tile: linear-gradient(135deg,#4f6cff,#9333ea);
+  --btn-sec-bg:#f3f4f6; --btn-sec-text:#111827;
+  --dlg-cancel-bg:#f3f4f6; --dlg-cancel-text:#1f2937;
+}
+.dark{
+  --page-grad: linear-gradient(135deg,#111827 0%,#1f2937 50%,#030712 100%);
+  --surface:#1f2937; --border:#374151; --divider:#374151; --row-border:#374151;
+  --text:#f3f4f6; --muted:#9ca3af; --label:#d1d5db;
+  --glass:rgba(31,41,55,0.8); --glass-border:#374151;
+  --grad-text: linear-gradient(90deg,#7a93ff,#c084fc);
+  --grad-tile: linear-gradient(135deg,#3a52cc,#7e22ce);
+  --btn-sec-bg:#374151; --btn-sec-text:#f3f4f6;
+  --dlg-cancel-bg:#374151; --dlg-cancel-text:#f3f4f6;
+}
+*{box-sizing:border-box;}
+body{margin:0;background:#8b8f9a;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI','Roboto','Helvetica Neue',sans-serif;-webkit-font-smoothing:antialiased;}
+.wrap{max-width:1160px;margin:0 auto;padding:28px 20px 60px;}
+.caption{color:#e8e9ef;font-size:13px;margin:22px 4px 8px;font-weight:600;letter-spacing:.02em;}
+
+.browser{border-radius:12px;overflow:hidden;box-shadow:0 18px 50px -12px rgba(0,0,0,.5);border:1px solid rgba(0,0,0,.25);}
+.chrome{display:flex;align-items:center;gap:10px;background:#e6e7eb;padding:9px 12px;border-bottom:1px solid #d3d4d9;}
+.dark-chrome{background:#20242c;border-bottom:1px solid #333842;}
+.dots{display:flex;gap:7px;} .dot{width:12px;height:12px;border-radius:50%;}
+.d1{background:#ff5f57;} .d2{background:#febc2e;} .d3{background:#28c840;}
+.urlbar{flex:1;background:#fff;border-radius:7px;padding:5px 12px;font-size:12.5px;color:#4b5563;text-align:center;}
+.dark-chrome .urlbar{background:#11141a;color:#9ca3af;}
+
+.page{position:relative;background:var(--page-grad);color:var(--text);}
+.appbar{background:var(--glass);backdrop-filter:blur(16px);border-bottom:1px solid var(--glass-border);box-shadow:0 1px 2px rgba(0,0,0,.05);}
+.appbar-in{max-width:1120px;margin:0 auto;height:64px;display:flex;align-items:center;justify-content:space-between;padding:0 24px;}
+.brand{display:flex;align-items:center;}
+.logo{width:32px;height:32px;border-radius:9px;background:linear-gradient(135deg,#4f6cff,#9333ea);display:flex;align-items:center;justify-content:center;color:#fff;font-weight:700;font-size:18px;}
+.brandname{font-size:20px;font-weight:700;background:var(--grad-text);-webkit-background-clip:text;background-clip:text;color:transparent;margin-left:10px;}
+.nav{display:flex;align-items:center;gap:30px;margin-left:38px;}
+.nav a{color:var(--label);text-decoration:none;font-weight:500;font-size:15px;}
+.nav a.active{color:var(--brand-600);font-weight:600;}
+.dark .nav a.active{color:var(--brand-400);}
+.appbar-right{display:flex;align-items:center;gap:14px;}
+.iconbtn{width:36px;height:36px;border-radius:9px;background:#f3f4f6;border:none;display:flex;align-items:center;justify-content:center;font-size:17px;cursor:pointer;}
+.dark .iconbtn{background:#374151;}
+
+.main{max-width:820px;margin:0 auto;padding:30px 24px 48px;}
+.back{display:inline-flex;gap:6px;color:var(--muted);font-size:13.5px;text-decoration:none;margin-bottom:18px;}
+.coll-head{display:flex;gap:20px;align-items:center;margin-bottom:24px;}
+.coll-tile{flex:0 0 auto;width:150px;height:112px;border-radius:14px;background:var(--grad-tile);color:#fff;padding:14px;display:flex;flex-direction:column;justify-content:flex-end;box-shadow:0 6px 16px -4px rgba(0,0,0,.25);}
+.coll-tile .ct-name{font-weight:700;font-size:17px;} .coll-tile .ct-count{font-size:12px;opacity:.85;margin-top:2px;}
+.coll-info h1{font-size:30px;font-weight:700;margin:0 0 4px;letter-spacing:-.02em;}
+.coll-info p{margin:0;color:var(--muted);font-size:14.5px;}
+.coll-actions{margin:8px 0 0;}
+.btn-primary{display:inline-flex;align-items:center;justify-content:center;gap:8px;padding:11px 20px;border-radius:11px;background:var(--brand-500);color:#fff;font-weight:600;font-size:15px;border:none;cursor:pointer;box-shadow:0 4px 12px -2px rgba(79,108,255,.35);}
+.btn-primary:hover{background:var(--brand-600);}
+
+.listcard{background:var(--surface);border:1px solid var(--border);border-radius:12px;box-shadow:0 4px 12px -2px rgba(0,0,0,.08);overflow:hidden;}
+.lrow{display:grid;grid-template-columns:1.8fr 2.3fr 0.7fr 0.7fr 190px;align-items:center;gap:12px;padding:13px 16px;border-bottom:1px solid var(--row-border);font-size:14.5px;}
+.lrow:last-child{border-bottom:none;}
+.lrow .rt{font-weight:500;} .lrow .ra{color:var(--muted);}
+.mono{font-variant-numeric:tabular-nums;}
+.badge{display:inline-flex;align-items:center;gap:5px;border-radius:9999px;font-size:12.5px;font-weight:500;padding:7px 12px;border:none;cursor:pointer;}
+.badge-primary-btn{background:var(--brand-500);color:#fff;padding:8px 13px;border-radius:9px;font-size:13px;font-weight:500;border:none;cursor:pointer;}
+.badge-success{background:var(--green-100);color:var(--green-700);}
+.raction{justify-self:end;}
+
+/* ---- ConfirmDialog (mirrors ConfirmDialog.tsx) ---- */
+.overlay{position:absolute;inset:0;background:rgba(0,0,0,.5);display:flex;align-items:center;justify-content:center;z-index:50;}
+.dark .overlay{background:rgba(0,0,0,.7);}
+.dialog{background:var(--surface);border-radius:12px;box-shadow:0 20px 50px -10px rgba(0,0,0,.5);padding:24px;max-width:24rem;margin:0 16px;}
+.dialog h2{font-size:18px;font-weight:600;color:var(--text);margin:0 0 8px;}
+.dialog p{color:var(--label);font-size:15px;line-height:1.5;margin:0 0 24px;}
+.dialog .dbtns{display:flex;gap:12px;justify-content:flex-end;}
+.dbtn{display:inline-flex;align-items:center;border-radius:8px;padding:9px 16px;font-size:14px;font-weight:500;border:none;cursor:pointer;}
+.dbtn-cancel{background:var(--dlg-cancel-bg);color:var(--dlg-cancel-text);}
+.dbtn-confirm{background:var(--brand-500);color:#fff;}
+.dbtn-confirm:hover{background:var(--brand-600);}
+
+/* ---- toast inset panel ---- */
+.toast-panel{margin-top:14px;border-radius:12px;background:#5b6070;padding:26px 20px;display:flex;justify-content:center;position:relative;}
+.toast{display:inline-flex;align-items:center;gap:10px;background:#111827;color:#f3f4f6;border-radius:10px;padding:12px 18px;font-size:14.5px;font-weight:500;box-shadow:0 10px 30px -6px rgba(0,0,0,.5);}
+.toast .tk{color:#4ade80;font-size:16px;}
+.toast-note{position:absolute;left:16px;bottom:8px;color:#dfe1e8;font-size:11.5px;}
+</style>
+</head>
+<body>
+<div class="wrap">
+
+  <!-- ================= LIGHT: collection detail + ConfirmDialog ================= -->
+  <div class="caption">/catalog/collections/:uid · "Rock 90" + import ConfirmDialog — light</div>
+  <div class="browser">
+    <div class="chrome"><div class="dots"><span class="dot d1"></span><span class="dot d2"></span><span class="dot d3"></span></div><div class="urlbar">musiciantools.app/catalog/collections/rock-90</div></div>
+    <div class="page">
+      <header class="appbar"><div class="appbar-in">
+        <div class="brand"><div class="logo">♪</div><span class="brandname">Musician Tools</span>
+          <nav class="nav"><a href="#">Songlist</a><a href="#" class="active">Catalog</a><a href="#">Heatmap</a><a href="#">Sessions</a><a href="#">Playlists</a><a href="#">Topics</a><a href="#">Instruments</a></nav>
+        </div>
+        <div class="appbar-right"><button class="iconbtn">🌙</button><button class="iconbtn">👤</button></div>
+      </div></header>
+
+      <main class="main">
+        <a class="back" href="#">← Back to Catalog</a>
+        <div class="coll-head">
+          <div class="coll-tile"><div class="ct-name">Rock 90</div><div class="ct-count">Rock 90 · 20</div></div>
+          <div class="coll-info">
+            <h1>Rock 90</h1>
+            <p>20 songs · the essential 90s rock répertoire</p>
+            <div class="coll-actions"><button class="btn-primary">Add collection to my songlist</button></div>
+          </div>
+        </div>
+
+        <div class="listcard">
+          <div class="lrow"><span class="ra">The Cranberries</span><span class="rt">Zombie</span><span class="mono">Em</span><span class="mono">84</span><span class="raction"><button class="badge-primary-btn">Add to my songlist</button></span></div>
+          <div class="lrow"><span class="ra">Oasis</span><span class="rt">Wonderwall</span><span class="mono">Em</span><span class="mono">87</span><span class="raction"><span class="badge badge-success">✓ Already in your songlist</span></span></div>
+          <div class="lrow"><span class="ra">Radiohead</span><span class="rt">Creep</span><span class="mono">G</span><span class="mono">92</span><span class="raction"><button class="badge-primary-btn">Add to my songlist</button></span></div>
+          <div class="lrow"><span class="ra">Green Day</span><span class="rt">Boulevard of Broken Dreams</span><span class="mono">Fm</span><span class="mono">82</span><span class="raction"><button class="badge-primary-btn">Add to my songlist</button></span></div>
+          <div class="lrow"><span class="ra">The Verve</span><span class="rt">Bittersweet Symphony</span><span class="mono">E</span><span class="mono">86</span><span class="raction"><button class="badge-primary-btn">Add to my songlist</button></span></div>
+          <div class="lrow"><span class="ra">Blind Melon</span><span class="rt">No Rain</span><span class="mono">E</span><span class="mono">76</span><span class="raction"><button class="badge-primary-btn">Add to my songlist</button></span></div>
+        </div>
+      </main>
+
+      <!-- ConfirmDialog (DL-12) -->
+      <div class="overlay">
+        <div class="dialog">
+          <h2>Add collection to my songlist</h2>
+          <p>Add 20 songs to your Songlist? A "Rock 90" playlist will be created.</p>
+          <div class="dbtns">
+            <button class="dbtn dbtn-cancel">Cancel</button>
+            <button class="dbtn dbtn-confirm">Confirm</button>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- post-import toast (second panel / inset) -->
+  <div class="caption">Post-import recap toast (setToastMessage, 2500ms) — after Confirm</div>
+  <div class="toast-panel">
+    <div class="toast"><span class="tk">✓</span> Added 18 · 2 already in your songlist</div>
+    <span class="toast-note">best-effort variant on failure: “Added 17 · 2 already in your songlist · 1 failed”</span>
+  </div>
+
+  <!-- ================= DARK ================= -->
+  <div class="caption">/catalog/collections/:uid · "Rock 90" + import ConfirmDialog — dark (load-bearing)</div>
+  <div class="browser dark">
+    <div class="chrome dark-chrome"><div class="dots"><span class="dot d1"></span><span class="dot d2"></span><span class="dot d3"></span></div><div class="urlbar">musiciantools.app/catalog/collections/rock-90</div></div>
+    <div class="page">
+      <header class="appbar"><div class="appbar-in">
+        <div class="brand"><div class="logo">♪</div><span class="brandname">Musician Tools</span>
+          <nav class="nav"><a href="#">Songlist</a><a href="#" class="active">Catalog</a><a href="#">Heatmap</a><a href="#">Sessions</a><a href="#">Playlists</a><a href="#">Topics</a><a href="#">Instruments</a></nav>
+        </div>
+        <div class="appbar-right"><button class="iconbtn">☀️</button><button class="iconbtn">👤</button></div>
+      </div></header>
+
+      <main class="main">
+        <a class="back" href="#">← Back to Catalog</a>
+        <div class="coll-head">
+          <div class="coll-tile"><div class="ct-name">Rock 90</div><div class="ct-count">Rock 90 · 20</div></div>
+          <div class="coll-info">
+            <h1>Rock 90</h1>
+            <p>20 songs · the essential 90s rock répertoire</p>
+            <div class="coll-actions"><button class="btn-primary">Add collection to my songlist</button></div>
+          </div>
+        </div>
+
+        <div class="listcard">
+          <div class="lrow"><span class="ra">The Cranberries</span><span class="rt">Zombie</span><span class="mono">Em</span><span class="mono">84</span><span class="raction"><button class="badge-primary-btn">Add to my songlist</button></span></div>
+          <div class="lrow"><span class="ra">Oasis</span><span class="rt">Wonderwall</span><span class="mono">Em</span><span class="mono">87</span><span class="raction"><span class="badge badge-success">✓ Already in your songlist</span></span></div>
+          <div class="lrow"><span class="ra">Radiohead</span><span class="rt">Creep</span><span class="mono">G</span><span class="mono">92</span><span class="raction"><button class="badge-primary-btn">Add to my songlist</button></span></div>
+          <div class="lrow"><span class="ra">Green Day</span><span class="rt">Boulevard of Broken Dreams</span><span class="mono">Fm</span><span class="mono">82</span><span class="raction"><button class="badge-primary-btn">Add to my songlist</button></span></div>
+          <div class="lrow"><span class="ra">The Verve</span><span class="rt">Bittersweet Symphony</span><span class="mono">E</span><span class="mono">86</span><span class="raction"><button class="badge-primary-btn">Add to my songlist</button></span></div>
+          <div class="lrow"><span class="ra">Blind Melon</span><span class="rt">No Rain</span><span class="mono">E</span><span class="mono">76</span><span class="raction"><button class="badge-primary-btn">Add to my songlist</button></span></div>
+        </div>
+      </main>
+
+      <div class="overlay">
+        <div class="dialog">
+          <h2>Add collection to my songlist</h2>
+          <p>Add 20 songs to your Songlist? A "Rock 90" playlist will be created.</p>
+          <div class="dbtns">
+            <button class="dbtn dbtn-cancel">Cancel</button>
+            <button class="dbtn dbtn-confirm">Confirm</button>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+</div>
+</body>
+</html>

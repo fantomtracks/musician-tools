@@ -20,7 +20,7 @@ beforeEach(() => jest.clearAllMocks());
 describe('accountcontroller.getProfile', () => {
   test('returns the profile with handle, never the password', async () => {
     User.findByPk.mockResolvedValue({
-      uid: 'u1', name: 'Ada', discriminator: '0042', email: 'ada@example.com', emailVerified: true, isAdmin: false,
+      uid: 'u1', name: 'Ada', discriminator: '0042', email: 'ada@example.com', emailVerified: true, isAdmin: false, isCurator: true,
       getHandle() { return `${this.name}#${this.discriminator}`; },
     });
     const res = mockRes();
@@ -28,6 +28,7 @@ describe('accountcontroller.getProfile', () => {
 
     const body = res.json.mock.calls[0][0];
     expect(body).toMatchObject({ handle: 'Ada#0042', email: 'ada@example.com' });
+    expect(body.isCurator).toBe(true); // story 19.2: profile rehydrates the curator flag
     expect(body).not.toHaveProperty('password');
   });
 

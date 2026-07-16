@@ -3,7 +3,9 @@ import { renderSongs } from '../test/renderSongs';
 
 jest.mock('../services/songService', () => ({
   songService: {
-    getAllSongs: jest.fn().mockResolvedValue([]),
+    // At least one song so the list + sidebar render (an EMPTY songlist now shows the
+    // Catalog "Browse the Catalog" hook instead of the list — story 19.4 / DL-13).
+    getAllSongs: jest.fn().mockResolvedValue([{ uid: 'song-1', title: 'Alpha', artist: 'A' }]),
     updateSong: jest.fn().mockResolvedValue({}),
     createSong: jest.fn().mockResolvedValue({}),
     deleteSong: jest.fn().mockResolvedValue(undefined),
