@@ -13,6 +13,7 @@ import ProfilePage from './pages/ProfilePage';
 import CatalogAdmin from './pages/CatalogAdmin';
 import CatalogManage from './pages/CatalogManage';
 import CatalogCollectionCompose from './pages/CatalogCollectionCompose';
+import CatalogCollection from './pages/CatalogCollection';
 import Catalog from './pages/Catalog';
 import CatalogEntry from './pages/CatalogEntry';
 import VerifyEmailPage from './pages/VerifyEmailPage';
@@ -51,6 +52,9 @@ export const routes: RouteObject[] = [
             { path: 'profile', element: <ProfilePage /> },
             // Story 19.3 — Catalog browse (list) + detail. Read surface, auth-gated.
             { path: 'catalog', element: <Catalog /> },
+            // Story 20.4 — user-facing Collection detail (browse + import). Two-segment
+            // path; no clash with catalog/:uid (fiche) or catalog/manage/collections/:uid.
+            { path: 'catalog/collections/:uid', element: <CatalogCollection /> },
             // Story 19.5 — Catalog curator management hub (list + edit + delete).
             { path: 'catalog/manage', element: <CatalogManage /> },
             // Story 20.2 — curator Collection composer (search + Add/Remove, rename,

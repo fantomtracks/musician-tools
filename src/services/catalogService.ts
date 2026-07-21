@@ -95,6 +95,16 @@ export type CatalogCollectionDetail = {
   songs: CatalogSong[];
 };
 
+// Recap of a whole-collection import into the user's Songlist (story 20.3):
+// `added` newly copied, `skipped` already owned, `failed` errored, plus the mirror
+// playlist's uid (created or reused).
+export type ImportCollectionResult = {
+  added: number;
+  skipped: number;
+  failed: number;
+  playlistUid: string;
+};
+
 // Thrown on a 404 from a Collection detail/mutation (deep-link or concurrent delete),
 // so a page can show a calm not-found. Mirror of CatalogNotFoundError.
 export class CollectionNotFoundError extends Error {
@@ -383,5 +393,24 @@ export const catalogService = {
     if (!response.ok) {
       throw new Error('Failed to remove from the collection');
     }
+  },
+
+  // Import a whole Collection into the user's Songlist (story 20.3, any logged-in user):
+  // copies every published member (best-effort) + creates/reuses a mirror Playlist named
+  // after the Collection. Returns the {added,skipped,failed,playlistUid} recap. 404 -> gone.
+  async importCollection(uid: string, signal?: AbortSignal): Promise<ImportCollectionResult> {
+    const response = await apiFetch(`${API_BASE}/catalog/collections/${uid}/add-to-songlist`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      credentials: 'include',
+      signal,
+    });
+    if (response.status === 404) {
+      throw new CollectionNotFoundError();
+    }
+    if (!response.ok) {
+      throw new Error('Failed to import the collection');
+    }
+    return response.json();
   },
 };

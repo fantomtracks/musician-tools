@@ -185,3 +185,28 @@ describe('catalogService Collections', () => {
     await expect(catalogService.deleteCollection('gone')).rejects.toBeInstanceOf(CollectionNotFoundError);
   });
 });
+
+// ---- Story 20.4: import a Collection ----
+
+describe('catalogService.importCollection', () => {
+  const originalFetch = global.fetch;
+  beforeEach(() => { clearCsrfToken(); });
+  afterEach(() => { global.fetch = originalFetch; });
+
+  test('POSTs add-to-songlist and returns the recap', async () => {
+    const recap = { added: 18, skipped: 2, failed: 0, playlistUid: 'p1' };
+    const fetchMock = mockFetchWithCsrf({ ok: true, status: 200, json: async () => recap });
+    global.fetch = fetchMock as unknown as typeof fetch;
+    await expect(catalogService.importCollection('col1')).resolves.toEqual(recap);
+    expect(fetchMock).toHaveBeenCalledWith(
+      '/api/catalog/collections/col1/add-to-songlist',
+      expect.objectContaining({ method: 'POST', credentials: 'include' })
+    );
+  });
+
+  test('throws CollectionNotFoundError on 404', async () => {
+    const fetchMock = mockFetchWithCsrf({ ok: false, status: 404, json: async () => ({}) });
+    global.fetch = fetchMock as unknown as typeof fetch;
+    await expect(catalogService.importCollection('gone')).rejects.toBeInstanceOf(CollectionNotFoundError);
+  });
+});

@@ -1,9 +1,10 @@
 import { useEffect, useRef, useState } from 'react';
 import { useSearchParams } from 'react-router-dom';
 import { catalogService } from '../services/catalogService';
-import type { CatalogListResponse, CatalogFacets } from '../services/catalogService';
+import type { CatalogListResponse, CatalogFacets, CatalogCollection } from '../services/catalogService';
 import CatalogList from '../components/CatalogList';
 import CatalogFilters from '../components/CatalogFilters';
+import CollectionCard from '../components/CollectionCard';
 import { useSonglistMatcher } from '../hooks/useSonglistMatcher';
 
 const EMPTY_FACETS: CatalogFacets = { genre: [], key: [], mode: [], timeSignature: [] };
@@ -39,6 +40,8 @@ export default function Catalog() {
   const abortRef = useRef<AbortController | null>(null);
   const { findExisting, addToCache } = useSonglistMatcher(); // client-side "already in songlist" flag (19.4)
   const [facets, setFacets] = useState<CatalogFacets>(EMPTY_FACETS);
+  // Story 20.4: the Collections rail (shown above the list when there is no query).
+  const [collections, setCollections] = useState<CatalogCollection[] | null>(null);
 
   // Facet values (distinct across the whole Catalog) for the filter pills. Loaded once.
   useEffect(() => {
@@ -46,6 +49,15 @@ export default function Catalog() {
     catalogService.getFacets(ctrl.signal)
       .then(f => setFacets(f))
       .catch(() => { /* degrade: no pills, search still works */ });
+    return () => ctrl.abort();
+  }, []);
+
+  // Collections for the rail. Loaded once; on error stays null → the rail is absent.
+  useEffect(() => {
+    const ctrl = new AbortController();
+    catalogService.listCollections(ctrl.signal)
+      .then(c => setCollections(c))
+      .catch(() => { /* degrade: no rail */ });
     return () => ctrl.abort();
   }, []);
 
@@ -121,6 +133,21 @@ export default function Catalog() {
           onToggle={toggleFacet}
         />
       </div>
+
+      {/* Collections rail (DL-5): above the list, only with no query; folds away on search.
+          Empty collections (songCount 0 — e.g. all-draft members for a non-curator) are
+          hidden so a tile is never a dead-end. */}
+      {(() => {
+        const railCollections = (!hasQuery && collections) ? collections.filter(c => c.songCount > 0) : [];
+        return railCollections.length > 0 && (
+          <section className="mt-6" aria-labelledby="collections-rail-heading">
+            <h2 id="collections-rail-heading" className="text-lg font-medium text-gray-800 dark:text-gray-200 mb-2">Collections</h2>
+            <div className="grid grid-cols-2 sm:grid-cols-3 gap-3">
+              {railCollections.map(c => <CollectionCard key={c.uid} collection={c} />)}
+            </div>
+          </section>
+        );
+      })()}
 
       <div className="flex items-center justify-between mt-6 mb-2">
         <h2 className="text-lg font-medium text-gray-800 dark:text-gray-200" aria-live="polite">

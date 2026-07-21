@@ -12,6 +12,7 @@ import { applySongFilters, countActiveFilters, NO_INSTRUMENT } from '../utils/so
 import { handleComboKeyDown, useScrollHighlightIntoView, comboboxInputAria, comboboxOptionAria } from '../utils/comboboxKeyboard';
 import { useAutosave } from '../hooks/useAutosave';
 import { useRowSelection } from '../hooks/useRowSelection';
+import EmptySonglistCollections from '../components/EmptySonglistCollections';
 import { StickyActionBar } from '../components/StickyActionBar';
 import { findDuplicateSong } from '../utils/songDuplicate';
 import { formatLocalDate } from '../utils/heatmap';
@@ -1836,6 +1837,8 @@ function Songs() {
             or{' '}
             <button type="button" className="text-brand-600 dark:text-brand-400 hover:underline" onClick={() => navigate('/songs/new')}>add a song manually</button>
           </p>
+          {/* Story 20.4: preview a few Collections (self-contained, degrades to nothing). */}
+          <EmptySonglistCollections />
         </div>
       ) : page === 'list' ? (
         <SongsList
