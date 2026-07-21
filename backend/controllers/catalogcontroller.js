@@ -5,7 +5,7 @@
 //
 // Story 19.1 scope: curator write CRUD on catalog entries. Read (list/detail)
 // endpoints land in story 19.3; "Add to my songlist" in story 19.4.
-const { CatalogSong, Song, User, CatalogCollection, CatalogCollectionSong } = require('../models');
+const { CatalogSong, Song, User, CatalogCollection, CatalogCollectionSong, Playlist, PlaylistSong } = require('../models');
 const { Op, fn, col, where: whereFn } = require('sequelize');
 const createError = require('http-errors');
 const logger = require('../logger');
@@ -634,6 +634,108 @@ const getCollection = async (req, res, next) => {
   }
 };
 
+// ---- Story 20.3: Import a Collection into the Songlist (best-effort, non-atomic) ----
+
+// Create the mirror Playlist named after the Collection, or reuse the user's existing
+// one with that name (case-insensitive lower(name), Epic 10 index
+// playlists_user_uid_name_ci). Mirror of playlistcontroller.createPlaylist's 23505 path.
+async function resolveMirrorPlaylist(userId, name) {
+  try {
+    return await Playlist.create({ userUid: userId, name, description: null });
+  } catch (error) {
+    if (error && error.name === 'SequelizeUniqueConstraintError') {
+      const foldedName = whereFn(fn('lower', col('name')), String(name == null ? '' : name).trim().toLowerCase());
+      const existing = await Playlist.findOne({ where: { [Op.and]: [{ userUid: userId }, foldedName] } });
+      if (existing) return existing;
+    }
+    throw error; // non-unique failure, or a conflict we somehow can't resolve
+  }
+}
+
+// POST /api/catalog/collections/:uid/add-to-songlist — import a Collection's PUBLISHED
+// entries into the user's Songlist + a mirror Playlist named after the Collection.
+// Auth only (writes the USER's own songlist/playlist, NOT the Catalog). BEST-EFFORT,
+// NON-ATOMIC by design (epics.md § Epic 20): each entry is an autonomous unit, there is
+// deliberately NO enclosing transaction, and one entry failing must not abort the batch.
+const importCollectionToSonglist = async (req, res, next) => {
+  try {
+    const userId = req.session && req.session.user;
+    if (!userId) {
+      return next(createError(401, 'Unauthorized'));
+    }
+    if (!isUuid(req.params.uid)) {
+      return next(createError(404, 'Collection not found'));
+    }
+    // Published members only — a draft is not public (19.6) and 19.4 refuses to copy it.
+    // Full attributes (default) are needed for buildSongFromCatalog.
+    const collection = await CatalogCollection.findByPk(req.params.uid, {
+      include: [memberSongInclude(false)],
+    });
+    if (!collection) {
+      return next(createError(404, 'Collection not found'));
+    }
+    const members = collection.songs || [];
+
+    // Mirror personal Playlist named after the Collection (created or reused).
+    const playlist = await resolveMirrorPlaylist(userId, collection.name);
+
+    let added = 0;
+    let skipped = 0;
+    let failed = 0;
+    const songUidsToAttach = [];
+
+    // NO transaction here — best-effort. A per-entry failure increments `failed` and the
+    // loop continues (the whole point of the story; do not "fix" by wrapping this).
+    for (const entry of members) {
+      try {
+        const song = await Song.create(buildSongFromCatalog(entry, userId));
+        songUidsToAttach.push(song.uid);
+        added += 1;
+      } catch (error) {
+        if (error && error.name === 'SequelizeUniqueConstraintError') {
+          // Already in the user's Songlist (Epic 17 index) — skip the insert but still
+          // attach the existing Song to the mirror playlist.
+          const existing = await findExistingUserSong(userId, entry.title, entry.artist).catch(() => null);
+          if (existing) {
+            songUidsToAttach.push(existing.uid);
+            skipped += 1;
+          } else {
+            failed += 1; // 23505 but the existing row couldn't be resolved (concurrent delete)
+          }
+        } else {
+          logger.error('Import: failed to copy a catalog entry', { collectionUid: collection.uid });
+          failed += 1;
+        }
+      }
+    }
+
+    // Attach every copied/existing song to the mirror playlist, idempotently on the
+    // composite unique (playlist_uid, song_uid). ADDITIVE — never wipes existing rows
+    // (do NOT reuse playlistcontroller.syncPlaylistSongs: transactional destroy+rebuild).
+    let position = await PlaylistSong.count({ where: { playlistUid: playlist.uid } });
+    for (const songUid of songUidsToAttach) {
+      try {
+        const [, created] = await PlaylistSong.findOrCreate({
+          where: { playlistUid: playlist.uid, songUid },
+          defaults: { playlistUid: playlist.uid, songUid, position },
+        });
+        if (created) position += 1;
+      } catch (attachError) {
+        // Best-effort attach too: a transient error, or a findOrCreate unique race on
+        // (playlist_uid, song_uid) under a concurrent import (double-click), must NOT
+        // abort the whole import — the song is already in the Songlist. Log and continue;
+        // a re-import is idempotent and will (re)attach it.
+        logger.error('Import: failed to attach a song to the mirror playlist', { playlistUid: playlist.uid });
+      }
+    }
+
+    res.json({ added, skipped, failed, playlistUid: playlist.uid });
+  } catch (error) {
+    logger.error('Error importing collection to songlist:', error);
+    next(createError(500, 'Error importing collection'));
+  }
+};
+
 module.exports = {
   createCatalogEntry,
   updateCatalogEntry,
@@ -652,4 +754,6 @@ module.exports = {
   removeSongFromCollection,
   getCollections,
   getCollection,
+  // Story 20.3 — import
+  importCollectionToSonglist,
 };

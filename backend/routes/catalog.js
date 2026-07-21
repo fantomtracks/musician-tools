@@ -35,6 +35,9 @@ router.put('/collections/:uid', authsess, requireCurator, catalogController.upda
 router.delete('/collections/:uid', authsess, requireCurator, catalogController.deleteCollection);
 router.post('/collections/:uid/songs', authsess, requireCurator, catalogController.addSongToCollection);
 router.delete('/collections/:uid/songs/:catalogSongUid', authsess, requireCurator, catalogController.removeSongFromCollection);
+// Story 20.3 — import a Collection into the user's OWN Songlist + mirror Playlist.
+// authsess ONLY (not requireCurator): it writes the user's songlist, not the Catalog.
+router.post('/collections/:uid/add-to-songlist', authsess, catalogController.importCollectionToSonglist);
 
 router.get('/:uid', authsess, catalogController.getCatalogEntry);
 
