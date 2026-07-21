@@ -5,7 +5,7 @@
 //
 // Story 19.1 scope: curator write CRUD on catalog entries. Read (list/detail)
 // endpoints land in story 19.3; "Add to my songlist" in story 19.4.
-const { CatalogSong, Song, User } = require('../models');
+const { CatalogSong, Song, User, CatalogCollection, CatalogCollectionSong } = require('../models');
 const { Op, fn, col, where: whereFn } = require('sequelize');
 const createError = require('http-errors');
 const logger = require('../logger');
@@ -158,6 +158,10 @@ const updateCatalogEntry = async (req, res, next) => {
 };
 
 // DELETE /api/catalog/:uid (curator).
+// Story 20.1: deleting an entry also removes it from every Collection — the
+// CatalogCollectionSongs.catalog_song_uid FK is ON DELETE CASCADE, so entry.destroy()
+// cascades the membership cleanup at the DB level (no code needed here). Hard cleanup,
+// the opposite of Songs.sourceCatalogUid (soft, no FK).
 const deleteCatalogEntry = async (req, res, next) => {
   try {
     if (!isUuid(req.params.uid)) {
@@ -448,6 +452,188 @@ const getCatalogExists = async (req, res, next) => {
   }
 };
 
+// ---- Story 20.1: Catalog Collections (curated themed groupings) ----
+// SHARED data like catalog entries (§3): reads are non-scoped (auth only); writes are
+// curator-only (requireCurator -> 403, wired on the routes). A Collection groups catalog
+// entries via the CatalogCollectionSongs join; the front browse/import lands in 20.3/20.4.
+
+// Filter applied to a Collection's member entries so a DRAFT entry (publishedAt IS NULL,
+// story 19.6) never leaks through a Collection to a non-curator. Curators see drafts too.
+// Returned as an include-where; paired with required:false so a Collection whose only
+// members are drafts still returns (with an empty songs list) instead of vanishing.
+function memberSongInclude(includeDrafts, extra = {}) {
+  const include = {
+    model: CatalogSong,
+    as: 'songs',
+    through: { attributes: [] }, // hide the join row from the payload
+    required: false,
+    ...extra, // e.g. { attributes: ['uid'] } when we only need to count members
+  };
+  if (!includeDrafts) include.where = { publishedAt: { [Op.not]: null } };
+  return include;
+}
+
+// POST /api/catalog/collections (curator) — create a Collection.
+const createCollection = async (req, res, next) => {
+  try {
+    const body = req.body || {};
+    const name = normalizeText(body.name);
+    if (!name) {
+      return next(createError(400, 'Name is required'));
+    }
+    const description = normalizeText(body.description);
+    const collection = await CatalogCollection.create({
+      name,
+      description: description !== undefined ? description : null,
+    });
+    res.status(201).json(collection);
+  } catch (error) {
+    logger.error('Error creating collection:', error);
+    next(createError(500, 'Error creating collection'));
+  }
+};
+
+// PUT /api/catalog/collections/:uid (curator) — rename / re-describe.
+const updateCollection = async (req, res, next) => {
+  try {
+    if (!isUuid(req.params.uid)) {
+      return next(createError(404, 'Collection not found'));
+    }
+    const collection = await CatalogCollection.findByPk(req.params.uid);
+    if (!collection) {
+      return next(createError(404, 'Collection not found'));
+    }
+    const body = req.body || {};
+    const updates = {};
+    const name = normalizeText(body.name);
+    if (name !== undefined) {
+      if (!name) {
+        return next(createError(400, 'Name is required'));
+      }
+      updates.name = name;
+    }
+    const description = normalizeText(body.description);
+    if (description !== undefined) updates.description = description;
+    const updated = await collection.update(updates);
+    res.json(updated);
+  } catch (error) {
+    logger.error('Error updating collection:', error);
+    next(createError(500, 'Error updating collection'));
+  }
+};
+
+// DELETE /api/catalog/collections/:uid (curator). FK CASCADE on collection_uid removes
+// the membership rows; the referenced catalog entries are untouched.
+const deleteCollection = async (req, res, next) => {
+  try {
+    if (!isUuid(req.params.uid)) {
+      return next(createError(404, 'Collection not found'));
+    }
+    const collection = await CatalogCollection.findByPk(req.params.uid);
+    if (!collection) {
+      return next(createError(404, 'Collection not found'));
+    }
+    await collection.destroy();
+    res.json({ message: 'Collection deleted' });
+  } catch (error) {
+    logger.error('Error deleting collection:', error);
+    next(createError(500, 'Error deleting collection'));
+  }
+};
+
+// POST /api/catalog/collections/:uid/songs (curator) — add an entry to the Collection.
+// Body: { catalogSongUid }. Idempotent via findOrCreate against the composite unique
+// (collection_uid, catalog_song_uid): re-adding is a 200 no-op, never a 500. An entry
+// may belong to many Collections (multi-appartenance, FR-12).
+const addSongToCollection = async (req, res, next) => {
+  try {
+    const collectionUid = req.params.uid;
+    const catalogSongUid = (req.body || {}).catalogSongUid;
+    if (!isUuid(collectionUid) || !isUuid(catalogSongUid)) {
+      return next(createError(404, 'Collection or catalog entry not found'));
+    }
+    const collection = await CatalogCollection.findByPk(collectionUid);
+    if (!collection) {
+      return next(createError(404, 'Collection not found'));
+    }
+    const song = await CatalogSong.findByPk(catalogSongUid);
+    if (!song) {
+      return next(createError(404, 'Catalog entry not found'));
+    }
+    const [, created] = await CatalogCollectionSong.findOrCreate({
+      where: { collectionUid, catalogSongUid },
+      defaults: { collectionUid, catalogSongUid },
+    });
+    res.status(created ? 201 : 200).json({
+      message: created ? 'Added to collection' : 'Already in collection',
+    });
+  } catch (error) {
+    logger.error('Error adding entry to collection:', error);
+    next(createError(500, 'Error adding to collection'));
+  }
+};
+
+// DELETE /api/catalog/collections/:uid/songs/:catalogSongUid (curator) — remove an
+// entry from the Collection. Idempotent (removing an absent link is not an error).
+const removeSongFromCollection = async (req, res, next) => {
+  try {
+    const collectionUid = req.params.uid;
+    const catalogSongUid = req.params.catalogSongUid;
+    if (!isUuid(collectionUid) || !isUuid(catalogSongUid)) {
+      return next(createError(404, 'Collection or catalog entry not found'));
+    }
+    await CatalogCollectionSong.destroy({ where: { collectionUid, catalogSongUid } });
+    res.json({ message: 'Removed from collection' });
+  } catch (error) {
+    logger.error('Error removing entry from collection:', error);
+    next(createError(500, 'Error removing from collection'));
+  }
+};
+
+// GET /api/catalog/collections — list { uid, name, description, songCount }. Non-scoped
+// (§3, auth only). songCount reflects PUBLISHED members only for non-curators (draft
+// safety, AC #7); a curator sees the full count.
+const getCollections = async (req, res, next) => {
+  try {
+    const includeDrafts = await isRequestCurator(req);
+    // Only the member COUNT is needed here -> load just uid (not the full rows).
+    const collections = await CatalogCollection.findAll({
+      include: [memberSongInclude(includeDrafts, { attributes: ['uid'] })],
+      order: [['name', 'ASC'], ['uid', 'ASC']],
+    });
+    res.json(collections.map((c) => ({
+      uid: c.uid,
+      name: c.name,
+      description: c.description,
+      songCount: (c.songs || []).length,
+    })));
+  } catch (error) {
+    logger.error('Error listing collections:', error);
+    next(createError(500, 'Error listing collections'));
+  }
+};
+
+// GET /api/catalog/collections/:uid — detail + member entries. Unknown/invalid uid ->
+// calm 404 (same posture as getCatalogEntry). Draft members hidden from non-curators.
+const getCollection = async (req, res, next) => {
+  try {
+    if (!isUuid(req.params.uid)) {
+      return next(createError(404, 'Collection not found'));
+    }
+    const includeDrafts = await isRequestCurator(req);
+    const collection = await CatalogCollection.findByPk(req.params.uid, {
+      include: [memberSongInclude(includeDrafts)],
+    });
+    if (!collection) {
+      return next(createError(404, 'Collection not found'));
+    }
+    res.json(collection);
+  } catch (error) {
+    logger.error('Error fetching collection:', error);
+    next(createError(500, 'Error fetching collection'));
+  }
+};
+
 module.exports = {
   createCatalogEntry,
   updateCatalogEntry,
@@ -458,4 +644,12 @@ module.exports = {
   getCatalogEntry,
   getCatalogExists,
   addToSonglist,
+  // Story 20.1 — Collections
+  createCollection,
+  updateCollection,
+  deleteCollection,
+  addSongToCollection,
+  removeSongFromCollection,
+  getCollections,
+  getCollection,
 };
