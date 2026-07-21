@@ -245,7 +245,10 @@ Découvert en QA de l'Epic 19 : l'admin curateur (19-2) est **création-only** ;
 Un utilisateur **importe une Collection** curée (« Rock 90 ») d'un geste → chansons dans sa Songlist + **Playlist perso miroir** idempotente ; le curateur **compose** des Collections. Bâtit sur Epic 19 (modèle fiche + mécanique Add stables) : tables `CatalogCollection` + jointure, import **non-atomique** best-effort, enrichit le crochet Songlist-vide (aperçu Collections).
 **FRs couverts (espace Catalog) :** FR-8, FR-9, FR-12. _Détail § Epic 20 ci-dessous._
 
-**Dépendances :** E1 → E2 → (E3 ∥ E4). Les epics 3 et 4 sont indépendants l'un de l'autre. E6 dépend d'E4 (pont Mark as Played). E5 est transverse ; E9 (confort UI, post-rétro) est autonome et se solde avant E7 ; E7 (compte + sécurité, hors-PRD) est autonome — ne dépend d'aucun épic PRD et n'en bloque aucun. E10–E17 (confort/dette/sécu post-rétro) sont de même autonomes, sans dépendance inter-epics, en exécution légère (E15 s'adosse à l'auth durcie d'E7 mais ne dépend d'aucun autre épic). **Intra-E17 :** 17.2 (front) dépend de 17.1 (garde serveur + 409) ; ordre imposé 17.1 → 17.2. E17 durcit rétroactivement la politique doublon posée par 13.1 (édition) mais ne dépend d'aucun autre épic. **Intra-E18 :** 18.2 (route-ify + swap guard) dépend de 18.1 (migration data-router) ; ordre imposé 18.1 → 18.2. E18 révise rétroactivement le guard de nav livré par 17.2 (le supprime au profit de `useBlocker`) mais ne dépend d'aucun autre épic. **E19 → E20** : E19 (Browse & Add + curation de fiches) pose le modèle `CatalogSong` + la mécanique Add dont E20 (Collections) dépend — ordre imposé E19 → E20. E19/E20 (Catalog) sont autonomes vis-à-vis des epics journal ; ils réutilisent SANS les modifier l'unicité Epic 17, les playlists Epic 10, l'auto-fill 8.1 et le data-router Epic 18 (additif strict). Les NFR1-NFR6 et NFR-S1-S4 transverses s'appliquent aux critères d'acceptation des stories concernées ; les NFR-1..6 **Catalog** (espace propre) s'appliquent à E19/E20.
+### Epic 21: Catalog ↔ Song — provenance & refresh de drift (cadré 2026-07-21, ADR `architecture-catalog-song-link-2026-07-21.md`)
+La copie Songlist (19.4 *Add* / 20.3 *import*) est un **snapshot déconnecté** portant `sourceCatalogUid` — aujourd'hui **écrit mais lu nulle part**. Cet épic **expose le lien** (provenance « from the Catalog » + navigation Song → fiche source) et permet de **rafraîchir** une copie quand le curateur a fait évoluer la fiche source : **drift par timestamp** (`sourceCatalogSyncedAt`), **Refresh** qui écrase les champs **intrinsèques** à la version Catalog et **préserve** les champs perso (instrument/accordage/notes…). **Additif strict sur 19.4** : le défaut reste snapshot, la connexion est **opt-in** (action explicite). Raffinement post-Catalog (hors PRD initial). _Détail § Epic 21 ci-dessous._
+
+**Dépendances :** E1 → E2 → (E3 ∥ E4). Les epics 3 et 4 sont indépendants l'un de l'autre. E6 dépend d'E4 (pont Mark as Played). E5 est transverse ; E9 (confort UI, post-rétro) est autonome et se solde avant E7 ; E7 (compte + sécurité, hors-PRD) est autonome — ne dépend d'aucun épic PRD et n'en bloque aucun. E10–E17 (confort/dette/sécu post-rétro) sont de même autonomes, sans dépendance inter-epics, en exécution légère (E15 s'adosse à l'auth durcie d'E7 mais ne dépend d'aucun autre épic). **Intra-E17 :** 17.2 (front) dépend de 17.1 (garde serveur + 409) ; ordre imposé 17.1 → 17.2. E17 durcit rétroactivement la politique doublon posée par 13.1 (édition) mais ne dépend d'aucun autre épic. **Intra-E18 :** 18.2 (route-ify + swap guard) dépend de 18.1 (migration data-router) ; ordre imposé 18.1 → 18.2. E18 révise rétroactivement le guard de nav livré par 17.2 (le supprime au profit de `useBlocker`) mais ne dépend d'aucun autre épic. **E19 → E20** : E19 (Browse & Add + curation de fiches) pose le modèle `CatalogSong` + la mécanique Add dont E20 (Collections) dépend — ordre imposé E19 → E20. E19/E20 (Catalog) sont autonomes vis-à-vis des epics journal ; ils réutilisent SANS les modifier l'unicité Epic 17, les playlists Epic 10, l'auto-fill 8.1 et le data-router Epic 18 (additif strict). Les NFR1-NFR6 et NFR-S1-S4 transverses s'appliquent aux critères d'acceptation des stories concernées ; les NFR-1..6 **Catalog** (espace propre) s'appliquent à E19/E20. **E19 → E21** : E21 (provenance & refresh) dépend du modèle `CatalogSong`, du pointeur `sourceCatalogUid` et de `buildSongFromCatalog` (E19) et de la fiche Song en vraie route (E18) ; **additif strict** sur le snapshot 19.4 (défaut inchangé, connexion opt-in). **Intra-E21 :** 21.2 (front) dépend de 21.1 (colonne + `getSong` enrichi + endpoint Refresh) ; ordre imposé 21.1 → 21.2.
 
 ## Epic 1: Ma bibliothèque de sujets de travail
 
@@ -1832,3 +1835,63 @@ afin de peupler ma Songlist d'un geste (UJ-2).
 
 **And** a11y : stretched-link, cibles ≥44px, live-region pour le récap ; UI en anglais, dark mode
 `[src/pages/Catalog.tsx, src/components/CollectionCard.tsx, src/pages/CatalogCollection.tsx, src/pages/Songs.tsx, src/services/catalogService.ts, src/router.tsx]`
+
+## Epic 21: Catalog ↔ Song — provenance & refresh de drift
+
+La copie Songlist est un snapshot déconnecté (19.4/20.3) portant `sourceCatalogUid` inutilisé. Cet épic l'exploite : **provenance + navigation** (Song ↔ fiche source) et **refresh de drift** quand le curateur fait évoluer la fiche Catalog. Cadré dans l'ADR `architecture-catalog-song-link-2026-07-21.md` (décisions verrouillées : drift par timestamp ; Refresh écrase l'intrinsèque + préserve le perso ; dégradation propre si source supprimée/dépubliée). **Additif strict** sur le modèle snapshot 19.4 — la connexion est opt-in par action. Réutilise SANS le modifier `buildSongFromCatalog` (E19), le pattern contrôleur scopé `userUid`→404 (7.5), l'exception lecture Catalog non-scopée (§3), la fiche Song en route (E18), `ConfirmDialog`.
+
+**Ordre imposé : 21.1 (back) → 21.2 (front).**
+
+### Story 21.1: Provenance + drift + refresh (backend)
+
+En tant qu'**utilisateur**,
+je veux que ma chanson copiée connaisse sa fiche Catalog d'origine et sache si celle-ci a évolué,
+afin de pouvoir mettre à jour ma copie à la version du Catalog.
+
+**Acceptance Criteria:**
+
+**Given** la migration
+**When** elle s'exécute
+**Then** `Songs.source_catalog_synced_at` (DATE nullable) existe ; **backfill idempotent** des copies existantes (`source_catalog_uid` non nul) = `CatalogSong.updated_at` de la source si résolvable, sinon `Songs.created_at` — **aucun faux « update available »** sur le legacy ; idempotente (part en **prod** au merge)
+
+**Given** une copie depuis le Catalog (chemins *Add* 19.4 et *import* 20.3)
+**When** `buildSongFromCatalog` construit la Song
+**Then** `sourceCatalogSyncedAt = catalog.updatedAt` est posé
+
+**Given** un `GET /api/songs/:uid` d'une Song avec `sourceCatalogUid` posé **et** source **publiée**
+**When** la réponse est construite
+**Then** elle inclut `sourceCatalog: { uid, updatedAt, drift }` où `drift = CatalogSong.updatedAt > Song.sourceCatalogSyncedAt` (lecture Catalog **non scopée**, §3) ; si la source est **absente ou en brouillon** → champ `sourceCatalog` **absent** (dégradation propre)
+
+**Given** `POST /api/songs/:uid/refresh-from-catalog`
+**When** l'utilisateur rafraîchit sa copie (scopé `userUid` → **404** si pas à lui/inconnu)
+**Then** si la source n'existe plus / est en brouillon → **404/409** ; sinon les champs **intrinsèques** (`key, bpm, mode, timeSignature, durationSeconds, language, genre, streamingLinks, pitchStandard`, JSON **deep-cloned**) sont **écrasés** depuis la fiche Catalog courante ; les champs **perso** (`instrument, instrumentTuning, instrumentDifficulty, capo, technique, instrumentLinks, notes, lastPlayed, myInstrumentUid`) et `title/artist/album` sont **inchangés** ; `sourceCatalogSyncedAt = CatalogSong.updatedAt` ; renvoie la Song
+
+**And** tests backend mockés (drift true/false, refresh préserve le perso, 404/409 source absente) + **smoke base dev** ; migration validée base dev avant « done »
+`[backend/migrations/*-add-source-catalog-synced-at-to-songs.js, backend/models/song.js, backend/controllers/songcontroller.js (getSong, refreshSongFromCatalog), backend/controllers/catalogcontroller.js (buildSongFromCatalog), backend/routes/songs.js]`
+
+### Story 21.2: Provenance + drift + Refresh (front, fiche Song)
+
+En tant qu'**utilisateur**,
+sur la fiche d'une chanson venue du Catalog, je veux voir d'où elle vient et être prévenu quand la version Catalog a évolué,
+afin de rafraîchir ma copie d'un geste.
+
+**Acceptance Criteria:**
+
+**Given** une fiche Song dont `getSong` renvoie `sourceCatalog` (source publiée)
+**When** la fiche s'affiche
+**Then** un **badge « Added from the Catalog »** + un **lien vers `/catalog/:uid`** (fiche source) sont présents
+
+**Given** `sourceCatalog.drift === true`
+**When** la fiche s'affiche
+**Then** une **bannière** « A newer version of this song is in the Catalog » + un bouton **Refresh** apparaissent
+
+**Given** le clic sur **Refresh**
+**When** l'action se déclenche
+**Then** un **ConfirmDialog** annonce « Update key, BPM, etc. to the Catalog version? Your instrument, tuning and notes are kept. » → à la confirmation, `refreshSongFromCatalog` → la fiche se met à jour (le drift retombe) + **feedback** de succès (bannière/toast, `role="status"`)
+
+**Given** une source **supprimée / dépubliée** (`sourceCatalog` absent), ou une erreur de refresh (source disparue entre-temps)
+**When** la fiche s'affiche / le refresh échoue
+**Then** **ni badge ni bannière** (dégradation propre) ; l'échec de refresh affiche un message clair (**erreur** distincte du succès)
+
+**And** `songService.refreshSongFromCatalog` ; UI en anglais, dark mode, a11y ; tests (`StrictMode`) ; front vert
+`[src/services/songService.ts, src/pages/Songs.tsx (fiche), src/components/ConfirmDialog.tsx, éventuel composant badge/bannière]`
