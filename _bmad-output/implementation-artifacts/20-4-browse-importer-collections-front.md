@@ -113,6 +113,7 @@ Commits `c46bbfe` (20.1), `3a63a1b` (20.3), `9bdd3e0` (20.2) are the foundation 
 
 - 2026-07-21 — Story implemented (dev-story). `importCollection` service + `CollectionCard` + Collections rail on `Catalog` + `CatalogCollection` detail/import page + empty-Songlist preview + route + 9 tests. Frontend 471✓, tsc✓, lint✓. Status → review.
 - 2026-07-21 — Code review (3 layers). Auditor 6/6 ACs, no High. 3 patches applied (error toast role=alert; filter empty collections from rail/preview; aria-labelledby) + 2 tests, 8 dismissed. Front 473✓, tsc✓, lint✓. Status → done.
+- 2026-07-21 — UX follow-up (manual QA feedback): the import recap was a fleeting bottom toast, easy to miss, and read "Added 0 · …" on a re-import. Replaced it with a **persistent inline result banner** (green success / red error, under the button) and clarified the copy (segments, no "Added 0" — e.g. "3 already in your songlist", "Nothing to import."). +1 test (re-import copy). Verified in-browser (dark + light). Front 474✓, tsc✓, lint✓.
 
 ## Dev Agent Record
 

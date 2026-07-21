@@ -63,7 +63,19 @@ test('import: confirm dialog then recap toast', async () => {
   expect(screen.getByText(/Add 2 songs to your Songlist\?/)).toBeInTheDocument();
   fireEvent.click(screen.getByRole('button', { name: 'Add to my songlist' }));
   await waitFor(() => expect(cat.importCollection).toHaveBeenCalledWith('col1'));
-  await screen.findByText('Added 18 · 2 already in your songlist');
+  // Persistent inline result banner with the clarified copy.
+  await screen.findByText('Added 18 songs · 2 already in your songlist');
+});
+
+test('re-import (all already owned) reads clearly, no "Added 0"', async () => {
+  cat.importCollection.mockResolvedValue({ added: 0, skipped: 3, failed: 0, playlistUid: 'p1' });
+  renderDetail();
+  await screen.findByText('Rock 90s');
+  fireEvent.click(screen.getByRole('button', { name: 'Add collection to my songlist' }));
+  fireEvent.click(screen.getByRole('button', { name: 'Add to my songlist' }));
+  const banner = await screen.findByText('3 already in your songlist');
+  expect(banner).toBeInTheDocument();
+  expect(screen.queryByText(/Added 0/)).toBeNull();
 });
 
 test('import failure surfaces an assertive error toast (role=alert)', async () => {

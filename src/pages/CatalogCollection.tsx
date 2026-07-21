@@ -19,11 +19,9 @@ export default function CatalogCollection() {
 
   const [confirmOpen, setConfirmOpen] = useState(false);
   const [importing, setImporting] = useState(false);
-  const [toast, setToast] = useState<{ message: string; isError: boolean } | null>(null);
-  const showToast = (message: string, isError = false) => {
-    setToast({ message, isError });
-    setTimeout(() => setToast(null), 2500);
-  };
+  // Persistent inline result banner (not a transient toast — the import recap must stay
+  // visible until the user acts/navigates).
+  const [result, setResult] = useState<{ message: string; isError: boolean } | null>(null);
 
   useEffect(() => {
     if (!uid) return;
@@ -47,15 +45,21 @@ export default function CatalogCollection() {
     setImporting(true);
     try {
       const recap = await catalogService.importCollection(collection.uid);
-      let message = `Added ${recap.added}`;
-      if (recap.skipped > 0) message += ` · ${recap.skipped} already in your songlist`;
-      if (recap.failed > 0) message += ` · ${recap.failed} failed`;
-      showToast(message);
+      // Build the recap from segments so an all-skipped re-import reads clearly
+      // ("3 already in your songlist") instead of a confusing "Added 0 · …".
+      const parts: string[] = [];
+      if (recap.added) parts.push(`Added ${recap.added} song${recap.added > 1 ? 's' : ''}`);
+      if (recap.skipped) parts.push(`${recap.skipped} already in your songlist`);
+      if (recap.failed) parts.push(`${recap.failed} failed`);
+      setResult({ message: parts.length ? parts.join(' · ') : 'Nothing to import.', isError: false });
       setConfirmOpen(false);
     } catch (err) {
-      showToast(err instanceof CollectionNotFoundError
-        ? 'This collection no longer exists.'
-        : 'Could not import the collection.', true);
+      setResult({
+        message: err instanceof CollectionNotFoundError
+          ? 'This collection no longer exists.'
+          : 'Could not import the collection.',
+        isError: true,
+      });
       setConfirmOpen(false);
     } finally {
       setImporting(false);
@@ -92,7 +96,7 @@ export default function CatalogCollection() {
       )}
       <p className="mt-1 text-sm text-gray-500 dark:text-gray-400">{count} {count === 1 ? 'song' : 'songs'}</p>
 
-      <div className="my-6">
+      <div className="mt-6 mb-3">
         <button
           type="button"
           className="btn-primary min-h-[44px]"
@@ -102,6 +106,20 @@ export default function CatalogCollection() {
           {importing ? 'Adding…' : 'Add collection to my songlist'}
         </button>
       </div>
+
+      {/* Persistent inline result — stays visible after the import (not a fleeting toast). */}
+      {result && (
+        <div
+          role={result.isError ? 'alert' : 'status'}
+          aria-live={result.isError ? 'assertive' : 'polite'}
+          className={`mb-6 rounded-lg border px-4 py-3 text-sm font-medium ${result.isError
+            ? 'border-red-300 bg-red-50 text-red-800 dark:border-red-800 dark:bg-red-900/30 dark:text-red-300'
+            : 'border-green-300 bg-green-50 text-green-800 dark:border-green-700 dark:bg-green-900/30 dark:text-green-300'}`}
+        >
+          {!result.isError && <span aria-hidden="true">✓ </span>}
+          {result.message}
+        </div>
+      )}
 
       {count === 0 ? (
         <p className="text-gray-500 dark:text-gray-400 py-6 text-center">This collection is empty.</p>
@@ -132,15 +150,6 @@ export default function CatalogCollection() {
         onCancel={() => { if (!importing) setConfirmOpen(false); }}
       />
 
-      {toast && (
-        <div
-          role={toast.isError ? 'alert' : 'status'}
-          aria-live={toast.isError ? 'assertive' : 'polite'}
-          className={`fixed bottom-6 left-1/2 -translate-x-1/2 text-white text-sm px-4 py-2 rounded-lg shadow-lg ${toast.isError ? 'bg-red-700' : 'bg-gray-900'}`}
-        >
-          {toast.message}
-        </div>
-      )}
     </div>
   );
 }
