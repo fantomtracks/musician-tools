@@ -1,4 +1,4 @@
-import { catalogService, CatalogNotFoundError, CatalogConflictError } from '../services/catalogService';
+import { catalogService, CatalogNotFoundError, CatalogConflictError, CollectionNotFoundError } from '../services/catalogService';
 import { clearCsrfToken } from '../services/csrf';
 
 // apiFetch does a CSRF round-trip before a mutation (story 7.3): /csrf-token then
@@ -124,5 +124,64 @@ describe('catalogService.checkCatalogExists', () => {
     const fetchMock = jest.fn().mockResolvedValue({ ok: false, status: 500, json: async () => ({}) });
     global.fetch = fetchMock as unknown as typeof fetch;
     await expect(catalogService.checkCatalogExists('X')).rejects.toThrow('Failed to check catalog existence');
+  });
+});
+
+// ---- Story 20.2: Collections ----
+
+describe('catalogService Collections', () => {
+  const originalFetch = global.fetch;
+  beforeEach(() => { clearCsrfToken(); });
+  afterEach(() => { global.fetch = originalFetch; });
+
+  test('listCollections GETs /api/catalog/collections', async () => {
+    const rows = [{ uid: 'col1', name: 'Rock 90s', description: null, songCount: 2 }];
+    const fetchMock = jest.fn().mockResolvedValue({ ok: true, status: 200, json: async () => rows });
+    global.fetch = fetchMock as unknown as typeof fetch;
+    await expect(catalogService.listCollections()).resolves.toEqual(rows);
+    expect(fetchMock).toHaveBeenCalledWith('/api/catalog/collections', expect.objectContaining({ credentials: 'include' }));
+  });
+
+  test('createCollection POSTs the name and returns the collection', async () => {
+    const created = { uid: 'newc', name: 'Jazz', description: null, songs: [] };
+    const fetchMock = mockFetchWithCsrf({ ok: true, status: 201, json: async () => created });
+    global.fetch = fetchMock as unknown as typeof fetch;
+    await expect(catalogService.createCollection('Jazz')).resolves.toEqual(created);
+    expect(fetchMock).toHaveBeenCalledWith(
+      '/api/catalog/collections',
+      expect.objectContaining({ method: 'POST', body: JSON.stringify({ name: 'Jazz', description: null }) })
+    );
+  });
+
+  test('getCollection throws CollectionNotFoundError on 404', async () => {
+    const fetchMock = jest.fn().mockResolvedValue({ ok: false, status: 404, json: async () => ({}) });
+    global.fetch = fetchMock as unknown as typeof fetch;
+    await expect(catalogService.getCollection('gone')).rejects.toBeInstanceOf(CollectionNotFoundError);
+  });
+
+  test('addSongToCollection POSTs the catalogSongUid', async () => {
+    const fetchMock = mockFetchWithCsrf({ ok: true, status: 201, json: async () => ({ message: 'Added to collection' }) });
+    global.fetch = fetchMock as unknown as typeof fetch;
+    await expect(catalogService.addSongToCollection('col1', 's1')).resolves.toBeUndefined();
+    expect(fetchMock).toHaveBeenCalledWith(
+      '/api/catalog/collections/col1/songs',
+      expect.objectContaining({ method: 'POST', body: JSON.stringify({ catalogSongUid: 's1' }) })
+    );
+  });
+
+  test('removeSongFromCollection DELETEs the nested path', async () => {
+    const fetchMock = mockFetchWithCsrf({ ok: true, status: 200, json: async () => ({ message: 'Removed from collection' }) });
+    global.fetch = fetchMock as unknown as typeof fetch;
+    await expect(catalogService.removeSongFromCollection('col1', 's1')).resolves.toBeUndefined();
+    expect(fetchMock).toHaveBeenCalledWith(
+      '/api/catalog/collections/col1/songs/s1',
+      expect.objectContaining({ method: 'DELETE' })
+    );
+  });
+
+  test('deleteCollection throws CollectionNotFoundError on 404', async () => {
+    const fetchMock = mockFetchWithCsrf({ ok: false, status: 404, json: async () => ({}) });
+    global.fetch = fetchMock as unknown as typeof fetch;
+    await expect(catalogService.deleteCollection('gone')).rejects.toBeInstanceOf(CollectionNotFoundError);
   });
 });

@@ -12,6 +12,7 @@ import MyHeatmapPage from './pages/MyHeatmapPage';
 import ProfilePage from './pages/ProfilePage';
 import CatalogAdmin from './pages/CatalogAdmin';
 import CatalogManage from './pages/CatalogManage';
+import CatalogCollectionCompose from './pages/CatalogCollectionCompose';
 import Catalog from './pages/Catalog';
 import CatalogEntry from './pages/CatalogEntry';
 import VerifyEmailPage from './pages/VerifyEmailPage';
@@ -52,6 +53,9 @@ export const routes: RouteObject[] = [
             { path: 'catalog', element: <Catalog /> },
             // Story 19.5 — Catalog curator management hub (list + edit + delete).
             { path: 'catalog/manage', element: <CatalogManage /> },
+            // Story 20.2 — curator Collection composer (search + Add/Remove, rename,
+            // delete). Deeper static+:uid path; no clash with catalog/:uid.
+            { path: 'catalog/manage/collections/:uid', element: <CatalogCollectionCompose /> },
             // Story 19.5 — edit an existing fiche (CatalogAdmin in edit mode). Static
             // `admin` segment outranks :uid; this stays above catalog/:uid too.
             { path: 'catalog/admin/:uid', element: <CatalogAdmin /> },

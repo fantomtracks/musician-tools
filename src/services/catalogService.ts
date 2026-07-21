@@ -79,6 +79,31 @@ export class CatalogConflictError extends Error {
   }
 }
 
+// A Collection = a curated, SHARED grouping of catalog entries (story 20.1). List
+// shape carries a member count; detail carries the member entries themselves.
+export type CatalogCollection = {
+  uid: string;
+  name: string;
+  description?: string | null;
+  songCount: number;
+};
+
+export type CatalogCollectionDetail = {
+  uid: string;
+  name: string;
+  description?: string | null;
+  songs: CatalogSong[];
+};
+
+// Thrown on a 404 from a Collection detail/mutation (deep-link or concurrent delete),
+// so a page can show a calm not-found. Mirror of CatalogNotFoundError.
+export class CollectionNotFoundError extends Error {
+  constructor() {
+    super('Collection not found');
+    this.name = 'CollectionNotFoundError';
+  }
+}
+
 const API_BASE = '/api';
 
 export const catalogService = {
@@ -258,5 +283,105 @@ export const catalogService = {
       throw new Error('Failed to publish catalog entry');
     }
     return response.json();
+  },
+
+  // ---- Story 20.2: Collections (curator) ----
+
+  // List all Collections (name + member count). Any logged-in user; the curator hub
+  // uses it. `signal` aborts a superseded request.
+  async listCollections(signal?: AbortSignal): Promise<CatalogCollection[]> {
+    const response = await apiFetch(`${API_BASE}/catalog/collections`, { credentials: 'include', signal });
+    if (!response.ok) {
+      throw new Error('Failed to load collections');
+    }
+    return response.json();
+  },
+
+  // Create a Collection (curator; requireCurator -> 403). 400 if name is empty. The
+  // API returns the created row (no `songs` / `songCount`) — callers use uid/name only.
+  async createCollection(name: string, description?: string | null): Promise<{ uid: string; name: string; description?: string | null }> {
+    const response = await apiFetch(`${API_BASE}/catalog/collections`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ name, description: description ?? null }),
+      credentials: 'include',
+    });
+    if (!response.ok) {
+      throw new Error('Failed to create collection');
+    }
+    return response.json();
+  },
+
+  // Fetch one Collection with its member entries. The curator sees draft members
+  // (20.1 draft-safety gates on isCurator). 404 -> CollectionNotFoundError.
+  async getCollection(uid: string, signal?: AbortSignal): Promise<CatalogCollectionDetail> {
+    const response = await apiFetch(`${API_BASE}/catalog/collections/${uid}`, { credentials: 'include', signal });
+    if (response.status === 404) {
+      throw new CollectionNotFoundError();
+    }
+    if (!response.ok) {
+      throw new Error('Failed to load the collection');
+    }
+    return response.json();
+  },
+
+  // Rename / re-describe a Collection (curator). 404 -> CollectionNotFoundError. Returns
+  // the updated row (no `songs`); callers use name only.
+  async updateCollection(uid: string, changes: { name?: string; description?: string | null }): Promise<{ uid: string; name: string; description?: string | null }> {
+    const response = await apiFetch(`${API_BASE}/catalog/collections/${uid}`, {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(changes),
+      credentials: 'include',
+    });
+    if (response.status === 404) {
+      throw new CollectionNotFoundError();
+    }
+    if (!response.ok) {
+      throw new Error('Failed to update the collection');
+    }
+    return response.json();
+  },
+
+  // Delete a Collection (curator). Cascades its join rows; the entries survive.
+  async deleteCollection(uid: string): Promise<void> {
+    const response = await apiFetch(`${API_BASE}/catalog/collections/${uid}`, {
+      method: 'DELETE',
+      credentials: 'include',
+    });
+    if (response.status === 404) {
+      throw new CollectionNotFoundError();
+    }
+    if (!response.ok) {
+      throw new Error('Failed to delete the collection');
+    }
+  },
+
+  // Add a catalog entry to a Collection (curator). Idempotent server-side (201 created
+  // / 200 already present). 404 -> the collection or the entry is gone.
+  async addSongToCollection(uid: string, catalogSongUid: string): Promise<void> {
+    const response = await apiFetch(`${API_BASE}/catalog/collections/${uid}/songs`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ catalogSongUid }),
+      credentials: 'include',
+    });
+    if (response.status === 404) {
+      throw new CollectionNotFoundError();
+    }
+    if (!response.ok) {
+      throw new Error('Failed to add to the collection');
+    }
+  },
+
+  // Remove a catalog entry from a Collection (curator). Idempotent.
+  async removeSongFromCollection(uid: string, catalogSongUid: string): Promise<void> {
+    const response = await apiFetch(`${API_BASE}/catalog/collections/${uid}/songs/${catalogSongUid}`, {
+      method: 'DELETE',
+      credentials: 'include',
+    });
+    if (!response.ok) {
+      throw new Error('Failed to remove from the collection');
+    }
   },
 };

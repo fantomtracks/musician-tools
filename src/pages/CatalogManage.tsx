@@ -2,7 +2,7 @@ import { useEffect, useRef, useState } from 'react';
 import { Link, Navigate, useNavigate, useSearchParams } from 'react-router-dom';
 import { useAuth } from '../contexts/AuthContext';
 import { catalogService, CatalogNotFoundError } from '../services/catalogService';
-import type { CatalogListResponse } from '../services/catalogService';
+import type { CatalogListResponse, CatalogCollection } from '../services/catalogService';
 import { ConfirmDialog } from '../components/ConfirmDialog';
 import { useRowSelection } from '../hooks/useRowSelection';
 
@@ -19,6 +19,9 @@ export default function CatalogManage() {
   const [searchParams, setSearchParams] = useSearchParams();
   const search = searchParams.get('search') || '';
   const page = Math.max(1, Math.floor(Number(searchParams.get('page'))) || 1);
+  // Story 20.2: the hub has two tabs — the fiches (Entries) hub and the Collections
+  // hub — selected via ?tab= (URL-state, back-button parity). Default = entries.
+  const tab = searchParams.get('tab') === 'collections' ? 'collections' : 'entries';
 
   const [searchInput, setSearchInput] = useState(search);
   const [data, setData] = useState<CatalogListResponse | null>(null);
@@ -38,6 +41,14 @@ export default function CatalogManage() {
     setToastMessage(message);
     setTimeout(() => setToastMessage(null), 2500);
   };
+
+  // Story 20.2: Collections tab state.
+  const [collections, setCollections] = useState<CatalogCollection[] | null>(null);
+  const [collectionsError, setCollectionsError] = useState(false);
+  const [collectionsToken, setCollectionsToken] = useState(0);
+  const [newName, setNewName] = useState('');
+  const [creating, setCreating] = useState(false);
+  const creatingRef = useRef(false); // in-flight guard (Enter can fire before re-render)
 
   const patchParams = (changes: Record<string, string | null>) => {
     setSearchParams(prev => {
@@ -77,6 +88,36 @@ export default function CatalogManage() {
       });
     return () => ctrl.abort();
   }, [search, page, refetchToken]);
+
+  // Fetch the Collections list when that tab is active (StrictMode-safe abort).
+  useEffect(() => {
+    if (tab !== 'collections') return;
+    const ctrl = new AbortController();
+    setCollectionsError(false);
+    catalogService.listCollections(ctrl.signal)
+      .then(res => setCollections(res))
+      .catch(err => { if (err?.name !== 'AbortError') setCollectionsError(true); });
+    return () => ctrl.abort();
+  }, [tab, collectionsToken]);
+
+  const handleCreateCollection = async () => {
+    const name = newName.trim();
+    // ref guard: two rapid Enter presses read the same render-time `creating`, and
+    // Collections have NO name-uniqueness backstop — without this, they'd create a dup.
+    if (!name || creatingRef.current) return;
+    creatingRef.current = true;
+    setCreating(true);
+    try {
+      const created = await catalogService.createCollection(name);
+      setNewName('');
+      navigate(`/catalog/manage/collections/${created.uid}`);
+    } catch {
+      showToast('Could not create the collection.');
+    } finally {
+      setCreating(false);
+      creatingRef.current = false;
+    }
+  };
 
   // Role gate (after hooks, so hook order is stable). Not a 404 oracle.
   if (!user?.isCurator) {
@@ -130,9 +171,82 @@ export default function CatalogManage() {
     <div className="w-full max-w-5xl mx-auto px-4 py-6">
       <div className="flex flex-wrap items-center justify-between gap-3 mb-4">
         <h1 className="text-2xl font-semibold text-gray-900 dark:text-gray-100">Manage the Catalog</h1>
-        <Link to="/catalog/admin" className="btn-primary text-sm shrink-0">New entry</Link>
+        {tab === 'entries' && (
+          <Link to="/catalog/admin" className="btn-primary text-sm shrink-0">New entry</Link>
+        )}
       </div>
 
+      {/* Story 20.2 — Entries | Collections tabs. */}
+      <div className="flex gap-1 border-b border-gray-200 dark:border-gray-700 mb-4" role="tablist">
+        <button
+          type="button"
+          role="tab"
+          aria-selected={tab === 'entries'}
+          className={`px-4 py-2 text-sm font-medium -mb-px border-b-2 ${tab === 'entries' ? 'border-brand-500 text-brand-600 dark:text-brand-400' : 'border-transparent text-gray-500 dark:text-gray-400 hover:text-gray-700 dark:hover:text-gray-200'}`}
+          onClick={() => patchParams({ tab: null })}
+        >
+          Entries
+        </button>
+        <button
+          type="button"
+          role="tab"
+          aria-selected={tab === 'collections'}
+          className={`px-4 py-2 text-sm font-medium -mb-px border-b-2 ${tab === 'collections' ? 'border-brand-500 text-brand-600 dark:text-brand-400' : 'border-transparent text-gray-500 dark:text-gray-400 hover:text-gray-700 dark:hover:text-gray-200'}`}
+          onClick={() => patchParams({ tab: 'collections' })}
+        >
+          Collections
+        </button>
+      </div>
+
+      {tab === 'collections' && (
+        <div>
+          {/* New collection */}
+          <div className="flex items-center gap-2 mb-4">
+            <input
+              type="text"
+              className="input-base"
+              aria-label="New collection name"
+              placeholder="New collection name…"
+              value={newName}
+              onChange={e => setNewName(e.target.value)}
+              onKeyDown={e => { if (e.key === 'Enter') handleCreateCollection(); }}
+            />
+            <button type="button" className="btn-primary text-sm shrink-0" onClick={handleCreateCollection} disabled={creating || !newName.trim()}>
+              {creating ? 'Creating…' : 'New collection'}
+            </button>
+          </div>
+
+          {collectionsError ? (
+            <div className="text-center py-10">
+              <p className="text-gray-600 dark:text-gray-300">Something went wrong.</p>
+              <button type="button" className="btn-secondary mt-3" onClick={() => setCollectionsToken(t => t + 1)}>Retry</button>
+            </div>
+          ) : collections === null ? (
+            <div className="space-y-2" aria-hidden="true">
+              {Array.from({ length: 4 }).map((_, i) => (<div key={i} className="h-10 rounded bg-gray-100 dark:bg-gray-700 animate-pulse" />))}
+            </div>
+          ) : collections.length === 0 ? (
+            <p className="text-gray-500 dark:text-gray-400 py-10 text-center">No collections yet — create the first one.</p>
+          ) : (
+            <ul className="divide-y divide-gray-100 dark:divide-gray-700 rounded-lg border border-gray-200 dark:border-gray-700">
+              {collections.map(c => (
+                <li key={c.uid}>
+                  <button
+                    type="button"
+                    className="w-full text-left flex items-center justify-between gap-3 px-4 py-3 hover:bg-gray-50 dark:hover:bg-gray-700/50"
+                    onClick={() => navigate(`/catalog/manage/collections/${c.uid}`)}
+                  >
+                    <span className="font-medium text-gray-900 dark:text-gray-100 truncate">{c.name}</span>
+                    <span className="shrink-0 text-sm text-gray-500 dark:text-gray-400">{c.songCount} {c.songCount === 1 ? 'entry' : 'entries'}</span>
+                  </button>
+                </li>
+              ))}
+            </ul>
+          )}
+        </div>
+      )}
+
+      {tab === 'entries' && (<>
       <input
         type="search"
         aria-label="Search the catalog"
@@ -263,6 +377,7 @@ export default function CatalogManage() {
           )}
         </div>
       )}
+      </>)}
 
       <ConfirmDialog
         isOpen={confirmOpen}
