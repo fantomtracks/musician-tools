@@ -311,6 +311,7 @@ describe('catalogcontroller', () => {
     language: ['English'], genre: ['Rock'], streamingLinks: [{ label: 'YouTube', url: 'https://y' }],
     pitchStandard: 440,
     publishedAt: '2026-01-01T00:00:00.000Z', // published (19.6) → addToSonglist proceeds
+    updatedAt: '2026-03-01T00:00:00.000Z', // story 21.1: copied into sourceCatalogSyncedAt
     // Parasite fields: NOT part of a CatalogSong, but present here to prove the
     // explicit build never leaks personal/instrument data into the copy.
     userUid: 'someone-else', instrument: ['guitar'], capo: 3, notes: 'secret',
@@ -328,6 +329,7 @@ describe('catalogcontroller', () => {
     const arg = Song.create.mock.calls[0][0];
     expect(arg.userUid).toBe('u1');
     expect(arg.sourceCatalogUid).toBe(UID);
+    expect(arg.sourceCatalogSyncedAt).toBe('2026-03-01T00:00:00.000Z'); // story 21.1: version stamp = catalog.updatedAt
     expect(arg.title).toBe('Zombie');
     expect(arg.lastPlayed).toBeNull();
     // deep-clone: equal value, different reference (no shared JSON with the catalog entry)

@@ -6,6 +6,9 @@ jest.mock('../models', () => {
       create: jest.fn(async (data) => ({ ...data, uid: 'test-uid' })),
       findOne: jest.fn()
     },
+    CatalogSong: {
+      findByPk: jest.fn()
+    },
     Instrument: {
       findOne: jest.fn()
     },
@@ -28,7 +31,7 @@ jest.mock('../models', () => {
   };
 });
 
-const { Song, SongPlay, PracticeSession, SessionItem, Instrument } = require('../models');
+const { Song, SongPlay, PracticeSession, SessionItem, Instrument, CatalogSong } = require('../models');
 const { Op } = require('sequelize'); // real package (not mocked) — used to assert lookup WHERE clauses
 const controller = require('../controllers/songcontroller');
 
@@ -739,5 +742,133 @@ describe('malformed uid guard (404, not a 500)', () => {
     await call(controller, req);
     expect(Song.findOne).not.toHaveBeenCalled();
     expect(next.mock.calls[0][0].status).toBe(404);
+  });
+});
+
+// ---- Story 21.1: Catalog provenance + drift + refresh ----
+
+const CATALOG_UID = 'cccccccc-cccc-4ccc-8ccc-cccccccccccc';
+const SONG_UID = '55555555-5555-4555-8555-555555555555';
+
+function catalogCopy(overrides = {}) {
+  const base = {
+    uid: SONG_UID, userUid: 'user-1', title: 'Zombie', artist: 'The Cranberries', capo: 3,
+    sourceCatalogUid: CATALOG_UID, sourceCatalogSyncedAt: '2026-01-01T00:00:00.000Z', ...overrides,
+  };
+  return { ...base, toJSON: () => ({ ...base }), update: jest.fn(async (u) => ({ ...base, ...u })) };
+}
+function publishedCatalog(overrides = {}) {
+  return {
+    uid: CATALOG_UID, publishedAt: '2026-01-01', updatedAt: '2026-06-01T00:00:00.000Z',
+    key: 'F#', bpm: 90, mode: 'Major', timeSignature: '4/4', durationSeconds: 200, pitchStandard: 432,
+    language: ['English'], genre: ['Rock'], streamingLinks: [{ label: 'Spotify', url: 'https://x' }], ...overrides,
+  };
+}
+
+describe('getSong — Catalog provenance/drift (story 21.1)', () => {
+  beforeEach(() => jest.clearAllMocks());
+
+  test('published source + newer updatedAt → sourceCatalog.drift true', async () => {
+    Song.findOne.mockResolvedValue(catalogCopy());
+    CatalogSong.findByPk.mockResolvedValue(publishedCatalog({ updatedAt: '2026-06-01T00:00:00.000Z' }));
+    const res = mockRes();
+    await controller.getSong({ session: { user: 'user-1' }, params: { uid: SONG_UID } }, res, mockNext());
+    const body = res.json.mock.calls[0][0];
+    expect(body.sourceCatalog).toEqual({ uid: CATALOG_UID, updatedAt: '2026-06-01T00:00:00.000Z', drift: true });
+  });
+
+  test('published source not newer → drift false', async () => {
+    Song.findOne.mockResolvedValue(catalogCopy({ sourceCatalogSyncedAt: '2026-06-01T00:00:00.000Z' }));
+    CatalogSong.findByPk.mockResolvedValue(publishedCatalog({ updatedAt: '2026-06-01T00:00:00.000Z' }));
+    const res = mockRes();
+    await controller.getSong({ session: { user: 'user-1' }, params: { uid: SONG_UID } }, res, mockNext());
+    expect(res.json.mock.calls[0][0].sourceCatalog.drift).toBe(false);
+  });
+
+  test('draft source → no sourceCatalog field (no draft leak)', async () => {
+    Song.findOne.mockResolvedValue(catalogCopy());
+    CatalogSong.findByPk.mockResolvedValue(publishedCatalog({ publishedAt: null }));
+    const res = mockRes();
+    await controller.getSong({ session: { user: 'user-1' }, params: { uid: SONG_UID } }, res, mockNext());
+    expect(res.json.mock.calls[0][0].sourceCatalog).toBeUndefined();
+  });
+
+  test('no sourceCatalogUid → response unchanged, no Catalog lookup', async () => {
+    Song.findOne.mockResolvedValue(catalogCopy({ sourceCatalogUid: null }));
+    const res = mockRes();
+    await controller.getSong({ session: { user: 'user-1' }, params: { uid: SONG_UID } }, res, mockNext());
+    expect(CatalogSong.findByPk).not.toHaveBeenCalled();
+    expect(res.json.mock.calls[0][0].sourceCatalog).toBeUndefined();
+  });
+});
+
+describe('refreshSongFromCatalog (story 21.1)', () => {
+  beforeEach(() => jest.clearAllMocks());
+
+  test('overwrites intrinsic, preserves personal/identity, stamps syncedAt', async () => {
+    const song = catalogCopy();
+    Song.findOne.mockResolvedValue(song);
+    CatalogSong.findByPk.mockResolvedValue(publishedCatalog());
+    const res = mockRes();
+    await controller.refreshSongFromCatalog({ session: { user: 'user-1' }, params: { uid: SONG_UID } }, res, mockNext());
+
+    const payload = song.update.mock.calls[0][0];
+    expect(payload.key).toBe('F#');
+    expect(payload.bpm).toBe(90);
+    expect(payload.pitchStandard).toBe(432);
+    expect(payload.language).toEqual(['English']);
+    expect(payload.sourceCatalogSyncedAt).toBe('2026-06-01T00:00:00.000Z');
+    // personal + identity NOT in the payload
+    expect(payload).not.toHaveProperty('capo');
+    expect(payload).not.toHaveProperty('notes');
+    expect(payload).not.toHaveProperty('title');
+    expect(payload).not.toHaveProperty('artist');
+    expect(res.json).toHaveBeenCalled();
+  });
+
+  test('deep-clones the JSON fields (no shared reference with the Catalog entry)', async () => {
+    const song = catalogCopy();
+    Song.findOne.mockResolvedValue(song);
+    const catalog = publishedCatalog();
+    CatalogSong.findByPk.mockResolvedValue(catalog);
+    await controller.refreshSongFromCatalog({ session: { user: 'user-1' }, params: { uid: SONG_UID } }, mockRes(), mockNext());
+    const payload = song.update.mock.calls[0][0];
+    expect(payload.genre).toEqual(['Rock']);
+    expect(payload.genre).not.toBe(catalog.genre); // cloned, not the same array
+  });
+
+  test('404 when the song is not the user\'s / unknown', async () => {
+    Song.findOne.mockResolvedValue(null);
+    const next = mockNext();
+    await controller.refreshSongFromCatalog({ session: { user: 'user-1' }, params: { uid: SONG_UID } }, mockRes(), next);
+    expect(next.mock.calls[0][0].status).toBe(404);
+  });
+
+  test('409 not_from_catalog when the song has no sourceCatalogUid', async () => {
+    Song.findOne.mockResolvedValue(catalogCopy({ sourceCatalogUid: null }));
+    const res = mockRes();
+    await controller.refreshSongFromCatalog({ session: { user: 'user-1' }, params: { uid: SONG_UID } }, res, mockNext());
+    expect(res.status).toHaveBeenCalledWith(409);
+    expect(res.json.mock.calls[0][0].error).toBe('not_from_catalog');
+  });
+
+  test('409 source_unavailable when the source is gone (findByPk null)', async () => {
+    Song.findOne.mockResolvedValue(catalogCopy());
+    CatalogSong.findByPk.mockResolvedValue(null);
+    const res = mockRes();
+    await controller.refreshSongFromCatalog({ session: { user: 'user-1' }, params: { uid: SONG_UID } }, res, mockNext());
+    expect(res.status).toHaveBeenCalledWith(409);
+    expect(res.json.mock.calls[0][0].error).toBe('source_unavailable');
+  });
+
+  test('409 source_unavailable when the source is a DRAFT (publishedAt null) — no refresh', async () => {
+    const song = catalogCopy();
+    Song.findOne.mockResolvedValue(song);
+    CatalogSong.findByPk.mockResolvedValue(publishedCatalog({ publishedAt: null }));
+    const res = mockRes();
+    await controller.refreshSongFromCatalog({ session: { user: 'user-1' }, params: { uid: SONG_UID } }, res, mockNext());
+    expect(res.status).toHaveBeenCalledWith(409);
+    expect(res.json.mock.calls[0][0].error).toBe('source_unavailable');
+    expect(song.update).not.toHaveBeenCalled(); // copy left untouched
   });
 });

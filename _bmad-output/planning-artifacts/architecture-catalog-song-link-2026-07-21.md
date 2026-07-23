@@ -16,7 +16,7 @@ On garde le modèle **snapshot** (les copies restent indépendantes par défaut)
 - Nouvelle colonne `Songs.sourceCatalogSyncedAt` (DATE, nullable), posée **à la copie** = `CatalogSong.updatedAt` courant (dans `buildSongFromCatalog` → chemins 19.4 *add* ET 20.3 *import*).
 - **Drift** = la source existe, est **publiée**, et `CatalogSong.updatedAt > Song.sourceCatalogSyncedAt`.
 - Pas de diff champ-par-champ (sur-ingénierie pour une beta indie).
-- **Backfill migration** : pour les copies existantes (sourceCatalogUid non nul), `sourceCatalogSyncedAt = source.updatedAt` courant si la source est résolvable, sinon = `Song.createdAt`. → **pas de faux « update available »** sur les copies legacy.
+- **Backfill migration** : pour les copies existantes (sourceCatalogUid non nul), `sourceCatalogSyncedAt = Song.createdAt` (le moment de la copie). _(Corrigé en code review 21.1 : le premier jet `= source.updatedAt courant` masquait le vrai drift — une copie faite d'une v1, source éditée depuis en v2, aurait été estampillée « à jour ». `createdAt` est la bonne approximation : la copie détient la source telle qu'au moment createdAt, donc source éditée après createdAt ⇒ drift=true, correct ; et ça ne crée pas de faux positif.)_
 
 ### D2 — Politique de conflit : **Refresh écrase les champs intrinsèques** (tranché northwood)
 - Refresh remet les **champs intrinsèques** à la version Catalog : `key, bpm, mode, timeSignature, durationSeconds, language, genre, streamingLinks, pitchStandard` (deep-clone des JSON, comme `buildSongFromCatalog`).

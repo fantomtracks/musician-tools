@@ -364,6 +364,7 @@ function buildSongFromCatalog(catalog, userUid) {
   return {
     userUid,
     sourceCatalogUid: catalog.uid, // soft provenance pointer (no FK)
+    sourceCatalogSyncedAt: catalog.updatedAt, // story 21.1: version stamp for drift detection
     title: catalog.title,
     artist: catalog.artist ?? null,
     album: catalog.album ?? null,

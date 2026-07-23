@@ -136,6 +136,14 @@ module.exports = (sequelize, DataTypes) => {
       allowNull: true,
       defaultValue: null,
       field: 'source_catalog_uid'
+    },
+    sourceCatalogSyncedAt: {
+      // Story 21.1: the source CatalogSong.updatedAt at copy/refresh time. Drift =
+      // CatalogSong.updatedAt > this. SOFT (no FK), same discipline as sourceCatalogUid.
+      type: DataTypes.DATE,
+      allowNull: true,
+      defaultValue: null,
+      field: 'source_catalog_synced_at'
     }
   }, {
     tableName: 'Songs',

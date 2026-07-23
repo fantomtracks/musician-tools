@@ -1,4 +1,4 @@
-const { Song, SongPlay, PracticeSession, SessionItem, Instrument, sequelize } = require('../models');
+const { Song, SongPlay, PracticeSession, SessionItem, Instrument, CatalogSong, sequelize } = require('../models');
 const { Op, fn, col, where: whereFn } = require('sequelize');
 const createError = require('http-errors');
 const logger = require('../logger');
@@ -100,10 +100,68 @@ const getSong = async (req, res, next) => {
     if (!song) {
       return next(createError(404, 'Song not found'));
     }
+    // Story 21.1: enrich with the Catalog source link + drift flag when this Song is a
+    // Catalog copy AND the source is still PUBLISHED. Read is NON-scoped by userUid (§3:
+    // a Catalog entry is shared). A draft/absent source yields no `sourceCatalog` (do not
+    // leak a draft's existence, and offer no dead link/refresh).
+    if (song.sourceCatalogUid) {
+      // Graceful degradation: a failed source lookup omits the sourceCatalog block rather
+      // than 500-ing the whole read — but it must NOT be silent (else a DB fault looks
+      // exactly like "no source"). Log it.
+      const catalog = await CatalogSong.findByPk(song.sourceCatalogUid)
+        .catch((e) => { logger.error('getSong: catalog source lookup failed', e); return null; });
+      if (catalog && catalog.publishedAt != null) {
+        const drift = song.sourceCatalogSyncedAt == null
+          || new Date(catalog.updatedAt) > new Date(song.sourceCatalogSyncedAt);
+        return res.json({ ...song.toJSON(), sourceCatalog: { uid: catalog.uid, updatedAt: catalog.updatedAt, drift } });
+      }
+    }
     res.json(song);
   } catch (error) {
     logger.error('Error fetching song:', error);
     next(createError(500, 'Error fetching song'));
+  }
+};
+
+// POST /api/songs/:uid/refresh-from-catalog (story 21.1) — pull the current Catalog
+// version into this copy: overwrite the INTRINSIC fields, PRESERVE personal + identity.
+const INTRINSIC_REFRESH_FIELDS = ['key', 'bpm', 'mode', 'timeSignature', 'durationSeconds', 'pitchStandard'];
+const refreshSongFromCatalog = async (req, res, next) => {
+  try {
+    const userId = req.session.user;
+    if (!userId) {
+      return next(createError(401, 'Unauthorized'));
+    }
+    if (!isUuid(req.params.uid)) {
+      return next(createError(404, 'Song not found'));
+    }
+    // Scoped (7.5): not-yours and unknown both 404.
+    const song = await Song.findOne({ where: { uid: req.params.uid, userUid: userId } });
+    if (!song) {
+      return next(createError(404, 'Song not found'));
+    }
+    if (!song.sourceCatalogUid) {
+      return res.status(409).json({ error: 'not_from_catalog', message: 'This song was not added from the Catalog' });
+    }
+    const catalog = await CatalogSong.findByPk(song.sourceCatalogUid);
+    if (!catalog || catalog.publishedAt == null) {
+      // Source deleted or unpublished → cannot refresh; the copy is left untouched.
+      return res.status(409).json({ error: 'source_unavailable', message: 'The source is no longer available in the Catalog' });
+    }
+    // Overwrite ONLY the intrinsic fields (identity title/artist/album and all personal
+    // fields are left untouched). JSON fields are deep-cloned so the copy never shares a
+    // reference with the shared Catalog entry (mirror buildSongFromCatalog).
+    const updates = { sourceCatalogSyncedAt: catalog.updatedAt };
+    for (const f of INTRINSIC_REFRESH_FIELDS) updates[f] = catalog[f] ?? null;
+    updates.language = structuredClone(catalog.language ?? null);
+    updates.genre = structuredClone(catalog.genre ?? null);
+    updates.streamingLinks = structuredClone(catalog.streamingLinks ?? null);
+
+    const updated = await song.update(updates);
+    res.json(updated);
+  } catch (error) {
+    logger.error('Error refreshing song from catalog:', error);
+    next(createError(500, 'Error refreshing from catalog'));
   }
 };
 
@@ -491,6 +549,7 @@ const lookupSongMetadata = async (req, res, next) => {
 module.exports = {
   getAllSongs,
   getSong,
+  refreshSongFromCatalog,
   createSong,
   updateSong,
   deleteSong,
