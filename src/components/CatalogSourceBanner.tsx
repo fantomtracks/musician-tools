@@ -12,9 +12,14 @@ import { ConfirmDialog } from './ConfirmDialog';
 export default function CatalogSourceBanner({
   songUid,
   onRefreshed,
+  beforeRefresh,
 }: {
   songUid: string;
   onRefreshed?: (song: Song) => void;
+  // Run right before the refresh POST — the fiche uses it to flush a pending autosave so the
+  // server refresh doesn't run on a stale row. Returns false to CANCEL the refresh (a save that
+  // was needed failed → refreshing would drop the unsaved edits). Resolves true when clear.
+  beforeRefresh?: () => Promise<boolean>;
 }) {
   const [source, setSource] = useState<Song['sourceCatalog'] | null>(null);
   const [confirmOpen, setConfirmOpen] = useState(false);
@@ -47,6 +52,17 @@ export default function CatalogSourceBanner({
     if (refreshing || !source) return;
     setRefreshing(true);
     try {
+      // Persist any pending fiche edits first, so the server refresh reads the current row and
+      // preserves them. A failed save cancels the refresh rather than dropping the edits.
+      if (beforeRefresh) {
+        const clear = await beforeRefresh();
+        if (!mountedRef.current) return;
+        if (!clear) {
+          setFeedback({ message: 'Could not save your changes — refresh cancelled.', isError: true });
+          setConfirmOpen(false);
+          return;
+        }
+      }
       const updated = await songService.refreshSongFromCatalog(songUid);
       if (!mountedRef.current) return; // banner unmounted mid-request → don't touch the next song
       setSource(updated.sourceCatalog ?? { ...source, drift: false }); // drift cleared

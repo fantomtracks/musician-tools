@@ -19,13 +19,24 @@ const songWith = (sourceCatalog?: Song['sourceCatalog']): Partial<Song> => ({
   uid: 's1', title: 'Zombie', key: 'C', bpm: 70, sourceCatalog,
 });
 
-const renderBanner = (onRefreshed?: (s: Song) => void) => render(
+const renderBanner = (
+  onRefreshed?: (s: Song) => void,
+  beforeRefresh?: () => Promise<boolean>,
+) => render(
   <StrictMode>
     <MemoryRouter>
-      <CatalogSourceBanner songUid="s1" onRefreshed={onRefreshed} />
+      <CatalogSourceBanner songUid="s1" onRefreshed={onRefreshed} beforeRefresh={beforeRefresh} />
     </MemoryRouter>
   </StrictMode>
 );
+
+// Confirm the drift dialog's "Refresh" (the LAST button so labelled) to trigger a refresh.
+const confirmRefresh = async () => {
+  fireEvent.click(await screen.findByRole('button', { name: 'Refresh' }));
+  await screen.findByText(/Update key, BPM/);
+  const confirmButtons = screen.getAllByRole('button', { name: 'Refresh' });
+  fireEvent.click(confirmButtons[confirmButtons.length - 1]);
+};
 
 beforeEach(() => {
   jest.clearAllMocks();
@@ -70,12 +81,52 @@ test('refresh fails source_unavailable → error alert, badge/banner removed', a
   svc.refreshSongFromCatalog.mockRejectedValue(new RefreshFromCatalogError('source_unavailable'));
   renderBanner();
 
-  fireEvent.click(await screen.findByRole('button', { name: 'Refresh' }));
-  await screen.findByText(/Update key, BPM/);
-  const confirmButtons = screen.getAllByRole('button', { name: 'Refresh' });
-  fireEvent.click(confirmButtons[confirmButtons.length - 1]);
+  await confirmRefresh();
 
   const alert = await screen.findByRole('alert');
   expect(alert).toHaveTextContent('The source is no longer in the Catalog.');
   expect(screen.queryByRole('link', { name: 'Catalog' })).toBeNull(); // source gone → badge removed
+});
+
+test('refresh fails not_from_catalog → error alert, badge/banner removed (no dead-end)', async () => {
+  svc.getSong.mockResolvedValue(songWith({ uid: 'cat-1', updatedAt: '2026-06-01', drift: true }) as Song);
+  svc.refreshSongFromCatalog.mockRejectedValue(new RefreshFromCatalogError('not_from_catalog'));
+  renderBanner();
+
+  await confirmRefresh();
+
+  const alert = await screen.findByRole('alert');
+  expect(alert).toHaveTextContent('This song is no longer linked to the Catalog.');
+  // both 409 codes clear the source so the user can't keep re-hitting the dead-end
+  expect(screen.queryByRole('button', { name: 'Refresh' })).toBeNull();
+  expect(screen.queryByRole('link', { name: 'Catalog' })).toBeNull();
+});
+
+test('beforeRefresh runs (and resolves) BEFORE the refresh POST', async () => {
+  svc.getSong.mockResolvedValue(songWith({ uid: 'cat-1', updatedAt: '2026-06-01', drift: true }) as Song);
+  svc.refreshSongFromCatalog.mockResolvedValue({ uid: 's1', title: 'Zombie' } as Song);
+  const order: string[] = [];
+  const beforeRefresh = jest.fn(async () => { order.push('flush'); return true; });
+  svc.refreshSongFromCatalog.mockImplementation(async () => { order.push('refresh'); return { uid: 's1' } as Song; });
+  renderBanner(undefined, beforeRefresh);
+
+  await confirmRefresh();
+
+  await waitFor(() => expect(svc.refreshSongFromCatalog).toHaveBeenCalled());
+  expect(beforeRefresh).toHaveBeenCalledTimes(1);
+  expect(order).toEqual(['flush', 'refresh']); // pending edits persisted before the refresh reads the row
+  await screen.findByText('Updated to the Catalog version.');
+});
+
+test('beforeRefresh returning false CANCELS the refresh (unsaved edits kept)', async () => {
+  svc.getSong.mockResolvedValue(songWith({ uid: 'cat-1', updatedAt: '2026-06-01', drift: true }) as Song);
+  const beforeRefresh = jest.fn(async () => false); // a needed save failed
+  renderBanner(undefined, beforeRefresh);
+
+  await confirmRefresh();
+
+  const alert = await screen.findByRole('alert');
+  expect(alert).toHaveTextContent('Could not save your changes — refresh cancelled.');
+  expect(svc.refreshSongFromCatalog).not.toHaveBeenCalled(); // never reached the POST
+  expect(screen.getByRole('button', { name: 'Refresh' })).toBeInTheDocument(); // still offered
 });

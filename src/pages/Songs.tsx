@@ -1017,6 +1017,21 @@ function Songs() {
     },
   });
 
+  // Story 21.2 (deferred fix) — before a Catalog Refresh reseeds the open form, make sure any
+  // pending or in-flight autosave has LANDED. Otherwise the server refresh reads a stale DB row
+  // (the just-typed personal edits not yet persisted), returns those old personal values, and
+  // buildFormFromSong(updated) overwrites the form → the edits are lost. flushAutoSave() no-ops
+  // over a save already in flight, so wait that one out first, then flush the debounced-but-unsent
+  // change. Returns false only when a real save was attempted and FAILED → the banner cancels the
+  // refresh rather than risk dropping the unsaved edits.
+  const flushBeforeRefresh = async (): Promise<boolean> => {
+    // Bounded wait so a hung request can't spin forever; after the cap we flush anyway.
+    for (let i = 0; i < 100 && savingRef.current; i++) {
+      await new Promise(resolve => setTimeout(resolve, 50));
+    }
+    return flushAutoSave();
+  };
+
   // Story 17.2 — Seuil 1: a song is "fresh" if the only thing that ever happened to
   // it is the (now-emptied) title — no other field filled, no practice, no playlist.
   // Such a draft is deleted silently on leave; anything with value gets the popup.
@@ -1995,7 +2010,7 @@ function Songs() {
           )}
           {/* Story 21.2: Catalog provenance + drift/Refresh (self-contained; renders nothing
               if this song isn't a Catalog copy). onRefreshed re-seeds the open form. */}
-          {editingUid && <CatalogSourceBanner key={editingUid} songUid={editingUid} onRefreshed={s => buildFormFromSong(s, false)} />}
+          {editingUid && <CatalogSourceBanner key={editingUid} songUid={editingUid} beforeRefresh={flushBeforeRefresh} onRefreshed={s => buildFormFromSong(s, false)} />}
           <SongForm
             mode={editingUid ? 'edit' : 'add'}
             form={form}
