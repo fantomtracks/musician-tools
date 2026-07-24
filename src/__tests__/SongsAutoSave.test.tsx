@@ -50,6 +50,9 @@ beforeEach(() => {
   // getSong is per-test (deep-link cases); reset its impl so a persistent mock (needed
   // because StrictMode double-invokes the fetch) can't leak forward.
   getSong.mockReset();
+  // story 21.2: CatalogSourceBanner fetches getSong on every fiche render → give a benign
+  // default (renders nothing without sourceCatalog); deep-link tests override it below.
+  getSong.mockResolvedValue({});
 });
 
 describe('Songs — auto-save (story 13.1)', () => {

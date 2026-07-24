@@ -14,6 +14,7 @@ import { useAutosave } from '../hooks/useAutosave';
 import { useRowSelection } from '../hooks/useRowSelection';
 import EmptySonglistCollections from '../components/EmptySonglistCollections';
 import { StickyActionBar } from '../components/StickyActionBar';
+import CatalogSourceBanner from '../components/CatalogSourceBanner';
 import { findDuplicateSong } from '../utils/songDuplicate';
 import { formatLocalDate } from '../utils/heatmap';
 
@@ -1992,6 +1993,9 @@ function Songs() {
               If you couldn't find this song in your songlist, remember to reset your filters.
             </div>
           )}
+          {/* Story 21.2: Catalog provenance + drift/Refresh (self-contained; renders nothing
+              if this song isn't a Catalog copy). onRefreshed re-seeds the open form. */}
+          {editingUid && <CatalogSourceBanner key={editingUid} songUid={editingUid} onRefreshed={s => buildFormFromSong(s, false)} />}
           <SongForm
             mode={editingUid ? 'edit' : 'add'}
             form={form}

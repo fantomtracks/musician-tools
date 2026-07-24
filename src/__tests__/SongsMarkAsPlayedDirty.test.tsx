@@ -8,6 +8,7 @@ jest.mock('../services/songService', () => ({
     getAllSongs: jest.fn().mockResolvedValue([
       { uid: 'song-a', title: 'Alpha', artist: 'A', instrument: ['Guitar'], durationSeconds: null },
     ]),
+    getSong: jest.fn().mockResolvedValue({}), // story 21.2: CatalogSourceBanner fetches this (renders nothing without sourceCatalog)
     updateSong: jest.fn().mockResolvedValue({ uid: 'song-a', title: 'Alpha', artist: 'A', instrument: ['Guitar'], durationSeconds: 300 }),
     createSong: jest.fn().mockResolvedValue({}),
     deleteSong: jest.fn().mockResolvedValue(undefined),
