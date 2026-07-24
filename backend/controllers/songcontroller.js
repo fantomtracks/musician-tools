@@ -8,7 +8,7 @@ const { DATE_PATTERN, MIN_DATE, isValidCalendarDate, maxAllowedDate } = require(
 const { isUuid } = require('../utils/uuid');
 // Story 19.8 — shared normalizers (reject-to-null; INTEGER columns can't 500 on a
 // decimal / non-numeric / out-of-INT4 input). normalizeLanguage moved here too.
-const { normalizeInt, normalizeDurationSeconds, normalizeLanguage } = require('../utils/normalize');
+const { normalizeInt, normalizeDurationSeconds, normalizeLanguage, normalizeMode } = require('../utils/normalize');
 
 const normalizeCapo = (value) => {
   if (value === undefined) return undefined;
@@ -222,7 +222,7 @@ const createSong = async (req, res, next) => {
       lastPlayed: lastPlayed ? new Date(lastPlayed) : null,
       streamingLinks,
       timeSignature,
-      mode
+      mode: normalizeMode(mode) ?? null // canonical casing so the Mode select matches (21.x)
     });
 
     res.status(201).json(song);
@@ -273,6 +273,7 @@ const updateSong = async (req, res, next) => {
     const normalizedLanguage = normalizeLanguage(language);
     const normalizedBpm = normalizeInt(bpm, { min: 1, max: 1000 });
     const normalizedPitch = normalizeInt(pitchStandard, { min: 380, max: 500 });
+    const normalizedMode = normalizeMode(mode); // undefined = absent (partial PUT) → keep existing
 
     await song.update({
       // normalizeText -> undefined (absent) / null (whitespace-only) / trimmed
@@ -298,7 +299,7 @@ const updateSong = async (req, res, next) => {
       myInstrumentUid: myInstrumentUid !== undefined ? myInstrumentUid : song.myInstrumentUid,
       streamingLinks: streamingLinks !== undefined ? streamingLinks : song.streamingLinks,
       timeSignature: timeSignature !== undefined ? timeSignature : song.timeSignature,
-      mode: mode !== undefined ? mode : song.mode
+      mode: normalizedMode !== undefined ? normalizedMode : song.mode
     });
 
     res.json(song);

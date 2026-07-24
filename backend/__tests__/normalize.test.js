@@ -1,4 +1,4 @@
-const { normalizeInt, normalizeDurationSeconds, normalizeLanguage } = require('../utils/normalize');
+const { normalizeInt, normalizeDurationSeconds, normalizeLanguage, normalizeMode } = require('../utils/normalize');
 
 describe('normalizeInt', () => {
   const bounds = { min: 1, max: 1000 };
@@ -67,5 +67,34 @@ describe('normalizeLanguage', () => {
   });
   test('a blank string -> null', () => {
     expect(normalizeLanguage('   ')).toBeNull();
+  });
+});
+
+describe('normalizeMode', () => {
+  test('undefined passthrough (partial PUT), null -> null', () => {
+    expect(normalizeMode(undefined)).toBeUndefined();
+    expect(normalizeMode(null)).toBeNull();
+  });
+  test('lowercase canonical -> exact capitalized spelling (the Catalog case)', () => {
+    expect(normalizeMode('major')).toBe('Major');
+    expect(normalizeMode('minor')).toBe('Minor');
+    expect(normalizeMode('mixolydian')).toBe('Mixolydian');
+  });
+  test('any casing maps to canonical, case-insensitively', () => {
+    expect(normalizeMode('MAJOR')).toBe('Major');
+    expect(normalizeMode('DoRiAn')).toBe('Dorian');
+    expect(normalizeMode('  aeolian ')).toBe('Aeolian');
+  });
+  test('already-canonical is left as-is', () => {
+    expect(normalizeMode('Major')).toBe('Major');
+    expect(normalizeMode('Locrian')).toBe('Locrian');
+  });
+  test('an unknown non-empty value is title-cased, never dropped', () => {
+    expect(normalizeMode('ionian')).toBe('Ionian');
+  });
+  test('blank / non-string -> null', () => {
+    expect(normalizeMode('   ')).toBeNull();
+    expect(normalizeMode(5)).toBeNull();
+    expect(normalizeMode(['Major'])).toBeNull();
   });
 });

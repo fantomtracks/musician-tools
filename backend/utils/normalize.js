@@ -53,4 +53,25 @@ const normalizeLanguage = (value) => {
     .join(' ');
 };
 
-module.exports = { normalizeInt, normalizeDurationSeconds, normalizeLanguage };
+// Canonical mode vocabulary — MUST mirror the frontend form options
+// (src/utils/songFieldOptions.ts `modeOptions`). The Song/Catalog form <select>
+// matches on the exact (capitalized) value, so a lowercase "major" (as the Catalog
+// historically stored) renders as an EMPTY Mode select on any Catalog copy. Normalize
+// every write to the canonical spelling so both sides store one shape ("Major").
+const MODE_VALUES = ['Major', 'Minor', 'Dorian', 'Phrygian', 'Lydian', 'Mixolydian', 'Aeolian', 'Locrian', 'Other'];
+
+// Map a mode to its canonical capitalized spelling (case-insensitive). An unknown but
+// non-empty value is title-cased rather than dropped (no silent loss, no 500).
+// undefined -> undefined (partial PUT untouched); null/empty/non-string -> null.
+const normalizeMode = (value) => {
+  if (value === undefined) return undefined;
+  if (value === null) return null;
+  if (typeof value !== 'string') return null;
+  const trimmed = value.trim();
+  if (!trimmed) return null;
+  const canonical = MODE_VALUES.find(m => m.toLowerCase() === trimmed.toLowerCase());
+  if (canonical) return canonical;
+  return trimmed.charAt(0).toUpperCase() + trimmed.slice(1).toLowerCase();
+};
+
+module.exports = { normalizeInt, normalizeDurationSeconds, normalizeLanguage, normalizeMode, MODE_VALUES };

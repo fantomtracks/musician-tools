@@ -12,7 +12,7 @@ const logger = require('../logger');
 const { isUuid } = require('../utils/uuid');
 // Story 19.8 — shared normalizers (bpm/pitchStandard reject-to-null on the INTEGER
 // columns ; language title-cased like the Song form ; durationSeconds factored out).
-const { normalizeInt, normalizeDurationSeconds, normalizeLanguage } = require('../utils/normalize');
+const { normalizeInt, normalizeDurationSeconds, normalizeLanguage, normalizeMode } = require('../utils/normalize');
 
 // Trim a free-text field before persisting (title/artist/album). undefined = field
 // absent from the payload -> leave it untouched on update. Whitespace-only -> null.
@@ -75,6 +75,7 @@ function pickIntrinsic(body) {
   if (out.bpm !== undefined) out.bpm = normalizeInt(out.bpm, { min: 1, max: 1000 });
   if (out.pitchStandard !== undefined) out.pitchStandard = normalizeInt(out.pitchStandard, { min: 380, max: 500 });
   if (out.language !== undefined) out.language = normalizeLanguage(out.language); // title-case parity with Song (19.8)
+  if (out.mode !== undefined) out.mode = normalizeMode(out.mode); // canonical casing so copies' Mode select matches (21.x)
   return out;
 }
 
