@@ -3,6 +3,9 @@ services:
     # Aligné sur la version du client de dump prod (PG_CLIENT_IMAGE du Makefile) : un dump
     # prod (pg_dump 17) se restaure alors proprement en local, sans erreur de GUC pg17
     # (transaction_timeout) ni "unsupported version". Bumper avec PG_CLIENT_IMAGE si la prod monte.
+    # ⚠️ Si ce container refuse de démarrer avec "database files are incompatible" (volume créé
+    #    par un PostgreSQL plus ancien) : `make reset-db` (DB fraîche), ou `make db-backup`
+    #    puis `make reset-db` puis `make db-restore FILE=…` pour garder les données locales.
     image: postgres:17
     restart: no
     user: postgres
