@@ -131,6 +131,10 @@ restart: check-env
 
 rebuild-backend: check-env
 	docker compose up -d --build backend
+	@# The rebuilt image's node_modules does NOT reach the running container: the anonymous
+	@# /app/node_modules volume is only seeded on first creation, never overwritten. Install
+	@# into the live volume so a newly-added dep actually lands in the container.
+	docker compose exec backend npm install
 
 ps:
 	docker compose ps
@@ -166,6 +170,10 @@ reset-db: check-env
 	docker compose down -v
 	docker compose up -d
 	@sleep 5
+	@# `down -v` wiped the backend's anonymous node_modules volume; reseeded from the (maybe
+	@# stale) image. Re-install so a dep added since the last image build is present — else
+	@# the backend crash-loops on a missing module (mirror of `setup`'s install step).
+	docker compose exec backend npm install
 	docker compose exec backend npx sequelize-cli db:migrate
 	@echo "✅ Database reset complete"
 
@@ -209,9 +217,15 @@ PROD_DB_URL ?= $(shell grep '^DATABASE_URL_PROD=' backend/.env 2>/dev/null | cut
 PG_CLIENT_IMAGE ?= postgres:17
 
 db-backup:
+	@if [ -z "$$(docker compose ps -q db)" ]; then echo "The db container is not running — start it first (make up)."; exit 2; fi
 	@mkdir -p $(BACKUP_DIR)
 	@echo "Creating backup to $(BACKUP_DIR)/musician_tools_$(TIMESTAMP).dump"
-	@docker compose exec -T db env PGPASSWORD=musician_pass pg_dump -U musician_user -d musician_tools -F c > $(BACKUP_DIR)/musician_tools_$(TIMESTAMP).dump
+	@# Write to a .tmp and promote on success only: the `>` redirect is opened by the shell
+	@# BEFORE pg_dump runs, so a failed dump would otherwise leave a 0-byte .dump that looks
+	@# like a real backup (and blows up later in db-restore).
+	@docker compose exec -T db env PGPASSWORD=musician_pass pg_dump -U musician_user -d musician_tools -F c > $(BACKUP_DIR)/musician_tools_$(TIMESTAMP).dump.tmp \
+		&& mv $(BACKUP_DIR)/musician_tools_$(TIMESTAMP).dump.tmp $(BACKUP_DIR)/musician_tools_$(TIMESTAMP).dump \
+		|| { rm -f $(BACKUP_DIR)/musician_tools_$(TIMESTAMP).dump.tmp; echo "Backup failed — no file written."; exit 1; }
 	@echo "Backup complete."
 
 db-backup-prod:
@@ -231,16 +245,18 @@ db-restore:
 	@if [ ! -f "$(FILE)" ]; then echo "Backup file not found: $(FILE)"; exit 2; fi
 	@echo "Restoring database from $(FILE)"
 	@# Run pg_restore from $(PG_CLIENT_IMAGE) (>= prod), over the db container's network
-	@# namespace (project-name independent) → reach the server at 127.0.0.1:5432. Mount the
-	@# dump's directory resolved to an absolute path ($(abspath ...) is CURDIR-based and
-	@# handles an absolute FILE too), so both `FILE=backups/x` and `FILE=/tmp/x` work.
+	@# namespace (project-name independent) → reach the server at 127.0.0.1:5432.
+	@# Resolve the dump's dir/basename in the SHELL (not Make's $(dir)/$(notdir), which
+	@# word-split on spaces) so a FILE with spaces works; `cd … && pwd` gives an absolute
+	@# path for both `FILE=backups/x` and `FILE=/tmp/x`. head -n1 in case db is ever scaled.
 	@# --single-transaction: atomic — a mid-restore failure rolls back instead of leaving a
 	@#   half-dropped DB. --no-owner/--no-acl: a prod dump references prod roles absent locally.
-	@DBID="$$(docker compose ps -q db)"; \
+	@DBID="$$(docker compose ps -q db | head -n1)"; \
 	if [ -z "$$DBID" ]; then echo "The db container is not running — start it first (make up)."; exit 2; fi; \
+	FDIR="$$(cd "$$(dirname "$(FILE)")" && pwd)"; FBASE="$$(basename "$(FILE)")"; \
 	docker run --rm --network "container:$$DBID" \
 		-e PGPASSWORD=musician_pass \
-		-v "$(abspath $(dir $(FILE))):/backups" \
+		-v "$$FDIR:/backups" \
 		$(PG_CLIENT_IMAGE) \
-		pg_restore -c --if-exists --single-transaction --no-owner --no-acl -h 127.0.0.1 -U musician_user -d musician_tools "/backups/$(notdir $(FILE))"
+		pg_restore -c --if-exists --single-transaction --no-owner --no-acl -h 127.0.0.1 -U musician_user -d musician_tools "/backups/$$FBASE"
 	@echo "Restore complete."
