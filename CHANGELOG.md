@@ -12,15 +12,15 @@ project adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
-<!-- v2 line — the Catalog is a multi-epic feature (browse/add/curate + drafts +
-     song↔catalog link + curated content). It ships as 2.0.0 when complete, NOT
-     piecemeal. Keep its entries here until the v2 release. -->
+## [2.0.0] — 2026-07-24
 
 ### Added
-- **A shared Catalog of ready-made songs you can add to your songlist in one tap.**
-  - **Browse & search** a shared pool of pre-filled songs — title, artist, key, mode, time signature — with filters, and open any entry to see its details.
-  - **Add to my songlist** copies a catalog song straight into your own songlist with its details pre-filled; if it's already there, you're told instead of ending up with a duplicate.
-  - **Curators** get a dedicated area to build and maintain the shared Catalog — add, edit, and remove entries (including removing several at once) — kept cleanly separate from everyone's personal songlists.
+- **A shared Catalog of ready-made songs — browse it, add from it, and stay in sync.** A pool of pre-filled songs you can pull into your own songlist, so you never retype details that are already known.
+  - **Browse & search** the shared pool — title, artist, key, mode, time signature — and narrow it with genre / key / mode / time-signature filters built from the values actually present, so a filter never comes back empty by accident. Open any entry to see its full details.
+  - **Add to my songlist** copies a catalog song straight into your songlist with its details pre-filled. If it's already in your songlist, you're told — no accidental duplicate.
+  - **Collections** — ready-made sets of songs (a theme, a setlist) shown right on the Catalog. Add a whole collection to your songlist in one step; it also creates a matching playlist, and any songs you already have are skipped.
+  - **Stay in sync with the source** — a song you added from the Catalog shows where it came from, and if the curator later improves that entry you get a **Refresh** that updates the shared details (key, BPM, mode, tuning reference, links…) to the new version **while keeping everything personal** — your instrument, tuning and notes.
+  - **Curators** get a dedicated workspace to build and maintain the Catalog — add, edit and remove entries and collections (several at once, too), with a draft/publish step so work-in-progress stays hidden until it's ready — kept cleanly separate from everyone's personal songlists.
 
 ## [1.14.0] — 2026-07-11
 
