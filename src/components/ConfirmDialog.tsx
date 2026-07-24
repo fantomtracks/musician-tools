@@ -1,4 +1,4 @@
-
+import { createPortal } from 'react-dom';
 
 interface ConfirmDialogProps {
   isOpen: boolean;
@@ -31,7 +31,11 @@ export function ConfirmDialog({
     }
   };
 
-  return (
+  // Rendered through a portal to document.body: the overlay is `position: fixed`, but any
+  // ancestor with a transform / filter / backdrop-filter (e.g. the fiche's .glass-effect card)
+  // becomes its containing block and would clip the overlay to that card instead of the
+  // viewport. Portaling to the body guarantees the backdrop covers the whole page everywhere.
+  return createPortal(
     <div
       className="fixed inset-0 bg-black bg-opacity-50 dark:bg-opacity-70 flex items-center justify-center z-50"
       onClick={onCancel}
@@ -70,6 +74,7 @@ export function ConfirmDialog({
           </button>
         </div>
       </div>
-    </div>
+    </div>,
+    document.body
   );
 }
