@@ -202,9 +202,10 @@ TIMESTAMP := $(shell date +%Y%m%d_%H%M%S)
 PROD_DB_URL ?= $(shell grep '^DATABASE_URL_PROD=' backend/.env 2>/dev/null | cut -d= -f2-)
 # pg client image used for dumping PROD and restoring its dumps locally. MUST be >= the
 # PROD server major version: a dump from pg_dump N is format-tagged N and pg_restore < N
-# rejects it ("unsupported version"). The local db container is older (pg15), so we never
-# use its client for prod dumps — we run this image over the compose network instead.
-# Bump this single line when PROD PostgreSQL is upgraded. (retro Epic 19/20, action #4)
+# rejects it ("unsupported version"). We run this pinned image over the compose network
+# rather than the db container's own client, so the tooling stays correct regardless of the
+# local server version. Keep it in sync with docker-compose's db image; bump both when PROD
+# PostgreSQL is upgraded. (retro Epic 19/20, action #4)
 PG_CLIENT_IMAGE ?= postgres:17
 
 db-backup:
@@ -222,20 +223,24 @@ db-backup-prod:
 	fi
 	@mkdir -p $(BACKUP_DIR)
 	@echo "Creating PROD backup to $(BACKUP_DIR)/musician_tools_prod_$(TIMESTAMP).dump"
-	@docker run --rm -e PROD_DB_URL="$(PROD_DB_URL)" -v "$(PWD)/$(BACKUP_DIR):/backups" $(PG_CLIENT_IMAGE) sh -c 'pg_dump "$$PROD_DB_URL" -F c -f "/backups/musician_tools_prod_$(TIMESTAMP).dump"'
+	@docker run --rm -e PROD_DB_URL="$(PROD_DB_URL)" -v "$(CURDIR)/$(BACKUP_DIR):/backups" $(PG_CLIENT_IMAGE) sh -c 'pg_dump "$$PROD_DB_URL" -F c -f "/backups/musician_tools_prod_$(TIMESTAMP).dump"'
 	@echo "PROD backup complete."
 
 db-restore:
 	@if [ -z "$(FILE)" ]; then echo "Usage: make db-restore FILE=backups/<file>.dump"; exit 2; fi
 	@if [ ! -f "$(FILE)" ]; then echo "Backup file not found: $(FILE)"; exit 2; fi
 	@echo "Restoring database from $(FILE)"
-	@# Run pg_restore from $(PG_CLIENT_IMAGE) (>= prod), NOT the local pg15 db client, so a
-	@# recent prod dump restores without "unsupported version". Share the db container's
-	@# network namespace (project-name independent) → reach the server at 127.0.0.1:5432.
-	@# --no-owner/--no-acl: a prod dump references prod roles absent locally; ignore them.
-	@docker run --rm --network "container:$$(docker compose ps -q db)" \
+	@# Run pg_restore from $(PG_CLIENT_IMAGE) (>= prod), over the db container's network
+	@# namespace (project-name independent) → reach the server at 127.0.0.1:5432. Mount the
+	@# dump's directory resolved to an absolute path ($(abspath ...) is CURDIR-based and
+	@# handles an absolute FILE too), so both `FILE=backups/x` and `FILE=/tmp/x` work.
+	@# --single-transaction: atomic — a mid-restore failure rolls back instead of leaving a
+	@#   half-dropped DB. --no-owner/--no-acl: a prod dump references prod roles absent locally.
+	@DBID="$$(docker compose ps -q db)"; \
+	if [ -z "$$DBID" ]; then echo "The db container is not running — start it first (make up)."; exit 2; fi; \
+	docker run --rm --network "container:$$DBID" \
 		-e PGPASSWORD=musician_pass \
-		-v "$(PWD)/$(dir $(FILE)):/backups" \
+		-v "$(abspath $(dir $(FILE))):/backups" \
 		$(PG_CLIENT_IMAGE) \
-		pg_restore -c --if-exists --no-owner --no-acl -h 127.0.0.1 -U musician_user -d musician_tools "/backups/$(notdir $(FILE))"
+		pg_restore -c --if-exists --single-transaction --no-owner --no-acl -h 127.0.0.1 -U musician_user -d musician_tools "/backups/$(notdir $(FILE))"
 	@echo "Restore complete."
