@@ -162,7 +162,8 @@ describe('catalogService Collections', () => {
   test('addSongToCollection POSTs the catalogSongUid', async () => {
     const fetchMock = mockFetchWithCsrf({ ok: true, status: 201, json: async () => ({ message: 'Added to collection' }) });
     global.fetch = fetchMock as unknown as typeof fetch;
-    await expect(catalogService.addSongToCollection('col1', 's1')).resolves.toBeUndefined();
+    // Returns the outcome since 22.2 (201 -> 'added'); it used to resolve undefined.
+    await expect(catalogService.addSongToCollection('col1', 's1')).resolves.toBe('added');
     expect(fetchMock).toHaveBeenCalledWith(
       '/api/catalog/collections/col1/songs',
       expect.objectContaining({ method: 'POST', body: JSON.stringify({ catalogSongUid: 's1' }) })
@@ -208,5 +209,40 @@ describe('catalogService.importCollection', () => {
     const fetchMock = mockFetchWithCsrf({ ok: false, status: 404, json: async () => ({}) });
     global.fetch = fetchMock as unknown as typeof fetch;
     await expect(catalogService.importCollection('gone')).rejects.toBeInstanceOf(CollectionNotFoundError);
+  });
+});
+
+// Story 22.2: the bulk "Add to collection" recap must tell "added" from "already in".
+// The controller already does (findOrCreate -> 201 created / 200 no-op); the service
+// used to return void and throw that away.
+describe('catalogService.addSongToCollection', () => {
+  const originalFetch = global.fetch;
+  beforeEach(() => { clearCsrfToken(); });
+  afterEach(() => { global.fetch = originalFetch; });
+
+  test('resolves "added" on 201 (the link was created)', async () => {
+    const fetchMock = mockFetchWithCsrf({ ok: true, status: 201, json: async () => ({ message: 'Added to collection' }) });
+    global.fetch = fetchMock as unknown as typeof fetch;
+
+    await expect(catalogService.addSongToCollection('col-1', 'song-1')).resolves.toBe('added');
+    expect(fetchMock).toHaveBeenCalledWith(
+      '/api/catalog/collections/col-1/songs',
+      expect.objectContaining({ method: 'POST', credentials: 'include' })
+    );
+  });
+
+  test('resolves "already-in" on 200 (idempotent no-op, NOT a failure)', async () => {
+    global.fetch = mockFetchWithCsrf({ ok: true, status: 200, json: async () => ({ message: 'Already in collection' }) }) as unknown as typeof fetch;
+    await expect(catalogService.addSongToCollection('col-1', 'song-1')).resolves.toBe('already-in');
+  });
+
+  test('throws CollectionNotFoundError on 404', async () => {
+    global.fetch = mockFetchWithCsrf({ ok: false, status: 404, json: async () => ({}) }) as unknown as typeof fetch;
+    await expect(catalogService.addSongToCollection('gone', 'song-1')).rejects.toBeInstanceOf(CollectionNotFoundError);
+  });
+
+  test('throws on any other error status', async () => {
+    global.fetch = mockFetchWithCsrf({ ok: false, status: 500, json: async () => ({}) }) as unknown as typeof fetch;
+    await expect(catalogService.addSongToCollection('col-1', 'song-1')).rejects.toThrow();
   });
 });

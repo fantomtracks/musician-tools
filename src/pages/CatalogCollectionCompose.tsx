@@ -4,6 +4,13 @@ import { useAuth } from '../contexts/AuthContext';
 import { catalogService, CollectionNotFoundError } from '../services/catalogService';
 import type { CatalogCollectionDetail, CatalogSong } from '../services/catalogService';
 import { ConfirmDialog } from '../components/ConfirmDialog';
+import { ListSkeleton } from '../components/ListSkeleton';
+import { Toast } from '../components/Toast';
+import { BulkActionBar } from '../components/BulkActionBar';
+import { RowSelectionCheckbox, SelectAllCheckbox } from '../components/SelectionCheckbox';
+import { selectionCell } from '../utils/selectionCell';
+import { useRowSelection } from '../hooks/useRowSelection';
+import { runBounded } from '../utils/runBounded';
 import {
   comboboxInputAria,
   comboboxOptionAria,
@@ -19,6 +26,19 @@ import {
 
 const DEBOUNCE_MS = 280;
 const SEARCH_LIMIT = 10;
+// Same pool as the other bulk actions (22.2). Members are not paginated, so a batch is
+// bounded by the size of the collection.
+const REMOVE_CONCURRENCY = 4;
+
+// Outcome of a bulk removal, kept OUTSIDE <BulkActionBar> (it unmounts itself at zero
+// selection, and a fully successful removal empties the selection — the recap would
+// vanish as it is written). Two segments only: the endpoint is unconditionally
+// idempotent (destroy + 200 even for an absent link), so "already removed" is not a
+// state the backend can report and a rejection is always a real error.
+interface RemoveRecap {
+  removed: number;
+  failed: number;
+}
 
 // A short "Artist · Title" label for a catalog entry.
 function entryLabel(e: CatalogSong): string {
@@ -67,6 +87,39 @@ export default function CatalogCollectionCompose() {
     setToastMessage(message);
     setTimeout(() => setToastMessage(null), 2500);
   };
+
+  // Story 22.3: members are a selectable table. Ephemeral selection (no persistKey) and
+  // NOT paginated, so select-all REPLACES the selection instead of unioning a page in.
+  const selection = useRowSelection();
+  const [confirmRemoveOpen, setConfirmRemoveOpen] = useState(false);
+  const [removing, setRemoving] = useState(false);
+  const removingRef = useRef(false); // in-flight guard: the render-time flag lags a click
+  const [removeRecap, setRemoveRecap] = useState<RemoveRecap | null>(null);
+  const mountedRef = useRef(true);
+
+  useEffect(() => {
+    mountedRef.current = true;
+    return () => { mountedRef.current = false; };
+  }, []);
+
+  // The recap closes at the user's next selection gesture. Driven by the HANDLERS, not
+  // by comparing selection snapshots: a fingerprint also fires on the batch's own
+  // removeMany, and on any tick that slips through the render lag before the boxes are
+  // disabled — killing the recap on the very frame it appears.
+  const userToggle = (uid: string) => { setRemoveRecap(null); selection.toggle(uid); };
+  const userSelectAll = (uids: string[]) => {
+    setRemoveRecap(null);
+    if (selection.allDisplayedSelected(uids)) selection.clear();
+    else selection.selectOnly(uids); // not paginated: select-all REPLACES
+  };
+
+  // A different collection means a different set of members: an inherited selection
+  // would fire DELETEs at uids that are not its members (the endpoint is idempotent, so
+  // they would all "succeed" and the recap would claim removals that never happened),
+  // and an empty collection renders no checkbox to untick it with.
+  useEffect(() => { selection.clear(); setRemoveRecap(null);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [uid]);
 
   // Fetch the collection + its members (StrictMode-safe: abort on unmount/supersede).
   useEffect(() => {
@@ -130,22 +183,39 @@ export default function CatalogCollectionCompose() {
     }
   };
 
-  const removeEntry = async (entry: CatalogSong) => {
-    if (!collection) return;
-    const index = collection.songs.findIndex(s => s.uid === entry.uid);
-    setCollection(prev => prev ? { ...prev, songs: prev.songs.filter(s => s.uid !== entry.uid) } : prev);
+  // Bulk removal (22.3) — replaces the per-row Remove: one removal path only.
+  // Best-effort like every batch in this epic: a failing entry stays in the table AND
+  // stays ticked, so the batch is replayable as-is.
+  const handleRemoveSelected = async () => {
+    // Guards close the dialog instead of returning silently: the selection can be
+    // emptied while the dialog is open (the boxes are only frozen once the batch
+    // starts), and a mute "Remove 0 entries" dialog that ignores its own button is a
+    // dead end.
+    if (!collection || selection.size === 0) { setConfirmRemoveOpen(false); return; }
+    if (removingRef.current || deleting) return;
+    removingRef.current = true;
+    setRemoving(true);
+    setRemoveRecap(null); // the previous batch's numbers must not hang over this one
+    const uids = Array.from(selection.selected);
+
     try {
-      await catalogService.removeSongFromCollection(collection.uid, entry.uid);
-      showToast(`Removed "${entryLabel(entry)}"`);
-    } catch {
-      // revert AT the original position (not the tail)
-      setCollection(prev => {
-        if (!prev) return prev;
-        const songs = [...prev.songs];
-        songs.splice(index < 0 ? songs.length : index, 0, entry);
-        return { ...prev, songs };
-      });
-      showToast('Could not remove that entry.');
+      const results = await runBounded(uids, REMOVE_CONCURRENCY, u =>
+        catalogService.removeSongFromCollection(collection.uid, u));
+
+      if (!mountedRef.current) return;
+
+      const removed = uids.filter((_, i) => results[i].status === 'fulfilled');
+      const removedSet = new Set(removed);
+      // Only what actually left the collection leaves the table.
+      setCollection(prev => prev ? { ...prev, songs: prev.songs.filter(s => !removedSet.has(s.uid)) } : prev);
+      setRemoveRecap({ removed: removed.length, failed: uids.length - removed.length });
+      selection.removeMany(removed);
+      setConfirmRemoveOpen(false);
+    } finally {
+      // `runBounded` never rejects, but an unexpected throw must not strand the page:
+      // every control on it is gated on `removing`, including the dialog's own Cancel.
+      removingRef.current = false;
+      if (mountedRef.current) setRemoving(false);
     }
   };
 
@@ -170,7 +240,10 @@ export default function CatalogCollectionCompose() {
   };
 
   const handleDelete = async () => {
-    if (!collection || deleting) return;
+    // `removing` too: confirming a delete while a removal batch is in flight would
+    // navigate away mid-batch. Freezing the header button is not enough — a dialog
+    // opened BEFORE the batch started stays live.
+    if (!collection || deleting || removing) return;
     setDeleting(true);
     try {
       await catalogService.deleteCollection(collection.uid);
@@ -189,11 +262,7 @@ export default function CatalogCollectionCompose() {
       </Link>
 
       {loading && !collection && !notFound && (
-        <div className="mt-4 space-y-2" aria-hidden="true">
-          {Array.from({ length: 5 }).map((_, i) => (
-            <div key={i} className="h-10 rounded bg-gray-100 dark:bg-gray-700 animate-pulse" />
-          ))}
-        </div>
+        <ListSkeleton rows={5} className="mt-4" />
       )}
 
       {notFound && (
@@ -239,8 +308,12 @@ export default function CatalogCollectionCompose() {
             )}
             <button
               type="button"
-              className="inline-flex items-center rounded-md border border-red-300 dark:border-red-800 text-red-600 dark:text-red-400 px-3 py-1.5 text-sm hover:bg-red-50 dark:hover:bg-red-900/30"
+              className="inline-flex items-center rounded-md border border-red-300 dark:border-red-800 text-red-600 dark:text-red-400 px-3 py-1.5 text-sm hover:bg-red-50 dark:hover:bg-red-900/30 disabled:opacity-50"
               onClick={() => setConfirmOpen(true)}
+              // Frozen during a batch AND while the removal dialog is open: the two
+              // destructive paths must not interleave, and two stacked modals would give
+              // the page two "Cancel" buttons with no focus trap to tell them apart.
+              disabled={removing || confirmRemoveOpen}
             >
               Delete collection
             </button>
@@ -257,6 +330,7 @@ export default function CatalogCollectionCompose() {
               className="input-base"
               placeholder="Search by title or artist…"
               value={searchInput}
+              disabled={removing}
               onChange={e => setSearchInput(e.target.value)}
               onKeyDown={e => handleComboKeyDown(e, visibleResults, activeIndex, setActiveIndex, setOpen, addEntry)}
               onFocus={() => { if (visibleResults.length > 0) setOpen(true); }}
@@ -292,37 +366,118 @@ export default function CatalogCollectionCompose() {
           <h2 className="text-lg font-medium text-gray-800 dark:text-gray-200 mt-8 mb-2" aria-live="polite">
             Entries ({collection.songs.length})
           </h2>
+          {/* Bulk bar: hides itself at zero selection (22.1). */}
+          <BulkActionBar count={selection.size} noun="entry" nounPlural="entries">
+            <button
+              type="button"
+              className="inline-flex items-center rounded-md bg-red-600 text-white px-3 py-1.5 text-sm hover:bg-red-700 disabled:opacity-50"
+              onClick={() => setConfirmRemoveOpen(true)}
+              disabled={removing || deleting || confirmOpen}
+            >
+              Remove selected
+            </button>
+          </BulkActionBar>
+
+          {/* Recap: a SIBLING of the bar, never a child — a fully successful removal
+              empties the selection and would take the recap down with the bar. */}
+          {removeRecap && (
+            <div
+              // Keyed on severity: a live region whose role mutates in place is not
+              // reliably re-announced.
+              key={removeRecap.failed > 0 ? 'recap-alert' : 'recap-status'}
+              role={removeRecap.failed > 0 ? 'alert' : 'status'}
+              // Named: the shared <Toast> keeps a permanent role="status" region mounted.
+              aria-label="Bulk action result"
+              className={`mt-4 flex items-start justify-between gap-3 rounded-lg border px-4 py-3 text-sm ${
+                removeRecap.failed > 0
+                  ? 'border-amber-300 bg-amber-50 text-amber-900 dark:border-amber-800 dark:bg-amber-900/30 dark:text-amber-200'
+                  : 'border-gray-200 bg-gray-50 text-gray-700 dark:border-gray-700 dark:bg-gray-800 dark:text-gray-200'
+              }`}
+            >
+              <p>
+                {[
+                  `${removeRecap.removed} removed`,
+                  removeRecap.failed > 0 ? `${removeRecap.failed} failed` : null,
+                ].filter(Boolean).join(' · ')}.
+                {removeRecap.failed > 0 && ' The failed entries are still selected, so you can retry.'}
+              </p>
+              <button
+                type="button"
+                className="shrink-0 text-xs text-gray-500 dark:text-gray-400 hover:text-gray-700 dark:hover:text-gray-200"
+                onClick={() => setRemoveRecap(null)}
+                aria-label="Dismiss"
+              >
+                ✕
+              </button>
+            </div>
+          )}
+
           {collection.songs.length === 0 ? (
             <p className="text-gray-500 dark:text-gray-400 py-8 text-center">
               No entries yet — search above to add some.
             </p>
           ) : (
-            <ul className="divide-y divide-gray-100 dark:divide-gray-700 rounded-lg border border-gray-200 dark:border-gray-700">
-              {collection.songs.map(entry => (
-                <li key={entry.uid} className="flex items-center justify-between gap-3 px-4 py-3">
-                  <div className="min-w-0">
-                    <p className="font-medium text-gray-900 dark:text-gray-100 truncate">
-                      {entry.artist ? `${entry.artist} · ` : ''}{entry.title}
-                      {entry.publishedAt == null && <DraftBadge />}
-                    </p>
-                    <p className="text-sm text-gray-500 dark:text-gray-400">
-                      {entry.key || '—'}{entry.bpm ? ` · ${entry.bpm} BPM` : ''}
-                    </p>
-                  </div>
-                  <button
-                    type="button"
-                    className="shrink-0 inline-flex items-center rounded-md border border-gray-300 dark:border-gray-600 px-3 py-1.5 text-sm text-gray-700 dark:text-gray-200 hover:bg-gray-50 dark:hover:bg-gray-700 min-h-[44px]"
-                    onClick={() => removeEntry(entry)}
-                    aria-label={`Remove ${entry.title}`}
-                  >
-                    Remove
-                  </button>
-                </li>
-              ))}
-            </ul>
+            <div className="mt-2 overflow-auto rounded-lg border border-gray-200 dark:border-gray-700">
+              <table className="min-w-full text-sm">
+                <thead className="bg-gray-50 dark:bg-gray-800">
+                  <tr className="text-left text-gray-500 dark:text-gray-400">
+                    <th className={selectionCell('px-3 py-2 w-12 text-center')}>
+                      <SelectAllCheckbox
+                        allSelected={selection.allDisplayedSelected(collection.songs.map(s => s.uid))}
+                        onToggle={() => userSelectAll(collection.songs.map(s => s.uid))}
+                        disabled={removing}
+                      />
+                    </th>
+                    <th scope="col" className="px-3 py-2 font-medium">Artist</th>
+                    <th scope="col" className="px-3 py-2 font-medium">Title</th>
+                    <th scope="col" className="px-3 py-2 font-medium">Key</th>
+                    <th scope="col" className="px-3 py-2 font-medium text-right">BPM</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {collection.songs.map(entry => (
+                    // No row click: unlike the other tables, this screen has no
+                    // destination to open — composing is what happens here.
+                    <tr
+                      key={entry.uid}
+                      className={`border-t border-gray-100 dark:border-gray-700 ${selection.isSelected(entry.uid) ? 'bg-blue-50 dark:bg-blue-900/40' : ''}`}
+                    >
+                      <td className={selectionCell('px-3 py-2 w-12 text-center')}>
+                        <RowSelectionCheckbox
+                          checked={selection.isSelected(entry.uid)}
+                          onChange={() => userToggle(entry.uid)}
+                          label={entry.artist ? `${entry.title} by ${entry.artist}` : entry.title}
+                          disabled={removing}
+                        />
+                      </td>
+                      <td className="px-3 py-2 text-gray-900 dark:text-gray-100 whitespace-nowrap">{entry.artist || '—'}</td>
+                      <td className="px-3 py-2 font-medium text-gray-900 dark:text-gray-100">
+                        {entry.title}
+                        {entry.publishedAt == null && <DraftBadge />}
+                      </td>
+                      <td className="px-3 py-2 text-gray-600 dark:text-gray-300 whitespace-nowrap">{entry.key || '—'}</td>
+                      <td className="px-3 py-2 text-gray-600 dark:text-gray-300 whitespace-nowrap text-right">{entry.bpm ?? '—'}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
           )}
         </>
       )}
+
+      <ConfirmDialog
+        isOpen={confirmRemoveOpen}
+        title={`Remove ${selection.size} ${selection.size === 1 ? 'entry' : 'entries'}`}
+        message={collection
+          ? `Remove ${selection.size} selected ${selection.size === 1 ? 'entry' : 'entries'} from "${collection.name}"? The catalog entries themselves are kept.`
+          : ''}
+        confirmText={removing ? 'Removing…' : 'Remove'}
+        cancelText="Cancel"
+        isDangerous
+        onConfirm={handleRemoveSelected}
+        onCancel={() => { if (!removing) setConfirmRemoveOpen(false); }}
+      />
 
       <ConfirmDialog
         isOpen={confirmOpen}
@@ -335,11 +490,7 @@ export default function CatalogCollectionCompose() {
         onCancel={() => { if (!deleting) setConfirmOpen(false); }}
       />
 
-      {toastMessage && (
-        <div role="status" aria-live="polite" className="fixed bottom-6 left-1/2 -translate-x-1/2 bg-gray-900 text-white text-sm px-4 py-2 rounded-lg shadow-lg">
-          {toastMessage}
-        </div>
-      )}
+      <Toast message={toastMessage} />
     </div>
   );
 }

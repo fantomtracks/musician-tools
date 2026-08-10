@@ -12,6 +12,7 @@ import { applySongFilters, countActiveFilters, NO_INSTRUMENT } from '../utils/so
 import { handleComboKeyDown, useScrollHighlightIntoView, comboboxInputAria, comboboxOptionAria } from '../utils/comboboxKeyboard';
 import { useAutosave } from '../hooks/useAutosave';
 import { useRowSelection } from '../hooks/useRowSelection';
+import { Toast } from '../components/Toast';
 import EmptySonglistCollections from '../components/EmptySonglistCollections';
 import { StickyActionBar } from '../components/StickyActionBar';
 import CatalogSourceBanner from '../components/CatalogSourceBanner';
@@ -1827,11 +1828,7 @@ function Songs() {
         </div>
       )}
 
-      {toastMessage && (
-        <div className="fixed bottom-4 right-4 bg-gray-800 text-white px-4 py-2 rounded shadow-lg z-50 animate-fade-in">
-          {toastMessage}
-        </div>
-      )}
+      <Toast message={toastMessage} />
 
       {page === 'form' && notFound ? (
         // Story 18.2: deep-link to an unknown/foreign song uid → scoped 404 (story 7.5).

@@ -367,9 +367,13 @@ export const catalogService = {
     }
   },
 
-  // Add a catalog entry to a Collection (curator). Idempotent server-side (201 created
-  // / 200 already present). 404 -> the collection or the entry is gone.
-  async addSongToCollection(uid: string, catalogSongUid: string): Promise<void> {
+  // Add a catalog entry to a Collection (curator). Idempotent server-side: the
+  // controller's findOrCreate on the composite unique answers 201 when it created the
+  // link and 200 when it was already there. We SURFACE that (story 22.2): the bulk
+  // "Add to collection" recap has to count an already-member entry as "already in",
+  // never as a failure, and no other signal distinguishes the two.
+  // 404 -> the collection or the entry is gone.
+  async addSongToCollection(uid: string, catalogSongUid: string): Promise<'added' | 'already-in'> {
     const response = await apiFetch(`${API_BASE}/catalog/collections/${uid}/songs`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
@@ -382,6 +386,7 @@ export const catalogService = {
     if (!response.ok) {
       throw new Error('Failed to add to the collection');
     }
+    return response.status === 201 ? 'added' : 'already-in';
   },
 
   // Remove a catalog entry from a Collection (curator). Idempotent.

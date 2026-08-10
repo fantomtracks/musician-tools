@@ -3,6 +3,9 @@ import type { Song } from '../services/songService';
 import type { ReactNode } from 'react';
 import SongsSidebar from './SongsSidebar';
 import FiltersDisclosureButton from './FiltersDisclosureButton';
+import { BulkActionBar } from './BulkActionBar';
+import { RowSelectionCheckbox, SelectAllCheckbox } from './SelectionCheckbox';
+import { selectionCell } from '../utils/selectionCell';
 
 export interface SongsListProps {
   // State
@@ -251,100 +254,94 @@ export default function SongsList(props: SongsListProps) {
               </div>
             </div>
           </div>
-          {props.selectedSongs.size > 0 && (
-            <div className="card-base glass-effect p-4">
-              <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
-                <span className="text-sm font-semibold text-gray-800 dark:text-gray-100">{props.selectedSongs.size} song(s) selected</span>
-                <div className="flex flex-wrap gap-2">
-                  <div className="relative">
+          {/* Bulk actions: the shared bar (22.1) hides itself when nothing is selected. */}
+          <BulkActionBar count={props.selectedSongs.size} noun="song(s)">
+            <div className="relative">
+              <button
+                type="button"
+                className="btn-primary text-sm px-3 py-1.5"
+                onClick={() => props.setBulkPlaylistOpen(!props.bulkPlaylistOpen)}
+                disabled={props.loading || props.playlists.length === 0}
+              >
+                Add to playlist
+              </button>
+              {props.bulkPlaylistOpen && (
+                <div className="absolute right-0 mt-2 w-72 rounded-md border border-gray-200 bg-white dark:border-gray-700 dark:bg-gray-800 shadow-lg z-20 p-3">
+                  <div className="flex items-center justify-between mb-2">
+                    <p className="text-sm text-gray-700 dark:text-gray-200">Select playlists</p>
                     <button
                       type="button"
-                      className="btn-primary text-sm px-3 py-1.5"
-                      onClick={() => props.setBulkPlaylistOpen(!props.bulkPlaylistOpen)}
-                      disabled={props.loading || props.playlists.length === 0}
+                      className="text-xs text-gray-500 dark:text-gray-400 hover:text-gray-700 dark:hover:text-gray-300"
+                      onClick={() => props.setBulkPlaylistOpen(false)}
                     >
-                      Add to playlist
+                      ✕
                     </button>
-                    {props.bulkPlaylistOpen && (
-                      <div className="absolute right-0 mt-2 w-72 rounded-md border border-gray-200 bg-white dark:border-gray-700 dark:bg-gray-800 shadow-lg z-20 p-3">
-                        <div className="flex items-center justify-between mb-2">
-                          <p className="text-sm text-gray-700 dark:text-gray-200">Select playlists</p>
-                          <button
-                            type="button"
-                            className="text-xs text-gray-500 dark:text-gray-400 hover:text-gray-700 dark:hover:text-gray-300"
-                            onClick={() => props.setBulkPlaylistOpen(false)}
-                          >
-                            ✕
-                          </button>
-                        </div>
-                        {props.playlists.length === 0 ? (
-                          <p className="text-sm text-gray-500 dark:text-gray-400">
-                            No playlists found.{' '}
-                            <Link to="/my-playlists" className="text-brand-500 dark:text-brand-400 hover:text-brand-600 dark:hover:text-brand-300">Create one</Link>
-                          </p>
-                        ) : (
-                          <>
-                            <div className="max-h-48 overflow-y-auto space-y-1 mb-3">
-                              {props.playlists.map(pl => (
-                                <label
-                                  key={pl.uid}
-                                  className="flex items-center space-x-3 cursor-pointer hover:bg-gray-50 dark:hover:bg-gray-700 p-1 rounded"
-                                >
-                                  <input
-                                    type="checkbox"
-                                    checked={props.bulkPlaylistSelection.has(pl.uid)}
-                                    onChange={() => props.toggleBulkPlaylistSelection(pl.uid)}
-                                    className="rounded border-gray-300 accent-brand-500 dark:accent-brand-400"
-                                  />
-                                  <span className="text-sm text-gray-900 dark:text-gray-100">{pl.name}</span>
-                                  <span className="text-xs text-gray-500 dark:text-gray-400">{(pl.songUids || []).length}</span>
-                                </label>
-                              ))}
-                            </div>
-                            <div className="flex justify-end gap-2">
-                              <button
-                                type="button"
-                                className="text-sm px-3 py-1 rounded-md border border-gray-200 dark:border-gray-700 text-gray-700 dark:text-gray-200 hover:bg-gray-100 dark:hover:bg-gray-700"
-                                onClick={() => props.setBulkPlaylistOpen(false)}
-                              >
-                                Cancel
-                              </button>
-                              <button
-                                type="button"
-                                className="text-sm px-3 py-1 rounded-md bg-brand-500 text-white hover:bg-brand-600 disabled:opacity-50"
-                                onClick={props.handleApplySelectedToPlaylists}
-                                disabled={props.bulkPlaylistSelection.size === 0 || props.loading}
-                              >
-                                Add
-                              </button>
-                            </div>
-                          </>
-                        )}
-                      </div>
-                    )}
                   </div>
-                  {props.instrumentFilter && (
-                    <button
-                      type="button"
-                      className="btn-primary text-sm px-3 py-1.5"
-                      onClick={props.handleMarkSelectedAsPlayedNow}
-                      disabled={props.loading}
-                    >
-                      {`Mark as played on ${props.instrumentFilter}`}
-                    </button>
+                  {props.playlists.length === 0 ? (
+                    <p className="text-sm text-gray-500 dark:text-gray-400">
+                      No playlists found.{' '}
+                      <Link to="/my-playlists" className="text-brand-500 dark:text-brand-400 hover:text-brand-600 dark:hover:text-brand-300">Create one</Link>
+                    </p>
+                  ) : (
+                    <>
+                      <div className="max-h-48 overflow-y-auto space-y-1 mb-3">
+                        {props.playlists.map(pl => (
+                          <label
+                            key={pl.uid}
+                            className="flex items-center space-x-3 cursor-pointer hover:bg-gray-50 dark:hover:bg-gray-700 p-1 rounded"
+                          >
+                            <input
+                              type="checkbox"
+                              checked={props.bulkPlaylistSelection.has(pl.uid)}
+                              onChange={() => props.toggleBulkPlaylistSelection(pl.uid)}
+                              className="rounded border-gray-300 accent-brand-500 dark:accent-brand-400"
+                            />
+                            <span className="text-sm text-gray-900 dark:text-gray-100">{pl.name}</span>
+                            <span className="text-xs text-gray-500 dark:text-gray-400">{(pl.songUids || []).length}</span>
+                          </label>
+                        ))}
+                      </div>
+                      <div className="flex justify-end gap-2">
+                        <button
+                          type="button"
+                          className="text-sm px-3 py-1 rounded-md border border-gray-200 dark:border-gray-700 text-gray-700 dark:text-gray-200 hover:bg-gray-100 dark:hover:bg-gray-700"
+                          onClick={() => props.setBulkPlaylistOpen(false)}
+                        >
+                          Cancel
+                        </button>
+                        <button
+                          type="button"
+                          className="text-sm px-3 py-1 rounded-md bg-brand-500 text-white hover:bg-brand-600 disabled:opacity-50"
+                          onClick={props.handleApplySelectedToPlaylists}
+                          disabled={props.bulkPlaylistSelection.size === 0 || props.loading}
+                        >
+                          Add
+                        </button>
+                      </div>
+                    </>
                   )}
-                  <button
-                    type="button"
-                    className="inline-flex items-center rounded-md bg-red-600 text-white px-3 py-1.5 text-sm hover:bg-red-700 disabled:opacity-50"
-                    onClick={props.handleDeleteSelected}
-                    disabled={props.loading}
-                  >
-                    Delete selected
-                  </button>
                 </div>
-              </div>
+              )}
             </div>
-          )}
+            {props.instrumentFilter && (
+              <button
+                type="button"
+                className="btn-primary text-sm px-3 py-1.5"
+                onClick={props.handleMarkSelectedAsPlayedNow}
+                disabled={props.loading}
+              >
+                {`Mark as played on ${props.instrumentFilter}`}
+              </button>
+            )}
+            <button
+              type="button"
+              className="inline-flex items-center rounded-md bg-red-600 text-white px-3 py-1.5 text-sm hover:bg-red-700 disabled:opacity-50"
+              onClick={props.handleDeleteSelected}
+              disabled={props.loading}
+            >
+              Delete selected
+            </button>
+          </BulkActionBar>
           {props.loading ? (
             <div className="card-base p-6 text-sm text-gray-600 dark:text-gray-400">Loading...</div>
           ) : props.filteredSongs.length === 0 ? (
@@ -357,14 +354,11 @@ export default function SongsList(props: SongsListProps) {
                 <table className="w-full text-sm">
                   <thead className="bg-gray-50 dark:bg-gray-800 dark:text-gray-100 hover:bg-gray-100 dark:hover:bg-gray-700 shadow-sm">
                     <tr>
-                      <th className="text-center p-2 border-b dark:border-gray-700 w-12">
-                        <input
-                          type="checkbox"
-                          className="h-4 w-4 cursor-pointer accent-brand-500 dark:accent-brand-400 bg-white dark:bg-gray-800 border border-gray-300 dark:border-gray-600 rounded"
-                          checked={props.allDisplayedSelected}
-                          onChange={props.toggleSelectAll}
+                      <th className={selectionCell('text-center p-2 border-b dark:border-gray-700 w-12')}>
+                        <SelectAllCheckbox
+                          allSelected={props.allDisplayedSelected}
+                          onToggle={props.toggleSelectAll}
                           disabled={props.loading}
-                          title={props.allDisplayedSelected ? "Deselect all" : "Select all"}
                         />
                       </th>
                       <props.SortHeader column="artist" label="Artist" />
@@ -381,17 +375,11 @@ export default function SongsList(props: SongsListProps) {
                         // reserved to the checkbox, which stops propagation below
                         onClick={() => props.onEdit(song)}
                       >
-                        <td
-                          className="p-2 text-center w-12"
-                          onClick={e => e.stopPropagation()}
-                          onKeyDown={e => e.stopPropagation()}
-                          tabIndex={-1}
-                        >
-                          <input
-                            type="checkbox"
-                            className="h-4 w-4 cursor-pointer accent-brand-500 dark:accent-brand-400 bg-white dark:bg-gray-800 border border-gray-300 dark:border-gray-600 rounded"
+                        <td className={selectionCell('p-2 text-center w-12')}>
+                          <RowSelectionCheckbox
                             checked={props.selectedSongs.has(song.uid)}
                             onChange={() => props.toggleSelectSong(song.uid)}
+                            label={song.artist ? `${song.title} by ${song.artist}` : song.title}
                             disabled={props.loading}
                           />
                         </td>
