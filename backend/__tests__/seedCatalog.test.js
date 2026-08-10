@@ -1055,24 +1055,24 @@ const {
   computeFill, enrichCatalogEntries, formatEnrichReport, runEnrich,
 } = require('../scripts/seed-catalog');
 
+const FICHE_UPDATED_AT = new Date('2026-08-10T21:00:00Z');
 const EMPTY_FICHE = {
   album: null, key: null, bpm: null, mode: null, timeSignature: null,
-  durationSeconds: null, language: null, genre: null, streamingLinks: null, pitchStandard: null,
+  durationSeconds: null, language: null, genre: null, streamingLinks: null,
 };
 const FULL_SONG = {
   album: 'Absolution', key: 'C', bpm: 186, mode: 'Major', timeSignature: '4/4',
   durationSeconds: 227, language: ['English'], genre: ['Rock'],
-  streamingLinks: { spotify: 'x' }, pitchStandard: 440,
+  streamingLinks: { spotify: 'x' },
 };
 const enrichCandidate = over => ({
   catalogUid: 'cat-1', label: 'Muse / Hysteria', songUid: 'song-1', songCount: 1,
+  catalogUpdatedAt: FICHE_UPDATED_AT, songSyncedAt: FICHE_UPDATED_AT,
   catalog: { ...EMPTY_FICHE }, song: { ...FULL_SONG }, ...over,
 });
-const makeModels = (updatedAt = new Date('2026-08-10T21:00:00Z')) => ({
-  CatalogSong: {
-    update: jest.fn().mockResolvedValue([1]),
-    findByPk: jest.fn().mockResolvedValue({ updatedAt }),
-  },
+// `returning: true` renvoie [count, rows] sur Postgres.
+const makeModels = (updatedAt = new Date('2026-08-10T21:30:00Z')) => ({
+  CatalogSong: { update: jest.fn().mockResolvedValue([1, [{ updatedAt }]]) },
   Song: { update: jest.fn().mockResolvedValue([1]) },
 });
 
@@ -1080,19 +1080,14 @@ describe('ENRICH_FIELDS — une seule liste, partagée par le code et le test', 
   test('exactement les 10 champs partageables, aucun champ personnel', () => {
     expect([...ENRICH_FIELDS].sort()).toEqual([
       'album', 'bpm', 'durationSeconds', 'genre', 'key', 'language',
-      'mode', 'pitchStandard', 'streamingLinks', 'timeSignature',
+      'mode', 'streamingLinks', 'timeSignature',
     ]);
+    // Retiré après review : la colonne porte DEFAULT 440 dans Postgres, donc elle
+    // n'est jamais vue comme un trou et ne pouvait jamais être comblée.
+    expect(ENRICH_FIELDS).not.toContain('pitchStandard');
     for (const perso of ['notes', 'lastPlayed', 'myInstrumentUid', 'instrument', 'tuning', 'userUid']) {
       expect(ENRICH_FIELDS).not.toContain(perso);
     }
-  });
-});
-
-describe('ENRICH_SIGNAL_FIELDS — pitchStandard ne dit rien, il vaut 440 par défaut', () => {
-  test('le signal « fiche vide » exclut pitchStandard, sinon aucune fiche n’est jamais vide', () => {
-    const { ENRICH_SIGNAL_FIELDS } = require('../scripts/seed-catalog');
-    expect(ENRICH_SIGNAL_FIELDS).not.toContain('pitchStandard');
-    expect(ENRICH_SIGNAL_FIELDS).toHaveLength(ENRICH_FIELDS.length - 1);
   });
 });
 
@@ -1144,10 +1139,10 @@ describe('computeFill — on comble les trous, on n’écrase jamais', () => {
   });
 
   test('une valeur hors bornes est ÉCARTÉE et signalée, jamais insérée telle quelle', () => {
-    const { fill, dropped } = computeFill({ ...EMPTY_FICHE }, { ...FULL_SONG, bpm: 99999, pitchStandard: 12 });
+    const { fill, dropped } = computeFill({ ...EMPTY_FICHE }, { ...FULL_SONG, bpm: 99999, durationSeconds: 0 });
     expect(fill).not.toHaveProperty('bpm');
-    expect(fill).not.toHaveProperty('pitchStandard');
-    expect(dropped.map(d => d.field).sort()).toEqual(['bpm', 'pitchStandard']);
+    expect(fill).not.toHaveProperty('durationSeconds');
+    expect(dropped.map(d => d.field).sort()).toEqual(['bpm', 'durationSeconds']);
   });
 
   test('les objets JSON sont clonés : muter la chanson après coup ne change pas ce qui a été calculé', () => {
@@ -1169,23 +1164,93 @@ describe('enrichCatalogEntries — écriture et re-synchronisation', () => {
     expect(report.enriched).toBe(1);
   });
 
-  test('LE CŒUR DE LA STORY : après l’écriture, syncedAt est re-posé depuis le updatedAt FRAIS de la fiche', async () => {
-    // Sans ça, modifier la fiche rend la drift vraie et allume « mise à jour
-    // disponible » chez la personne — exactement l’alerte que l’epic évite.
+  test('le marqueur est reposé depuis le updatedAt que MON écriture a produit, pas depuis une relecture', async () => {
+    // Une relecture répondrait « quel horodatage MAINTENANT » — donc potentiellement celui
+    // d'un curateur qui vient d'enregistrer, dont le changement serait marqué « déjà vu ».
     const updatedAt = new Date('2026-08-10T21:30:00Z');
     const m = makeModels(updatedAt);
     await enrichCatalogEntries({ ...m, candidates: [enrichCandidate()], apply: true });
-    expect(m.CatalogSong.findByPk).toHaveBeenCalledWith('cat-1');
-    expect(m.Song.update).toHaveBeenCalledTimes(1);
+    expect(m.CatalogSong.update.mock.calls[0][1].returning).toBe(true);
     const [values, options] = m.Song.update.mock.calls[0];
     expect(values).toEqual({ sourceCatalogSyncedAt: updatedAt });
     expect(options).toEqual({ where: { uid: 'song-1', sourceCatalogUid: 'cat-1' }, silent: true });
   });
 
-  test('le where de la fiche re-vérifie le brouillon au moment d’écrire', async () => {
+  test('le where re-vérifie que CHAQUE colonne à combler est encore vide', async () => {
+    // Sans ça, une valeur saisie par le curateur pendant le lot serait écrasée : `fill` est
+    // calculé sur un instantané pris avant la première écriture.
     const m = makeModels();
     await enrichCatalogEntries({ ...m, candidates: [enrichCandidate()], apply: true });
-    expect(m.CatalogSong.update.mock.calls[0][1].where).toEqual({ uid: 'cat-1', publishedAt: null });
+    const { where } = m.CatalogSong.update.mock.calls[0][1];
+    expect(where.uid).toBe('cat-1');
+    expect(where.publishedAt).toBeNull();
+    expect(where).toHaveProperty('bpm', null);          // colonne non-texte : IS NULL
+    expect(where.key).toEqual({ [Op.or]: [null, ''] }); // colonne texte : IS NULL OR = ''
+  });
+
+  test('fiche écrite mais marqueur NON reposé ⇒ seau « désynchronisées », pas « échec »', async () => {
+    // Le cas dangereux : la fiche EST écrite. Dire « ÉCHEC » ferait croire que rien n'a bougé.
+    const m = makeModels();
+    m.Song.update.mockResolvedValue([0]);
+    const report = await enrichCatalogEntries({ ...m, candidates: [enrichCandidate({ songSyncedAt: null })], apply: true });
+    expect(report.failed).toHaveLength(0);
+    expect(report.enriched).toBe(1);                    // la fiche a bien été écrite
+    expect(report.desynced).toEqual([{ catalogUid: 'cat-1', label: 'Muse / Hysteria', songUid: 'song-1' }]);
+  });
+
+  test('AUTO-RÉPARATION : une fiche sans trou mais dont le marqueur a dérivé est resynchronisée', async () => {
+    // Défaut trouvé en review : après un échec de resynchronisation, la fiche n'a plus de
+    // trous, donc l'ancien code sortait AVANT d'y arriver et la chanson restait décalée à vie.
+    const m = makeModels();
+    const report = await enrichCatalogEntries({
+      ...m,
+      candidates: [enrichCandidate({
+        catalog: { ...FULL_SONG },                       // plus rien à combler
+        songSyncedAt: new Date('2020-01-01T00:00:00Z'),  // marqueur périmé
+      })],
+      apply: true,
+    });
+    expect(m.CatalogSong.update).not.toHaveBeenCalled(); // la fiche n'est pas touchée
+    expect(m.Song.update).toHaveBeenCalledTimes(1);      // mais le marqueur est réparé
+    expect(report.resynced).toBe(1);
+  });
+
+  test('un marqueur déjà à jour n’est pas réécrit pour rien', async () => {
+    const m = makeModels();
+    await enrichCatalogEntries({
+      ...m, candidates: [enrichCandidate({ catalog: { ...FULL_SONG } })], apply: true,
+    });
+    expect(m.Song.update).not.toHaveBeenCalled();
+  });
+
+  test('une source dont TOUTES les valeurs sont refusées n’est pas dite « personne ne l’a renseignée »', async () => {
+    const m = makeModels();
+    const report = await enrichCatalogEntries({
+      ...m,
+      candidates: [enrichCandidate({ song: { ...EMPTY_FICHE, bpm: 99999 } })],
+      apply: true,
+    });
+    expect(report.sourceEmpty).toHaveLength(0);
+    expect(report.sourceRefused).toEqual([{ catalogUid: 'cat-1', label: 'Muse / Hysteria', fields: ['bpm'] }]);
+  });
+
+  test('un genre stocké en chaîne au lieu d’un tableau est écarté, pas copié', async () => {
+    const m = makeModels();
+    const report = await enrichCatalogEntries({
+      ...m, candidates: [enrichCandidate({ song: { ...FULL_SONG, genre: 'Rock' } })], apply: true,
+    });
+    expect(m.CatalogSong.update.mock.calls[0][0]).not.toHaveProperty('genre');
+    expect(report.dropped.some(d => d.field === 'genre')).toBe(true);
+  });
+
+  test('les champs texte sont trimés avant écriture', async () => {
+    const m = makeModels();
+    await enrichCatalogEntries({
+      ...m, candidates: [enrichCandidate({ song: { ...FULL_SONG, key: 'C ', album: ' Absolution ' } })], apply: true,
+    });
+    const values = m.CatalogSong.update.mock.calls[0][0];
+    expect(values.key).toBe('C');
+    expect(values.album).toBe('Absolution');
   });
 
   test('une fiche sans aucune chanson rattachée est ignorée, pas écrite', async () => {
@@ -1212,7 +1277,7 @@ describe('enrichCatalogEntries — écriture et re-synchronisation', () => {
     const m = makeModels();
     const report = await enrichCatalogEntries({
       ...m,
-      candidates: [enrichCandidate({ catalog: { ...EMPTY_FICHE, pitchStandard: 440 }, song: { ...EMPTY_FICHE, genre: [] } })],
+      candidates: [enrichCandidate({ catalog: { ...EMPTY_FICHE }, song: { ...EMPTY_FICHE, genre: [] } })],
       apply: true,
     });
     expect(m.CatalogSong.update).not.toHaveBeenCalled();
@@ -1283,8 +1348,9 @@ describe('formatEnrichReport', () => {
     return lines.join('\n');
   };
   const base = {
-    candidates: 0, enriched: 0, nothingToDo: 0, sourceEmpty: [], withoutSource: 0,
-    ambiguous: [], dropped: [], raced: [], failed: [], fills: [], byField: {}, applied: false,
+    candidates: 0, enriched: 0, nothingToDo: 0, sourceEmpty: [], sourceRefused: [], withoutSource: 0,
+    ambiguous: [], dropped: [], raced: [], failed: [], desynced: [], resynced: 0,
+    fills: [], byField: {}, applied: false,
   };
 
   test('chaque fiche enrichie est nommée avec les champs comblés', () => {

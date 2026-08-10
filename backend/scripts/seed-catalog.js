@@ -838,52 +838,72 @@ async function runAlias(db, opts) {
 
 // --- Enrich (story 23.5) -----------------------------------------------------
 //
-// Fills each DRAFT fiche from the single Song attached to it. Born from the 23.4
-// rehearsal: the original export carried only artist + title, so the seed could only
-// create empty fiches — but the restored prod dump carries key, bpm, genre and links.
+// Fills each DRAFT fiche from the single Song attached to it, and keeps the song's
+// synchronisation marker honest. Born from the 23.4 rehearsal: the original export carried
+// only artist + title, but the restored prod dump carries key, bpm, genre and links.
 //
-// It runs LAST (seed → attach → alias → enrich) because it travels along the link that
-// attach and alias create: no link, no source.
+// It runs LAST (seed → attach → alias → enrich): it travels along the link attach and alias
+// create, so no link means no source.
 //
-// ⚠️ THE POINT OF THIS PHASE IS NOT THE COPY, IT IS THE SIDE EFFECT OF THE COPY.
-// Updating a fiche moves its updatedAt, and drift is computed against that date
-// (`getSong`: drift = syncedAt == null || catalog.updatedAt > syncedAt). Enriching 75
-// fiches without re-syncing would light up "a newer version is available" for 75 people
-// — precisely the alert decision B exists to prevent. The re-sync below is half the
-// story, not a finishing touch.
+// ⚠️ WHAT THE RE-SYNC IS AND IS NOT (corrected after review — the first version of this
+// comment claimed the opposite). `getSong` only emits the provenance block when the fiche is
+// PUBLISHED (songcontroller.js:113), and this phase only touches DRAFTS — so no user can see
+// a "newer version available" banner at this point, drift or no drift. Publishing later moves
+// `updatedAt` past whatever we stamp here anyway (measured: drift goes 0 → 75 on publish).
+// The re-sync therefore prevents NO banner. What it does is keep `sourceCatalogSyncedAt`
+// TRUTHFUL: the copy really does reflect the fiche version it points at. The banner is 23.6's
+// problem, at publication time.
 
 // The closed list of what may travel from a personal Song into a SHARED fiche. Mirrors
-// songcontroller's INTRINSIC_REFRESH_FIELDS + the three JSON fields it deep-clones,
-// plus `album`. Everything else — notes, tuning, instrument, lastPlayed — is personal
-// and must never appear here. One list, used by the code AND by the test.
+// songcontroller's INTRINSIC_REFRESH_FIELDS + the three JSON fields it deep-clones, plus
+// `album`. Personal fields — notes, tuning, instrument, lastPlayed — must never appear here.
+//
+// `pitchStandard` was in this list and has been REMOVED: the column carries `DEFAULT 440` in
+// Postgres itself (verified — all 125 fiches hold 440), so it can never read as a hole and
+// could never be filled. Keeping it meant a dead entry plus a special case to exclude it from
+// the emptiness signal. Assumed consequence: a song tuned to 432 Hz does not propagate its
+// pitch to the shared fiche; the curator sets it by hand.
 const ENRICH_FIELDS = [
   'album', 'key', 'bpm', 'mode', 'timeSignature', 'durationSeconds',
-  'language', 'genre', 'streamingLinks', 'pitchStandard',
+  'language', 'genre', 'streamingLinks',
 ];
 
-// `pitchStandard` defaults to 440 on BOTH models, so a fiche always carries it and is
-// never literally "entirely empty". Judging emptiness on it would silence the signal
-// below for every fiche — measured, the bucket stopped firing at all. Emptiness is
-// therefore judged on the fields that actually carry information.
-const ENRICH_SIGNAL_FIELDS = ENRICH_FIELDS.filter(f => f !== 'pitchStandard');
+// Plain strings: trimmed before being written. `createCatalogEntry` trims album on the API
+// path; skipping it here would let « C » and « C  » become two distinct facet chips, one of
+// which matches nothing.
+const ENRICH_TEXT_FIELDS = new Set(['album', 'key', 'timeSignature']);
+
+// JSONB columns with no model-level validator on either side. A legacy row can hold a bare
+// string where an array is expected; copied as-is into a shared fiche it would be skipped by
+// the facet query (`jsonb_typeof(genre) = 'array'`) and never match a filter — enriched on
+// paper, invisible in the app.
+const ENRICH_SHAPE_GUARDS = {
+  genre: value => Array.isArray(value),
+  streamingLinks: value => typeof value === 'object' && value !== null,
+};
 
 // Column name is identical on both tables (verified against information_schema), so one
 // mapping serves both sides.
 const ENRICH_COLUMNS = {
   album: 'album', key: 'key', bpm: 'bpm', mode: 'mode', timeSignature: 'time_signature',
   durationSeconds: 'duration_seconds', language: 'language', genre: 'genre',
-  streamingLinks: 'streaming_links', pitchStandard: 'pitch_standard',
+  streamingLinks: 'streaming_links',
 };
 
-// LEFT JOIN, not JOIN: a draft fiche attached to NO song must still come back so it can
-// be counted and reported rather than vanish. `count(s.uid)` (not `count(*)`) so the
-// empty row a LEFT JOIN produces counts as zero, not one.
+// LEFT JOIN, not JOIN: a draft fiche attached to NO song must still come back so it can be
+// counted rather than vanish. `count(s.uid)` (not `count(*)`) so the empty row a LEFT JOIN
+// produces counts as zero.
+//
+// `c."updatedAt"` and `s.source_catalog_synced_at` come back so the re-sync can be checked
+// even when there is nothing to fill — that is what makes it self-healing.
 const ENRICH_CANDIDATES_SQL = `
-  SELECT c.uid   AS catalog_uid,
-         c.title AS catalog_title,
-         c.artist AS catalog_artist,
+  SELECT c.uid         AS catalog_uid,
+         c.title       AS catalog_title,
+         c.artist      AS catalog_artist,
+         c."updatedAt" AS catalog_updated_at,
          ${ENRICH_FIELDS.map(f => `c.${ENRICH_COLUMNS[f]} AS catalog_${ENRICH_COLUMNS[f]}`).join(',\n         ')},
-         s.uid AS song_uid,
+         s.uid                       AS song_uid,
+         s.source_catalog_synced_at  AS song_synced_at,
          ${ENRICH_FIELDS.map(f => `s.${ENRICH_COLUMNS[f]} AS song_${ENRICH_COLUMNS[f]}`).join(',\n         ')},
          count(s.uid) OVER (PARTITION BY c.uid) AS song_count
     FROM "CatalogSongs" c
@@ -901,18 +921,18 @@ async function selectEnrichCandidates(sequelize) {
   return rows.map(r => ({
     catalogUid: r.catalog_uid,
     label: describeSong(r.catalog_artist, r.catalog_title),
+    catalogUpdatedAt: r.catalog_updated_at,
     songUid: r.song_uid,
+    songSyncedAt: r.song_synced_at,
     songCount: Number(r.song_count),
     catalog: pick(r, 'catalog'),
     song: pick(r, 'song'),
   }));
 }
 
-// A hole is anything that carries no information: null, undefined, a blank string, an
-// empty array, an empty object. The blank string matters — measured during framing, a
-// naive count claimed 75 songs had a key or bpm when the real answer was 61, because
-// `key = ''` is not NULL. Filling a hole with '' would leave the fiche looking complete
-// while being empty.
+// A hole is anything carrying no information: null, undefined, a blank string, an empty array,
+// an empty object. The blank string matters — a naive count during framing claimed 75 songs
+// had a key or bpm when the real answer was 61, because `key = ''` is not NULL.
 function isEmptyValue(value) {
   if (value === null || value === undefined) return true;
   if (typeof value === 'string') return value.trim() === '';
@@ -921,12 +941,10 @@ function isEmptyValue(value) {
   return false;
 }
 
-// Reuse the shared normalizers rather than re-typing the rules: a value a historical
-// Song tolerates can be out of range for a fiche, and the two sides must agree on shape
-// ("Major", not "major"). Bounds mirror songcontroller/catalogcontroller exactly.
+// Reuse the shared normalizers rather than re-typing the rules. Bounds mirror
+// songcontroller/catalogcontroller exactly.
 const NORMALIZE_ENRICH = {
   bpm: value => normalizeInt(value, { min: 1, max: 1000 }),
-  pitchStandard: value => normalizeInt(value, { min: 380, max: 500 }),
   durationSeconds: normalizeDurationSeconds,
   language: normalizeLanguage,
   mode: normalizeMode,
@@ -937,34 +955,57 @@ function computeFill(catalogValues, songValues) {
   const dropped = [];
 
   for (const field of ENRICH_FIELDS) {
-    // The fiche wins whenever it already says something: the curator validated it.
-    if (!isEmptyValue(catalogValues[field])) continue;
+    if (!isEmptyValue(catalogValues[field])) continue; // the fiche wins: the curator validated it
     const raw = songValues[field];
-    if (isEmptyValue(raw)) continue; // nothing to give
+    if (isEmptyValue(raw)) continue;                   // nothing to give
+
+    const shapeOk = ENRICH_SHAPE_GUARDS[field];
+    if (shapeOk && !shapeOk(raw)) {
+      dropped.push({ field, reason: `forme inattendue (${Array.isArray(raw) ? 'array' : typeof raw}) : ${JSON.stringify(raw).slice(0, 60)}` });
+      continue;
+    }
 
     const normalize = NORMALIZE_ENRICH[field];
-    const value = normalize ? normalize(raw) : raw;
+    let value = normalize ? normalize(raw) : raw;
+    if (ENRICH_TEXT_FIELDS.has(field) && typeof value === 'string') value = value.trim();
 
-    // The normalizers reject to null rather than clamp (see utils/normalize.js). A value
-    // that comes back empty was refused — say so instead of writing null over a hole,
-    // which would look like a successful fill.
+    // The normalizers reject to null rather than clamp. Writing their return would fill a hole
+    // with emptiness while counting it a success.
     if (isEmptyValue(value)) {
       dropped.push({ field, reason: `valeur refusée par la normalisation : ${JSON.stringify(raw)}` });
       continue;
     }
 
-    // Deep clone: a shared fiche must never hold a reference into a user's row. Same
-    // discipline as refreshSongFromCatalog, which structuredClones the three JSON fields.
+    // Deep clone: a shared fiche must never hold a reference into a user's row.
     fill[field] = (value !== null && typeof value === 'object') ? structuredClone(value) : value;
   }
 
   return { fill, dropped };
 }
 
+// The write-time guard: re-assert in SQL that every column we are about to fill is STILL
+// empty. Without it, `fill` is computed from a snapshot taken before the batch started, and a
+// value the curator typed mid-run would be silently overwritten — which the code comment and
+// the tests both promised would never happen.
+function buildFillGuard(fill) {
+  const guard = {};
+  for (const field of Object.keys(fill)) {
+    guard[field] = ENRICH_TEXT_FIELDS.has(field) ? { [Op.or]: [null, ''] } : null;
+  }
+  return guard;
+}
+
+const needsResync = (catalogUpdatedAt, songSyncedAt) => {
+  if (!catalogUpdatedAt) return false;
+  if (songSyncedAt == null) return true;
+  return new Date(catalogUpdatedAt) > new Date(songSyncedAt);
+};
+
 async function enrichCatalogEntries({ CatalogSong, Song, candidates, apply = false, log = () => {} }) {
   const report = {
-    candidates: 0, enriched: 0, nothingToDo: 0, sourceEmpty: [], withoutSource: 0,
-    ambiguous: [], dropped: [], raced: [], failed: [], fills: [], byField: {}, applied: !!apply,
+    candidates: 0, enriched: 0, nothingToDo: 0, sourceEmpty: [], sourceRefused: [], withoutSource: 0,
+    ambiguous: [], dropped: [], raced: [], failed: [], desynced: [], resynced: 0,
+    fills: [], byField: {}, applied: !!apply,
   };
   const seen = new Set();
 
@@ -973,68 +1014,88 @@ async function enrichCatalogEntries({ CatalogSong, Song, candidates, apply = fal
     seen.add(c.catalogUid);
     report.candidates += 1;
 
-    // No song attached: normal for a fiche the curator created by hand. Counted, not listed.
     if (c.songCount === 0 || !c.songUid) { report.withoutSource += 1; continue; }
 
-    // Several songs attached: two users would disagree on the values, and picking one is
-    // not a fix. Same refusal as the ambiguity probes of 23.2 and 23.3.
     if (c.songCount > 1) {
       report.ambiguous.push({ catalogUid: c.catalogUid, label: c.label, songs: c.songCount });
       continue;
     }
 
     const { fill, dropped } = computeFill(c.catalog, c.song);
-    for (const d of dropped) report.dropped.push({ label: c.label, ...d });
+    const fields = Object.keys(fill);
 
-    // Nothing to fill: do NOT touch the fiche. An empty UPDATE would still bump updatedAt
-    // and light up the drift banner for nothing — which is exactly what this phase exists
-    // to avoid. It is also what makes a second run a true no-op.
-    //
-    // Two very different reasons land here, and the first real run showed they must not
-    // share a label: a fiche the curator already filled, and a fiche whose source song has
-    // nothing to give. Calling the second one « déjà complète » reads as "job done" when in
-    // fact nobody ever entered a key, a tempo or a genre for that song.
-    if (!Object.keys(fill).length) {
-      // A fiche that is ENTIRELY empty and whose source gives nothing is worth naming: it
-      // will stay a shell, and the curator has to type it from scratch. A fiche that is
-      // merely full-as-it-can-be is the normal steady state and only needs a count —
-      // the first re-run announced « source SANS DONNÉE : 74 » right after enriching 73,
-      // which reads as a failure when nothing is wrong.
-      if (ENRICH_SIGNAL_FIELDS.every(f => isEmptyValue(c.catalog[f]))) {
+    const classifyNoFill = () => {
+      // Three very different reasons land here and must not share a label.
+      if (dropped.length) {
+        report.sourceRefused.push({ catalogUid: c.catalogUid, label: c.label, fields: dropped.map(d => d.field) });
+      } else if (ENRICH_FIELDS.every(f => isEmptyValue(c.catalog[f]))) {
         report.sourceEmpty.push({ catalogUid: c.catalogUid, label: c.label });
       } else report.nothingToDo += 1;
-      continue;
-    }
-
-    const tally = () => {
-      report.enriched += 1;
-      report.fills.push({ label: c.label, fields: Object.keys(fill) });
-      for (const f of Object.keys(fill)) report.byField[f] = (report.byField[f] || 0) + 1;
     };
 
-    if (!apply) { tally(); continue; }
+    // Keeps the marker truthful even when there is nothing to fill. This is what makes the
+    // phase SELF-HEALING: a fiche written by a previous run whose re-sync failed has no holes
+    // left, so the old code returned before ever reaching the re-sync and the song stayed
+    // desynced for good.
+    const resyncIfNeeded = async (catalogUpdatedAt) => {
+      if (!needsResync(catalogUpdatedAt, c.songSyncedAt)) return true;
+      if (!apply) { report.resynced += 1; return true; }
+      const [synced = 0] = (await Song.update(
+        { sourceCatalogSyncedAt: catalogUpdatedAt },
+        { where: { uid: c.songUid, sourceCatalogUid: c.catalogUid }, silent: true }
+      )) || [];
+      if (!synced) {
+        // The song was deleted or detached since the SELECT — or a second song was attached
+        // and this one no longer matches. Either way the marker is NOT what we think.
+        report.desynced.push({ catalogUid: c.catalogUid, label: c.label, songUid: c.songUid });
+        return false;
+      }
+      report.resynced += 1;
+      return true;
+    };
 
     try {
-      const [affected = 0] = (await CatalogSong.update(fill, {
-        // Re-checks the draft state AT WRITE TIME: the curator may have published this
-        // fiche since the SELECT, and a published fiche is out of scope.
-        where: { uid: c.catalogUid, publishedAt: null },
+      if (!fields.length) {
+        classifyNoFill();
+        await resyncIfNeeded(c.catalogUpdatedAt);
+        continue;
+      }
+
+      for (const d of dropped) report.dropped.push({ label: c.label, ...d });
+
+      if (!apply) {
+        report.enriched += 1;
+        report.fills.push({ label: c.label, fields });
+        for (const f of fields) report.byField[f] = (report.byField[f] || 0) + 1;
+        continue;
+      }
+
+      // `returning: true` rather than a re-read: a re-read answers "what is the timestamp
+      // NOW", which may be a concurrent curator's write — stamping that on the song would
+      // mark THEIR change as already seen. This answers "what did MY write produce".
+      const [affected = 0, rows = []] = (await CatalogSong.update(fill, {
+        where: { uid: c.catalogUid, publishedAt: null, ...buildFillGuard(fill) },
+        returning: true,
       })) || [];
 
-      if (!affected) { report.raced.push({ catalogUid: c.catalogUid, label: c.label }); continue; }
+      if (!affected) {
+        report.raced.push({ catalogUid: c.catalogUid, label: c.label });
+        continue;
+      }
 
-      // Read the fiche's FRESH updatedAt and carry it to the attached song, so the drift
-      // stays false. Without this the phase would announce "a newer version is available"
-      // to every affected user. `silent` because the song itself did not change — only
-      // its synchronisation marker.
-      const fresh = await CatalogSong.findByPk(c.catalogUid);
-      await Song.update(
-        { sourceCatalogSyncedAt: fresh.updatedAt },
-        { where: { uid: c.songUid, sourceCatalogUid: c.catalogUid }, silent: true }
-      );
+      const written = rows && rows[0];
+      if (!written || !written.updatedAt) {
+        // The fiche IS written but we cannot know its new timestamp, so we cannot re-sync.
+        // Say exactly that instead of laundering it into a generic failure.
+        report.desynced.push({ catalogUid: c.catalogUid, label: c.label, songUid: c.songUid, reason: 'fiche écrite mais horodatage illisible' });
+      } else if (!(await resyncIfNeeded(written.updatedAt))) {
+        // enriched below anyway: the fiche WAS written. `desynced` carries the repair job.
+      }
 
-      tally();
-      log(`      ✎ ${c.label} — ${Object.keys(fill).join(', ')}`);
+      report.enriched += 1;
+      report.fills.push({ label: c.label, fields });
+      for (const f of fields) report.byField[f] = (report.byField[f] || 0) + 1;
+      log(`      ✎ ${c.label} — ${fields.join(', ')}`);
     } catch (error) {
       report.failed.push({ catalogUid: c.catalogUid, label: c.label, reason: (error && error.message) || String(error) });
     }
@@ -1047,13 +1108,18 @@ function formatEnrichReport(report, { log = console.log } = {}) {
   log(report.applied ? '=== ENRICHISSEMENT APPLIQUÉ ===' : '=== DRY-RUN — aucune écriture ===');
   log(`  ${label('fiches brouillon')}: ${report.candidates}`);
   log(`  ${label(report.applied ? 'enrichies' : 'à enrichir')}: ${report.enriched}`);
+  if (report.resynced) log(`  ${label(report.applied ? 'marqueurs resynchro.' : 'marqueurs à resynchro.')}: ${report.resynced}`);
   if (report.nothingToDo) log(`  ${label('rien à combler')}: ${report.nothingToDo}   (la fiche porte déjà tout ce que sa source peut donner)`);
-  if (report.sourceEmpty.length) {
-    log(`  ${label('source SANS DONNÉE')}: ${report.sourceEmpty.length}   (la fiche reste vide : personne n'a renseigné cette chanson)`);
-    for (const e of report.sourceEmpty) log(`      • ${e.label}`);
-  }
   if (report.withoutSource) log(`  ${label('sans chanson source')}: ${report.withoutSource}   (normal : personne ne les a)`);
 
+  if (report.sourceEmpty.length) {
+    log(`  ${label('source SANS DONNÉE')}: ${report.sourceEmpty.length}   (à remplir à la main : personne n'a renseigné cette chanson)`);
+    for (const e of report.sourceEmpty) log(`      • ${e.label}`);
+  }
+  if (report.sourceRefused.length) {
+    log(`  ${label('source REFUSÉE')}: ${report.sourceRefused.length}   ⚠️  la donnée existe mais a été rejetée — réparable`);
+    for (const e of report.sourceRefused) log(`      ✗ ${e.label}  (${e.fields.join(', ')})`);
+  }
   if (report.ambiguous.length) {
     log(`  ${label('AMBIGUËS')}: ${report.ambiguous.length}   ⚠️  plusieurs chansons rattachées — refusées, pas arbitrées`);
     for (const a of report.ambiguous) log(`      ✗ ${a.label}  (${a.songs} chansons)  [${a.catalogUid}]`);
@@ -1062,8 +1128,12 @@ function formatEnrichReport(report, { log = console.log } = {}) {
     log(`  ${label('valeurs ÉCARTÉES')}: ${report.dropped.length}`);
     for (const d of report.dropped) log(`      ✗ ${d.label} — ${d.field} : ${d.reason}`);
   }
+  if (report.desynced.length) {
+    log(`  ${label('DÉSYNCHRONISÉES')}: ${report.desynced.length}   ⚠️  fiche écrite, marqueur PAS reposé — relancez la phase, elle se répare`);
+    for (const d of report.desynced) log(`      ✗ ${d.label}  [fiche ${d.catalogUid}, song ${d.songUid}]${d.reason ? ` — ${d.reason}` : ''}`);
+  }
   if (report.raced.length) {
-    log(`  ${label('non écrites')}: ${report.raced.length}   (publiées depuis la sélection)`);
+    log(`  ${label('non écrites')}: ${report.raced.length}   (fiche introuvable dans l'état attendu : publiée, supprimée ou remplie depuis la sélection)`);
     for (const r of report.raced) log(`      ✗ ${r.label}  [${r.catalogUid}]`);
   }
   if (report.failed.length) {
@@ -1124,9 +1194,17 @@ async function runEnrich(db, opts) {
     }
   }
 
-  if (report.failed.length || report.ambiguous.length || report.raced.length) process.exitCode = 1;
-  else if (!opts.apply) console.log('Relancez avec --apply pour écrire.');
+  // Ambiguity is a STEADY state this phase deliberately refuses to resolve — two users owning
+  // the same song will keep it non-zero on every future run. Exiting 1 on it would make 1 the
+  // normal outcome, and an exit code that is always 1 carries no information. Only the
+  // transient, actionable outcomes fail the run.
+  if (report.ambiguous.length) {
+    console.error(`\n⚠️  ${report.ambiguous.length} fiche(s) ambiguë(s) — état stable, non bloquant, mais à regarder.`);
+  }
+  if (report.failed.length || report.raced.length || report.desynced.length) process.exitCode = 1;
+  if (!opts.apply) console.log('Relancez avec --apply pour écrire.');
 }
+
 
 // --- Entry point -----------------------------------------------------------
 
@@ -1342,7 +1420,7 @@ module.exports = {
   ALIAS_FILE, ALIAS_BIND_COLUMNS, ALIAS_BIND_FIELDS, parseAliasCsv, buildAliasCandidatesSql, selectAliasCandidates, attachAliasSongs,
   formatAliasReport, runAlias,
   // Story 23.5 — enrich phase
-  ENRICH_FIELDS, ENRICH_SIGNAL_FIELDS, ENRICH_COLUMNS, ENRICH_CANDIDATES_SQL, selectEnrichCandidates, computeFill,
+  ENRICH_FIELDS, ENRICH_TEXT_FIELDS, ENRICH_COLUMNS, buildFillGuard, needsResync, ENRICH_CANDIDATES_SQL, selectEnrichCandidates, computeFill,
   enrichCatalogEntries, formatEnrichReport, runEnrich,
 };
 
