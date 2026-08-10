@@ -73,31 +73,31 @@ Elle a donc dérivé dans les deux sens. **Tout chiffre mesuré jusqu'ici vaut p
   **Fait le 2026-08-10.** Fichier : `backups/musician_tools_prod_20260810_195530.dump`, **389 071 octets** (contre 276 275 pour la locale), reconnu `PostgreSQL custom database dump - v1.16-0`. `pg_restore --list` y trouve `Songs`, `Users`, `CatalogSongs`, `SongPlays`, `SessionItems`, `PlaylistSongs`. Signe distinctif confirmant qu'il s'agit bien de la prod et non d'une copie locale : les tables y appartiennent au rôle **`postgres`**, alors qu'en local elles appartiennent à `musician_user` — c'est précisément ce que `--no-owner --no-acl` neutralise à la restauration.
 
   ⚠️ **Trouvé en vérifiant que le dump ne partirait pas au commit** : `backups/` est bien ignoré (`.gitignore:29`), donc les nouveaux dumps sont hors de git. **Mais deux dumps sont VERSIONNÉS** depuis des commits antérieurs à cette règle (`backups/musician_tools_20251228_150430.dump` et `…20251231_141210.dump`, 19 Ko chacun, contenant tous deux la table `Users`). Un `.gitignore` n'a aucun effet sur un fichier déjà suivi. Reporté en deferred-work — la suppression de l'historique est une réécriture, donc une décision de northwood.
-- [ ] **Task 3 — Restauration locale** (AC: 1, 2)
-  - [ ] `make db-restore FILE=backups/musician_tools_prod_<ts>.dump`. Le piège pg17 est **résolu** (`39aa96b` : client et serveur alignés en pg17, round-trip vérifié) — ne pas recopier l'avertissement périmé de l'epic.
-  - [ ] Contrôle immédiat : `COUNT(*)` sur `Songs`, `Users`, `CatalogSongs` — et **vérifier que `Jamiroquoi / Runaway` est présent**. C'est le témoin qui prouve qu'on est bien sur la prod et plus sur la dev dérivée.
-- [ ] **Task 4 — Dry-runs, dans l'ordre** (AC: 3, 4)
-  - [ ] `--phase=seed`, puis `--phase=attach`, puis `--phase=alias`, chacun **sans** `--apply`. Environnement local : `DB_ENABLE_SSL= NODE_ENV=test` (⚠️ `NODE_ENV=development` **ne se connecte pas**, SSL en dur — cf. deferred-work).
-  - [ ] Relever les 3 chiffres de l'AC4 et les **comparer à l'attendu** : 82 entrées à créer, les 9 alias doivent tous matcher.
-  - [ ] Un code de sortie ≠ 0 **arrête** : lire le rapport, comprendre, décider.
-- [ ] **Task 5 — Exécution locale** (AC: 5, 7)
-  - [ ] Les 3 phases avec `--apply`, dans l'ordre.
-  - [ ] Relever les compteurs avant/après et les compteurs métier.
-  - [ ] **Relancer les 3 phases** : tout doit être à zéro. C'est l'AC7, et c'est la seule preuve d'idempotence sur données réelles.
+- [x] **Task 3 — Restauration locale** (AC: 1, 2)
+  - [x] `make db-restore FILE=backups/musician_tools_prod_<ts>.dump`. Le piège pg17 est **résolu** (`39aa96b` : client et serveur alignés en pg17, round-trip vérifié) — ne pas recopier l'avertissement périmé de l'epic.
+  - [x] Contrôle immédiat : `COUNT(*)` sur `Songs`, `Users`, `CatalogSongs` — et **vérifier que `Jamiroquoi / Runaway` est présent**. C'est le témoin qui prouve qu'on est bien sur la prod et plus sur la dev dérivée.
+- [x] **Task 4 — Dry-runs, dans l'ordre** (AC: 3, 4)
+  - [x] `--phase=seed`, puis `--phase=attach`, puis `--phase=alias`, chacun **sans** `--apply`. Environnement local : `DB_ENABLE_SSL= NODE_ENV=test` (⚠️ `NODE_ENV=development` **ne se connecte pas**, SSL en dur — cf. deferred-work).
+  - [x] Relever les 3 chiffres de l'AC4 et les **comparer à l'attendu** : 82 entrées à créer, les 9 alias doivent tous matcher.
+  - [x] Un code de sortie ≠ 0 **arrête** : lire le rapport, comprendre, décider.
+- [x] **Task 5 — Exécution locale** (AC: 5, 7)
+  - [x] Les 3 phases avec `--apply`, dans l'ordre.
+  - [x] Relever les compteurs avant/après et les compteurs métier.
+  - [x] **Relancer les 3 phases** : tout doit être à zéro. C'est l'AC7, et c'est la seule preuve d'idempotence sur données réelles.
 - [ ] **Task 6 — Vérification navigateur** (AC: 6)
   - [ ] Ouvrir une chanson rattachée : **bannière de provenance ABSENTE** (brouillon). Une bannière visible = bug bloquant.
   - [ ] Ouvrir une chanson passée par la phase alias : le titre corrigé s'affiche dans la songlist.
   - [ ] Ouvrir l'historique de session d'une chanson renommée qui en a un : il garde **l'ancienne** orthographe. C'est le contrat FR4, à constater pour ne pas le prendre pour un bug plus tard.
-- [ ] **Task 7 — Trancher la décision reportée** (AC: 4)
-  - [ ] Compter les rattachements **sans** renommage. 0 ⇒ acter que la décision est sans objet. ≥ 1 ⇒ présenter la liste nominative à northwood et **attendre sa décision** avant la prod.
+- [x] **Task 7 — Trancher la décision reportée** (AC: 4)
+  - [x] Compter les rattachements **sans** renommage. 0 ⇒ acter que la décision est sans objet. ≥ 1 ⇒ présenter la liste nominative à northwood et **attendre sa décision** avant la prod.
 - [ ] **Task 8 — Exécution prod** (AC: 8, 9)
   - [ ] **Ne rien lancer sans un feu vert explicite de northwood**, donné après lecture du rapport.
   - [ ] Dry-run prod d'abord (`--allow-remote` non requis en dry-run : le garde ne porte que sur l'écriture), phase par phase, relu.
   - [ ] Puis `--apply --allow-remote`, phase par phase, en relisant entre chaque.
   - [ ] ⚠️ **Ne jamais tester un garde avec le drapeau qui écrit.** Leçon de 23.1 : un `--apply` lancé pour « voir ce que fait le garde » a visé la prod. Seule une erreur TLS a évité 82 écritures.
-- [ ] **Task 9 — Rapport** (AC: 10)
-  - [ ] Archiver `epic-23-seed-report-<date>.md` : commandes, sorties, chiffres, écarts, décision AC4.
-  - [ ] Mentionner explicitement la règle d'exploitation : **ne publier une fiche qu'une fois remplie**.
+- [x] **Task 9 — Rapport** (AC: 10)
+  - [x] Archiver `epic-23-seed-report-<date>.md` : commandes, sorties, chiffres, écarts, décision AC4.
+  - [x] Mentionner explicitement la règle d'exploitation : **ne publier une fiche qu'une fois remplie**.
 
 ## Dev Notes
 
@@ -139,6 +139,16 @@ Les trois premières écrivaient du code testable. Celle-ci **agit**. Son seul f
 - [Source: `_bmad-output/project-context.md`]
 
 ## Dev Agent Record
+
+**Rapport complet : `_bmad-output/implementation-artifacts/epic-23-seed-report-2026-08-10.md`.**
+
+Répétition faite le 2026-08-10 sur copie locale de la prod. Prod **non touchée** (lecture seule).
+Résultats : 75 entrées créées / 7 déjà présentes ; **82 Songs rattachées sur 88** ; **9 alias sur 9 ont matché** ; `Songs`, `SongPlays`, `SessionItems`, `PlaylistSongs` **inchangés** ; **0 doublon** de fold au Catalog comme par utilisateur ; idempotence vérifiée (0/0/0 au second passage).
+**Décision reportée de la review 23.3 : TRANCHÉE — 0 rattachement sans renommage sur le dump prod, la décision est sans objet, comportement conservé.**
+Trois écarts découverts : `db-restore` incompatible avec un dump Supabase (contourné par `-n public`), séquence de la story fausse (les phases doivent être entrelacées), garde « alias morts » qui crie sur toute seconde exécution.
+Reste Task 6 (vérification navigateur) et Task 8 (exécution prod, sur feu vert explicite).
+
+### Agent Model Used
 
 ### Agent Model Used
 
