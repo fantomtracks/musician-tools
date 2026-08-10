@@ -4,7 +4,7 @@ baseline_commit: 2c460cb
 
 # Story 23.4: Répétition sur dump prod, garde-fous chiffrés, puis exécution
 
-Status: in-progress
+Status: done
 
 <!-- Note: Validation is optional. Run validate-create-story for quality check before dev-story. -->
 
@@ -90,11 +90,11 @@ Elle a donc dérivé dans les deux sens. **Tout chiffre mesuré jusqu'ici vaut p
   - [x] Ouvrir l'historique de session d'une chanson renommée qui en a un : il garde **l'ancienne** orthographe. C'est le contrat FR4, à constater pour ne pas le prendre pour un bug plus tard.
 - [x] **Task 7 — Trancher la décision reportée** (AC: 4)
   - [x] Compter les rattachements **sans** renommage. 0 ⇒ acter que la décision est sans objet. ≥ 1 ⇒ présenter la liste nominative à northwood et **attendre sa décision** avant la prod.
-- [ ] **Task 8 — Exécution prod** (AC: 8, 9)
-  - [ ] **Ne rien lancer sans un feu vert explicite de northwood**, donné après lecture du rapport.
-  - [ ] Dry-run prod d'abord (`--allow-remote` non requis en dry-run : le garde ne porte que sur l'écriture), phase par phase, relu.
-  - [ ] Puis `--apply --allow-remote`, phase par phase, en relisant entre chaque.
-  - [ ] ⚠️ **Ne jamais tester un garde avec le drapeau qui écrit.** Leçon de 23.1 : un `--apply` lancé pour « voir ce que fait le garde » a visé la prod. Seule une erreur TLS a évité 82 écritures.
+- [x] **Task 8 — Exécution prod** (AC: 8, 9)
+  - [x] **Ne rien lancer sans un feu vert explicite de northwood**, donné après lecture du rapport.
+  - [x] Dry-run prod d'abord (`--allow-remote` non requis en dry-run : le garde ne porte que sur l'écriture), phase par phase, relu.
+  - [x] Puis `--apply --allow-remote`, phase par phase, en relisant entre chaque.
+  - [x] ⚠️ **Ne jamais tester un garde avec le drapeau qui écrit.** Leçon de 23.1 : un `--apply` lancé pour « voir ce que fait le garde » a visé la prod. Seule une erreur TLS a évité 82 écritures.
 - [x] **Task 9 — Rapport** (AC: 10)
   - [x] Archiver `epic-23-seed-report-<date>.md` : commandes, sorties, chiffres, écarts, décision AC4.
   - [x] Mentionner explicitement la règle d'exploitation : **ne publier une fiche qu'une fois remplie**.

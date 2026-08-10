@@ -4,7 +4,7 @@ baseline_commit: 67b7725
 
 # Story 23.6: Publier les fiches en un passage, sans alerter personne
 
-Status: review
+Status: done
 
 <!-- Note: Validation is optional. Run validate-create-story for quality check before dev-story. -->
 
