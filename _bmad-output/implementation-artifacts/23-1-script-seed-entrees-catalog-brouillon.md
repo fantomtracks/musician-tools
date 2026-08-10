@@ -4,7 +4,7 @@ baseline_commit: 3416f6f919a8b7363d94813c8e78a2221b8158dc
 
 # Story 23.1: Script de seed — créer les entrées Catalog en brouillon
 
-Status: ready-for-dev
+Status: review
 
 <!-- Note: Validation is optional. Run validate-create-story for quality check before dev-story. -->
 
@@ -26,7 +26,7 @@ Première story d'**Epic 23**. Les Epics 19 → 22 ont construit tout l'outillag
 
 ## Découverte de cadrage — À LIRE EN PREMIER
 
-**1. L'index canonique du Catalog n'est PAS partiel — il couvre les brouillons.** Les notes de la story 19.6 le décrivent comme « PARTIEL (published only, 409 au Publish) ». **C'est faux** : la migration `20260716000100` dit *« the 19.1 canonical unique index is untouched, so every row (draft or published) is unique »*, et aucune migration ne crée d'index partiel ni ne supprime `catalog_songs_title_artist_ci`. Conséquence : **une insertion en doublon lève 23505 immédiatement, même en brouillon**. Le script doit sauter ce qui existe — ce n'est pas théorique, « Numb » est déjà au Catalog **et** dans le CSV.
+**1. L'index canonique du Catalog n'est PAS partiel — il couvre les brouillons.** Les notes de la story 19.6 le décrivent comme « PARTIEL (published only, 409 au Publish) ». **C'est faux** : la migration `20260716000100` dit *« the 19.1 canonical unique index is untouched, so every row (draft or published) is unique »*, et aucune migration ne crée d'index partiel ni ne supprime `catalog_songs_title_artist_ci`. Conséquence : **une insertion en doublon lève 23505 immédiatement, même en brouillon**. Le script doit donc sauter ce qui existe. **Justification exacte** : la ré-exécution (un second `--apply` ne doit rien créer) et le contenu du Catalog de **prod**, inconnu depuis le poste de dev. *(Correction : une première version de cette story citait « Numb » comme collision avérée — faux, le `grep -i` avait matché « My Number ». Sur la base de dev, les 82 lignes ne collisionnent avec aucune des 5 entrées existantes.)*
 
 **2. L'invariant 3 de l'epic est imprécis, et le suivre à la lettre serait un bug.** Il dit « le fold doit être celui de l'app : `lower` + `f_unaccent` ». En réalité le projet a **deux folds distincts** :
 - **fold d'IDENTITÉ** (unicité, détection de doublon) : `lower(title)` + `COALESCE(lower(artist), '')` — **accents CONSERVÉS**. C'est l'expression exacte de l'index `catalog_songs_title_artist_ci`, et celle du helper `findExistingByTitleArtist` (`catalogcontroller.js:41-50`).
@@ -53,25 +53,25 @@ Première story d'**Epic 23**. Les Epics 19 → 22 ont construit tout l'outillag
 
 ## Tasks / Subtasks
 
-- [ ] **Task 1 — Squelette du script et connexion** (AC: 1)
-  - [ ] `backend/scripts/seed-catalog.js` en **CommonJS** (`require`/`module.exports`) — le backend n'est pas en ESM et n'a pas de TypeScript.
-  - [ ] Connexion via `require('../models')` (source de vérité, cf. § *Pièges*). **Ne pas** instancier un `new Sequelize` maison.
-  - [ ] Parsing des arguments : `--apply` (défaut = dry-run), `--file=<chemin>` (défaut `seed/catalog-seed.csv`). Fermer la connexion en `finally`.
-- [ ] **Task 2 — Lecture et validation du fichier** (AC: 2, 3)
-  - [ ] Lire le CSV. **Attention aux titres contenant une virgule** — `Little Lord Fentanyl (feat. Puscifer)` n'en a pas, mais `I Got You (I Feel Good)` non plus ; vérifier tout de même le fichier avant de choisir un split naïf, et préférer un parsing qui gère les guillemets.
-  - [ ] Ignorer l'en-tête, ignorer les lignes vides ; `title` vide ⇒ ligne invalide (le modèle a `title allowNull: false`), `artist` vide est **légal** (`allowNull: true`).
-  - [ ] Détecter les doublons **internes au fichier** sur le fold d'identité et n'en garder qu'un, en le comptant.
-- [ ] **Task 3 — Skip et création** (AC: 3, 4, 5, 6)
-  - [ ] Pour chaque ligne : chercher l'existant sur le fold d'identité ; si trouvé → sauter avec la raison ; sinon, en mode `--apply`, `CatalogSong.create({ title, artist, publishedAt: null })`.
-  - [ ] Envelopper la création dans un `try/catch` par ligne : une `SequelizeUniqueConstraintError` compte comme « sautée (conflit) », le lot continue.
-- [ ] **Task 4 — Rapport** (AC: 2, 7)
-  - [ ] Récapitulatif chiffré + liste nominative des sautées. En dry-run, le rapport dit explicitement **qu'aucune écriture n'a eu lieu**.
-- [ ] **Task 5 — Tests** (AC: 5)
-  - [ ] `backend/__tests__/seedCatalog.test.js` avec `jest.mock('../models')` (**pas de vraie base**, convention du projet) : le fichier est parsé, une entrée existante est sautée, une nouvelle est créée avec `publishedAt: null`, un doublon interne n'est créé qu'une fois, une `SequelizeUniqueConstraintError` sur une ligne n'interrompt pas le lot, et le mode dry-run n'appelle **jamais** `create`.
-  - [ ] Extraire la logique testable (parsing + décision) d'une fonction exportée ; le `main()` qui se connecte reste fin et non testé.
-- [ ] **Task 6 — Validation** (AC: 8)
-  - [ ] `cd backend && npm test` et `npm run lint`. Baseline backend à mesurer **avant** de commencer (`cd backend && npm test 2>&1 | tail -3`) — la rétro Epic 22 interdit d'écrire un compteur non mesuré.
-  - [ ] `git diff --stat` doit ne montrer que le script, son test, et éventuellement `package.json` — aucun modèle, aucune migration, aucun contrôleur.
+- [x] **Task 1 — Squelette du script et connexion** (AC: 1)
+  - [x] `backend/scripts/seed-catalog.js` en **CommonJS** (`require`/`module.exports`) — le backend n'est pas en ESM et n'a pas de TypeScript.
+  - [x] Connexion via `require('../models')` (source de vérité, cf. § *Pièges*). **Ne pas** instancier un `new Sequelize` maison.
+  - [x] Parsing des arguments : `--apply` (défaut = dry-run), `--file=<chemin>` (défaut `seed/catalog-seed.csv`). Fermer la connexion en `finally`.
+- [x] **Task 2 — Lecture et validation du fichier** (AC: 2, 3)
+  - [x] Lire le CSV. **Attention aux titres contenant une virgule** — `Little Lord Fentanyl (feat. Puscifer)` n'en a pas, mais `I Got You (I Feel Good)` non plus ; vérifier tout de même le fichier avant de choisir un split naïf, et préférer un parsing qui gère les guillemets.
+  - [x] Ignorer l'en-tête, ignorer les lignes vides ; `title` vide ⇒ ligne invalide (le modèle a `title allowNull: false`), `artist` vide est **légal** (`allowNull: true`).
+  - [x] Détecter les doublons **internes au fichier** sur le fold d'identité et n'en garder qu'un, en le comptant.
+- [x] **Task 3 — Skip et création** (AC: 3, 4, 5, 6)
+  - [x] Pour chaque ligne : chercher l'existant sur le fold d'identité ; si trouvé → sauter avec la raison ; sinon, en mode `--apply`, `CatalogSong.create({ title, artist, publishedAt: null })`.
+  - [x] Envelopper la création dans un `try/catch` par ligne : une `SequelizeUniqueConstraintError` compte comme « sautée (conflit) », le lot continue.
+- [x] **Task 4 — Rapport** (AC: 2, 7)
+  - [x] Récapitulatif chiffré + liste nominative des sautées. En dry-run, le rapport dit explicitement **qu'aucune écriture n'a eu lieu**.
+- [x] **Task 5 — Tests** (AC: 5)
+  - [x] `backend/__tests__/seedCatalog.test.js` avec `jest.mock('../models')` (**pas de vraie base**, convention du projet) : le fichier est parsé, une entrée existante est sautée, une nouvelle est créée avec `publishedAt: null`, un doublon interne n'est créé qu'une fois, une `SequelizeUniqueConstraintError` sur une ligne n'interrompt pas le lot, et le mode dry-run n'appelle **jamais** `create`.
+  - [x] Extraire la logique testable (parsing + décision) d'une fonction exportée ; le `main()` qui se connecte reste fin et non testé.
+- [x] **Task 6 — Validation** (AC: 8)
+  - [x] `cd backend && npm test` et `npm run lint`. Baseline backend à mesurer **avant** de commencer (`cd backend && npm test 2>&1 | tail -3`) — la rétro Epic 22 interdit d'écrire un compteur non mesuré.
+  - [x] `git diff --stat` doit ne montrer que le script, son test, et éventuellement `package.json` — aucun modèle, aucune migration, aucun contrôleur.
 
 ## Dev Notes
 
@@ -117,14 +117,34 @@ Première story d'**Epic 23**. Les Epics 19 → 22 ont construit tout l'outillag
 
 ### Agent Model Used
 
+claude-opus-5[1m] (dev-story)
+
 ### Debug Log References
+
+- Baseline backend **mesurée avant de commencer** : `cd backend && npm test` → **372 tests** (action item n°1 de la rétro Epic 22).
+- TDD : `npx jest seedCatalog` → RED (module absent) → **13/13**.
+- Suite backend complète : **385/385** (372 + 13). `npm run lint` backend clean.
+- **Exécution réelle du script** (`NODE_ENV=development node scripts/seed-catalog.js`) : il annonce environnement + base + mode, puis échoue proprement sur `The server does not support SSL connections` avec un code de sortie non nul. **Problème d'environnement, pas de la story** — la config dev exige SSL (piège documenté dans `project-context`) et le Postgres local ne le propose pas dans son état actuel. C'est précisément ce que la story 23.4 doit régler avec le dump prod restauré.
+- **Vérification de bout en bout sans base** : le vrai fichier de 82 lignes traverse `parseSeedCsv` + `seedCatalog` avec un modèle simulé → **82 valides, 0 sautée au parsing**, première `AC/DC — Back in Black`, dernière `Vulfpeck — Dean Town`.
 
 ### Completion Notes List
 
+- **⚠️ CORRECTION D'UNE AFFIRMATION FAUSSE QUE J'AVAIS ÉCRITE.** Le cadrage, cette story, le suivi et deux messages de commit affirmaient que « Numb » était déjà au Catalog **et** dans le CSV, comme preuve que les collisions sont réelles. **Faux** : mon `grep -i "numb"` avait matché « My Number ». Vérifié : les 82 lignes ne collisionnent avec **aucune** des 5 entrées de la base de dev. La garde de skip reste néanmoins requise — pour l'idempotence d'un second `--apply` et parce que le contenu du Catalog de **prod** est inconnu depuis ici. Corrigé dans `epics.md`, dans cette story et dans `sprint-status.yaml`. C'est exactement l'action item n°1 de la rétro Epic 22, pris en défaut sur la story suivante.
+- **Le fold d'identité, pas celui de recherche** : `lower(title)` + `coalesce(lower(artist), '')`, accents conservés — même forme que `findExistingByTitleArtist`. Un test inspecte la structure réelle de la clause Sequelize (`attribute.fn`, `logic`) et vérifie qu'aucun `f_unaccent` n'y figure. *(La première version du test sérialisait la clause en JSON — inutile : les `Symbol` et les objets `Fn` n'y survivent pas. Le test passait sur un `{}` vide.)*
+- **Dry-run par défaut, `--apply` pour écrire.** Le script affiche environnement, base et mode **avant** toute action, et avertit explicitement si `NODE_ENV` vaut `production` — le piège majeur de ce projet, où un `NODE_ENV` non défini vaut `production`.
+- **Brouillon explicite** : `publishedAt: null` est passé littéralement à `create`, et un test vérifie que **seules** les clés `title`/`artist`/`publishedAt` sont envoyées — aucun `key`/`bpm`/`mode` inventé.
+- **Trois issues distinctes par ligne** : déjà présent → sauté ; `SequelizeUniqueConstraintError` (course entre deux exécutions) → sauté avec sa propre raison ; **toute autre erreur** → comptée en `failed` et affichée, jamais maquillée en « sauté ». Le lot continue dans les trois cas.
+- **Périmètre tenu** : aucun modèle, aucune migration, aucun contrôleur, aucune route, aucun front. Le script n'est référencé nulle part dans le déploiement.
+
 ### File List
+
+- **NEW** `backend/scripts/seed-catalog.js` — script manuel : parsing CSV, skip sur le fold d'identité, création en brouillon, rapport.
+- **NEW** `backend/__tests__/seedCatalog.test.js` — 13 tests (modèles mockés).
+- **UPDATE** `_bmad-output/planning-artifacts/epics.md`, `_bmad-output/implementation-artifacts/sprint-status.yaml` — correction de l'affirmation « Numb ».
 
 ## Change Log
 
 | Date | Version | Description | Author |
 |------|---------|-------------|--------|
+| 2026-08-10 | 1.0 | dev-story — script de seed + 13 tests. Backend **385/385** (baseline 372 mesurée avant), lint clean. Le script s'exécute réellement et échoue proprement sur la connexion SSL locale (environnement, pas la story) ; les 82 lignes réelles traversent parsing et décision. **Correction d'une affirmation fausse de mon cadrage** : « Numb » n'est pas dans le CSV, le grep avait matché « My Number ». | northwood |
 | 2026-08-10 | 0.1 | Story créée (create-story). Deux découvertes : l'index canonique du Catalog couvre les brouillons (la note de 19.6 est fausse) donc le skip est obligatoire ; et l'invariant 3 de l'epic confond le fold de RECHERCHE (`f_unaccent`) avec le fold d'IDENTITÉ (`lower` + `COALESCE`, accents conservés) — c'est le second qu'il faut, le suivre à la lettre aurait produit de faux skips. | northwood |
