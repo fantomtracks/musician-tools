@@ -15,7 +15,7 @@ project adheres to [Semantic Versioning](https://semver.org/).
 ## [2.1.0] — 2026-08-10
 
 ### Added
-- **The Catalog is now stocked — 125 ready-made songs instead of a nearly empty shelf.** Every song people had already typed in is now a shared Catalog entry, complete with its key, tempo, mode, time signature, genre and streaming links. Browse it, filter it, and pull anything into your own songlist without retyping a thing.
+- **The Catalog is now stocked — 125 ready-made songs instead of a nearly empty shelf.** Every song people had already typed in is now a shared Catalog entry, carrying whatever was known about it: 9 in 10 have streaming links, 8 in 10 a genre, 7 in 10 a tempo, and half a key. Browse it, filter it, and pull anything into your own songlist without retyping a thing — the gaps get filled in over time.
   - **Songs you already had are linked to their Catalog entry.** Your own version is untouched — same instrument, same tuning, same notes, same practice history. The entry simply says where it came from.
   - **A handful of typos were corrected** in the process, so a song you typed as "AC DC" now reads "AC/DC" and matches everyone else's. Your practice history keeps the name it had at the time, which is intended.
 - **Pick several songs at once, everywhere in the Catalog.** Every song list now works the way the Songlist does — a checkbox on each row and a bar of actions once you've picked some.
