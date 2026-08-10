@@ -66,9 +66,13 @@ Elle a donc dérivé dans les deux sens. **Tout chiffre mesuré jusqu'ici vaut p
   - [x] Noter le chemin du fichier dans le rapport : c'est le retour arrière.
 
   **Fait le 2026-08-10.** Fichier : `backups/musician_tools_20260810_195354.dump`, **276 275 octets**, reconnu `PostgreSQL custom database dump - v1.16-0`. Vérifié au-delà de « le fichier existe » : `pg_restore --list` y trouve **48 tables avec données**, dont `Songs`, `Users`, `CatalogSongs`, `SongPlays`, `SessionItems`. État sauvegardé : **91 Songs, 6 Users, 5 CatalogSongs, 102 SongPlays, 67 SessionItems**. C'est le retour arrière si la restauration du dump prod tourne mal.
-- [ ] **Task 2 — Dump prod frais** (AC: 2)
-  - [ ] `make db-backup-prod` (lit `DATABASE_URL_PROD` depuis `backend/.env`). ⚠️ **Lecture seule sur la prod** — `pg_dump` n'écrit rien.
-  - [ ] Vérifier la taille du fichier produit et l'horodater dans le rapport.
+- [x] **Task 2 — Dump prod frais** (AC: 2)
+  - [x] `make db-backup-prod` (lit `DATABASE_URL_PROD` depuis `backend/.env`). ⚠️ **Lecture seule sur la prod** — `pg_dump` n'écrit rien.
+  - [x] Vérifier la taille du fichier produit et l'horodater dans le rapport.
+
+  **Fait le 2026-08-10.** Fichier : `backups/musician_tools_prod_20260810_195530.dump`, **389 071 octets** (contre 276 275 pour la locale), reconnu `PostgreSQL custom database dump - v1.16-0`. `pg_restore --list` y trouve `Songs`, `Users`, `CatalogSongs`, `SongPlays`, `SessionItems`, `PlaylistSongs`. Signe distinctif confirmant qu'il s'agit bien de la prod et non d'une copie locale : les tables y appartiennent au rôle **`postgres`**, alors qu'en local elles appartiennent à `musician_user` — c'est précisément ce que `--no-owner --no-acl` neutralise à la restauration.
+
+  ⚠️ **Trouvé en vérifiant que le dump ne partirait pas au commit** : `backups/` est bien ignoré (`.gitignore:29`), donc les nouveaux dumps sont hors de git. **Mais deux dumps sont VERSIONNÉS** depuis des commits antérieurs à cette règle (`backups/musician_tools_20251228_150430.dump` et `…20251231_141210.dump`, 19 Ko chacun, contenant tous deux la table `Users`). Un `.gitignore` n'a aucun effet sur un fichier déjà suivi. Reporté en deferred-work — la suppression de l'historique est une réécriture, donc une décision de northwood.
 - [ ] **Task 3 — Restauration locale** (AC: 1, 2)
   - [ ] `make db-restore FILE=backups/musician_tools_prod_<ts>.dump`. Le piège pg17 est **résolu** (`39aa96b` : client et serveur alignés en pg17, round-trip vérifié) — ne pas recopier l'avertissement périmé de l'epic.
   - [ ] Contrôle immédiat : `COUNT(*)` sur `Songs`, `Users`, `CatalogSongs` — et **vérifier que `Jamiroquoi / Runaway` est présent**. C'est le témoin qui prouve qu'on est bien sur la prod et plus sur la dev dérivée.
