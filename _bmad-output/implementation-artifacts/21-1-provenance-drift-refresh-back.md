@@ -29,8 +29,8 @@ so that I can refresh my copy to the Catalog version.
 
 - [x] **Task 1 — Migration `add-source-catalog-synced-at-to-songs`** (AC: #1)
   - [x] `20260722000000-add-source-catalog-synced-at-to-songs.js` : `describeTable` guard → `addColumn` DATE nullable ; `down` gardé (mirror 19.4 add-column).
-  - [x] Backfill idempotent (`COALESCE(source.updatedAt, Song.createdAt)` WHERE source_catalog_uid NOT NULL AND synced_at IS NULL), pas de FK.
-  - [x] **Validé base dev** : 5 copies backfillées (3 = `source.updatedAt` exact, drift=0 ; 2 dangling → `createdAt`) ; replay = no-op.
+  - [x] Backfill idempotent (`Songs."createdAt"` WHERE source_catalog_uid NOT NULL AND synced_at IS NULL), pas de FK. — ⚠️ **corrigé en review** : le plan initial `COALESCE(source.updatedAt, Song.createdAt)` masquait le vrai drift des copies legacy (cf. § Review Findings, patch 1).
+  - [x] **Validé base dev** (re-validation post-patch) : 5 copies backfillées, **5/5 = `Songs."createdAt"`** (le moment de la copie) ; replay = no-op.
 - [x] **Task 2 — Model + stamp at copy** (AC: #2)
   - [x] `song.js` : attribut `sourceCatalogSyncedAt` (field `source_catalog_synced_at`).
   - [x] `buildSongFromCatalog` pose `sourceCatalogSyncedAt: catalog.updatedAt` (couvre *Add* 19.4 + *import* 20.3) ; assertion ajoutée au test `addToSonglist`.
@@ -64,7 +64,7 @@ _Dismissed (5): timestamp-drift over-reports on a non-intrinsic edit (album/titl
 [Source: _bmad-output/planning-artifacts/architecture-catalog-song-link-2026-07-21.md]
 - Drift by **timestamp** (`sourceCatalogSyncedAt`), NOT field-by-field diff.
 - Refresh **overwrites intrinsic**, **preserves personal + identity**. Explicit action (the front confirms).
-- Backfill = `source.updatedAt` → no false drift on legacy copies.
+- Backfill = `Songs."createdAt"` (the copy moment) → a legacy copy whose source was edited afterwards correctly reads `drift=true`. ⚠️ **The ADR's original rationale (`source.updatedAt`) was corrected during review**: it produced no false positives but *hid* real drift.
 - Source deleted/unpublished → graceful (no `sourceCatalog`, refresh 409).
 
 ### The intrinsic vs personal split — get this exactly right
@@ -119,15 +119,15 @@ claude-opus-4-8[1m]
 
 ### Debug Log References
 
-- `make migrate` → column added + backfill. Dev DB check: 5 catalog-copies backfilled; the 3 with a resolvable source got `synced_at = source."updatedAt"` exactly (drift=0, no false "update available"); the 2 dangling ones fell back to `Song."createdAt"`. Replay = "already up to date" (idempotent).
+- `make migrate` → column added + backfill. **First run (pre-review backfill `COALESCE(source."updatedAt", Song."createdAt")`)**: 5 catalog-copies backfilled; the 3 with a resolvable source got `synced_at = source."updatedAt"` exactly, the 2 dangling ones fell back to `Song."createdAt"`. ⚠️ Review showed this **hid real drift** on legacy copies → backfill changed to `Songs."createdAt"` unconditionally. **Re-validated on the dev DB after the patch: 5/5 = `Songs."createdAt"`.** Replay = "already up to date" (idempotent) in both runs.
 - Real end-to-end smoke (throwaway published CatalogSong + a Song copy with an old `synced_at` + `capo=4`, cleaned up): `GET` → `sourceCatalog.drift=true`, key='C'; `POST refresh-from-catalog` → 200, key='F#', bpm=90 (overwritten from Catalog), **capo=4 preserved**; `GET` again → `drift=false` (synced_at bumped). Confirms the real Sequelize paths the mocked suite can't (findByPk + Date comparison + `song.update` persisting intrinsic-only + `.toJSON()` enrichment shape).
 
 ### Completion Notes List
 
-- All 5 ACs satisfied. Backend **365/365** (+9), lint clean. **Additive strict** on 19.4 — the default snapshot is unchanged; the connection is opt-in via Refresh.
+- All 5 ACs satisfied. Backend **366/366** (+10 — 365 at dev-story time, +1 draft-source test added by review patch 3), lint clean. **Additive strict** on 19.4 — the default snapshot is unchanged; the connection is opt-in via Refresh.
 - **Intrinsic vs personal split (the crux):** Refresh overwrites ONLY `key, bpm, mode, timeSignature, durationSeconds, pitchStandard` (via `INTRINSIC_REFRESH_FIELDS`) + deep-cloned `language, genre, streamingLinks`. `title/artist/album` (identity → uniqueness 17.1 unaffected) and all personal fields (`capo, notes, instrument, tuning, …`) are never in the update payload — asserted in the test.
 - **Draft-safety:** `getSong` omits `sourceCatalog` for a draft/absent source (no leak); `refresh` returns `409 source_unavailable`. Catalog read is NON-scoped (§3).
-- **Backfill = `source.updatedAt`** → no legacy copy flags a false drift (validated on dev DB).
+- **Backfill = `Songs."createdAt"`** (the copy moment) → a legacy copy whose source was edited after the copy correctly reads `drift=true`. ⚠️ **Changed during review** (was `source.updatedAt`, which flagged no false positives but *hid* real drift); ADR note corrected, dev DB re-validated 5/5.
 - ⚠️ **Migration ships to PROD at merge** (via v2). Idempotent + dev-tested.
 - On branch `feat/epic-21-catalog-song-link` (off v2, baseline `385d121`). NOT committed — awaiting review. Never touches `main`.
 

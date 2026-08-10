@@ -60,6 +60,6 @@ _(Optionnel : scinder Niv.1 provenance/nav en 21-2 et drift/Refresh en 21-3 si o
 ## Notes / risques
 
 - **Rouvre le snapshot de 19.4** de façon **additive** (le défaut reste snapshot ; la connexion est opt-in par action). Pas de régression sur l'existant.
-- Backfill = source.updatedAt → aucune copie legacy ne clignote « update available » à tort.
+- Backfill = `Song.createdAt` (cf. D1, corrigé en code review 21.1) → une copie legacy dont la source a été éditée **après** la copie signale correctement « update available » ; pas de faux positif non plus. _(Le premier jet `source.updatedAt` ne créait pas de faux positif mais **masquait le vrai drift** — c'est le défaut qui a motivé la correction.)_
 - `title/artist` jamais touchés par Refresh (l'unicité per-user 17.1 sur (title,artist) n'est donc pas affectée).
 - Contenu réel quasi inexistant en prod (catalog vide) → la valeur ne se manifeste qu'après curation ; cohérent avec la séquence « v2 rempli avant 2.0.0 ».
