@@ -152,7 +152,7 @@ Sans la re-synchronisation, la mesure de cadrage annonçait **75 chansons en dri
 - **Les 2 fiches sans donnée sont publiées et présentées comme une liste de travail** (« À REMPLIR »), pas comme un avertissement — c'est ce que northwood a demandé.
 - **`hasData` est calculé en SQL** à partir de `ENRICH_FIELDS`, qui ne contient plus `pitchStandard` depuis la review de 23.5. La règle « ce qui compte comme de la donnée » n'existe donc qu'à un seul endroit.
 - **Observation hors périmètre, reportée** : le bouton « Publier » du curateur (`catalogcontroller.js:200`) fait `entry.update({ publishedAt })` **sans** re-synchroniser. Il a donc exactement le défaut que cette phase corrige : publier une fiche à la main depuis l'UI allumera la bannière chez ses détenteurs. L'AC8 interdit de toucher aux contrôleurs ; consigné en deferred-work.
-- **Contrôle navigateur non fait** : la session s'est refermée et je ne saisis pas de mot de passe. Ce qui le remplace : la bannière est conditionnée à la drift, mesurée à **0** après publication. Ce qui **doit** apparaître en revanche — la ligne « Added from the Catalog », désormais visible puisque les fiches sont publiées — reste à confirmer d'un coup d'œil.
+- **Contrôle navigateur fait** (northwood s'est reconnecté). `Vulfpeck / Dean Town` — qui n'affichait **rien** tant que sa fiche était brouillon — montre maintenant « ↳ Added from the Catalog » **et rien d'autre** : pas de bandeau ambre, pas de bouton Refresh. C'est exactement l'effet voulu : la provenance devient visible parce que la fiche est publiée, l'alerte ne l'est pas parce que le marqueur a été reposé.
 
 ### File List
 
