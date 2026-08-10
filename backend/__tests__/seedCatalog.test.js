@@ -1072,7 +1072,11 @@ const enrichCandidate = over => ({
 });
 // `returning: true` renvoie [count, rows] sur Postgres.
 const makeModels = (updatedAt = new Date('2026-08-10T21:30:00Z')) => ({
-  CatalogSong: { update: jest.fn().mockResolvedValue([1, [{ updatedAt }]]) },
+  CatalogSong: {
+    update: jest.fn().mockResolvedValue([1, [{ updatedAt }]]),
+    // Le chemin de réparation relit l'horodatage : celui du SELECT peut avoir des minutes.
+    findByPk: jest.fn().mockResolvedValue({ updatedAt }),
+  },
   Song: { update: jest.fn().mockResolvedValue([1]) },
 });
 
@@ -1184,8 +1188,19 @@ describe('enrichCatalogEntries — écriture et re-synchronisation', () => {
     const { where } = m.CatalogSong.update.mock.calls[0][1];
     expect(where.uid).toBe('cat-1');
     expect(where.publishedAt).toBeNull();
-    expect(where).toHaveProperty('bpm', null);          // colonne non-texte : IS NULL
-    expect(where.key).toEqual({ [Op.or]: [null, ''] }); // colonne texte : IS NULL OR = ''
+    expect(where).toHaveProperty('bpm', null);   // vue à NULL ⇒ gardée par IS NULL
+  });
+
+  test('le garde porte sur la valeur OBSERVÉE, pas sur une idée du vide', async () => {
+    // Une fiche à mode = '' était perdue en entier : le garde émettait IS NULL, qui ne
+    // matchait rien, et les 6 autres champs prêts à être écrits partaient avec.
+    const m = makeModels();
+    await enrichCatalogEntries({
+      ...m, candidates: [enrichCandidate({ catalog: { ...EMPTY_FICHE, mode: '' } })], apply: true,
+    });
+    const { where } = m.CatalogSong.update.mock.calls[0][1];
+    expect(where.mode).toEqual({ [Op.or]: [null, ''] });
+    expect(where).toHaveProperty('bpm', null);
   });
 
   test('fiche écrite mais marqueur NON reposé ⇒ seau « désynchronisées », pas « échec »', async () => {
@@ -1243,14 +1258,46 @@ describe('enrichCatalogEntries — écriture et re-synchronisation', () => {
     expect(report.dropped.some(d => d.field === 'genre')).toBe(true);
   });
 
-  test('les champs texte sont trimés avant écriture', async () => {
+  test('les champs texte sont trimés avant écriture — mode compris', async () => {
+    // `mode` avait été oublié dans ENRICH_TEXT_FIELDS ; c'est pourtant la colonne texte la
+    // plus susceptible de valoir '' ou ' '.
     const m = makeModels();
     await enrichCatalogEntries({
-      ...m, candidates: [enrichCandidate({ song: { ...FULL_SONG, key: 'C ', album: ' Absolution ' } })], apply: true,
+      ...m,
+      candidates: [enrichCandidate({ song: { ...FULL_SONG, key: 'C ', album: ' Absolution ', mode: ' Major ' } })],
+      apply: true,
     });
     const values = m.CatalogSong.update.mock.calls[0][0];
     expect(values.key).toBe('C');
     expect(values.album).toBe('Absolution');
+    expect(values.mode).toBe('Major');
+  });
+
+  test('le dry-run compte le marqueur que l’écriture rendra nécessaire', async () => {
+    // Une écriture bouge forcément updatedAt, donc impose forcément un re-marquage. Ne pas
+    // le compter faisait annoncer 2 au dry-run là où --apply en faisait 75.
+    const m = makeModels();
+    const report = await enrichCatalogEntries({ ...m, candidates: [enrichCandidate()], apply: false });
+    expect(report.enriched).toBe(1);
+    expect(report.resynced).toBe(1);
+  });
+
+  test('la réparation relit l’horodatage : celui du SELECT peut avoir des minutes', async () => {
+    const frais = new Date('2026-08-11T12:00:00Z');
+    const m = makeModels(frais);                       // findByPk renvoie l'horodatage FRAIS
+    await enrichCatalogEntries({
+      ...m,
+      candidates: [enrichCandidate({
+        catalog: { ...FULL_SONG },                                  // rien à combler
+        catalogUpdatedAt: new Date('2026-08-10T09:00:00Z'),         // vu au SELECT, périmé
+        songSyncedAt: new Date('2020-01-01T00:00:00Z'),
+      })],
+      apply: true,
+    });
+    expect(m.CatalogSong.findByPk).toHaveBeenCalledWith('cat-1', { attributes: ['updatedAt'] });
+    // On pose le FRAIS, pas celui du SELECT — sinon on rapporte un succès alors que la
+    // fiche est déjà repartie devant.
+    expect(m.Song.update.mock.calls[0][0]).toEqual({ sourceCatalogSyncedAt: frais });
   });
 
   test('une fiche sans aucune chanson rattachée est ignorée, pas écrite', async () => {
@@ -1383,10 +1430,13 @@ const {
 const PUBLISHED_AT = new Date('2026-08-11T09:00:00Z');
 const FRESH_UPDATED_AT = new Date('2026-08-11T09:00:01Z');
 const publishCandidate = over => ({
-  catalogUid: 'cat-1', label: 'Muse / Hysteria', songCount: 1, hasData: true, ...over,
+  catalogUid: 'cat-1', label: 'Muse / Hysteria', songCount: 1, hasData: true, alreadyPublished: false, ...over,
 });
 const makePublishModels = (updatedAt = FRESH_UPDATED_AT, syncedRows = 1) => ({
-  CatalogSong: { update: jest.fn().mockResolvedValue([1, [{ updatedAt }]]) },
+  CatalogSong: {
+    update: jest.fn().mockResolvedValue([1, [{ updatedAt }]]),
+    findByPk: jest.fn().mockResolvedValue({ updatedAt }),
+  },
   Song: { update: jest.fn().mockResolvedValue([syncedRows]) },
 });
 
@@ -1418,17 +1468,67 @@ describe('publishCatalogEntries', () => {
   });
 
   test('LE CŒUR : la resynchronisation vise TOUTES les chansons de la fiche, pas une seule', async () => {
-    // 23.5 refusait les fiches à plusieurs chansons ; ici il n'y a rien à arbitrer, mais
-    // ne resynchroniser que la première laisserait les autres propriétaires avec la
-    // bannière « nouvelle version disponible ».
     const m = makePublishModels(FRESH_UPDATED_AT, 3);
     const report = await publishCatalogEntries({
       ...m, candidates: [publishCandidate({ songCount: 3 })], apply: true, now: PUBLISHED_AT,
     });
     const [values, options] = m.Song.update.mock.calls[0];
     expect(values).toEqual({ sourceCatalogSyncedAt: FRESH_UPDATED_AT });
+    // `sourceCatalogUid` et non `uid` : c'est ce mot-là qui couvre les 3 chansons.
     expect(options).toEqual({ where: { sourceCatalogUid: 'cat-1' }, silent: true });
     expect(report.resynced).toBe(3);
+  });
+
+  test('le compte de resynchronisés vient de la BASE, pas du songCount annoncé', async () => {
+    // Défaut de mon propre test : il affirmait resynced === 3 alors que 3 était simplement
+    // ce que le mock renvoyait — l'assertion passait même si le code ignorait tout.
+    const m = makePublishModels(FRESH_UPDATED_AT, 2);   // la base n'en a resynchronisé que 2
+    const report = await publishCatalogEntries({
+      ...m, candidates: [publishCandidate({ songCount: 5 })], apply: true, now: PUBLISHED_AT,
+    });
+    expect(report.resynced).toBe(2);
+    expect(report.desynced[0].reason).toMatch(/2\/5/);   // et le manque est signalé
+  });
+
+  test('une exception pendant la resynchronisation ⇒ désynchronisée, PAS échec', async () => {
+    // La fiche EST publiée. La compter en « échec » ferait croire que rien n'a bougé, et
+    // l'omettre de « désynchronisées » la retirerait de la seule liste qui compte.
+    const m = makePublishModels();
+    m.Song.update.mockRejectedValue(new Error('connection terminated'));
+    const report = await publishCatalogEntries({ ...m, candidates: [publishCandidate()], apply: true, now: PUBLISHED_AT });
+    expect(report.published).toBe(1);
+    expect(report.failed).toHaveLength(0);
+    expect(report.desynced[0].reason).toMatch(/fiche publiée.*resynchronisation impossible/);
+  });
+
+  test('RÉPARATION : une fiche DÉJÀ publique dont une chanson a dérivé est resynchronisée sans être republiée', async () => {
+    // Sans ça, une publication dont la resynchro échoue laissait la fiche hors de portée de
+    // toute phase, et ses détenteurs gardaient la bannière définitivement.
+    const m = makePublishModels();
+    const report = await publishCatalogEntries({
+      ...m, candidates: [publishCandidate({ alreadyPublished: true })], apply: true, now: PUBLISHED_AT,
+    });
+    expect(m.CatalogSong.update).not.toHaveBeenCalled();  // published_at n'est PAS réécrit
+    expect(m.Song.update).toHaveBeenCalledTimes(1);
+    expect(report.repaired).toBe(1);
+    expect(report.published).toBe(0);
+  });
+
+  test('le dry-run annonce combien de marqueurs seraient reposés', async () => {
+    const m = makePublishModels();
+    const report = await publishCatalogEntries({
+      ...m, candidates: [publishCandidate({ songCount: 4 })], apply: false, now: PUBLISHED_AT,
+    });
+    expect(report.resynced).toBe(4);
+  });
+
+  test('returning ignoré par le dialecte ⇒ on relit, on ne déclare pas une désynchronisation', async () => {
+    const m = makePublishModels();
+    m.CatalogSong.update.mockResolvedValue([1]);          // pas de rows
+    const report = await publishCatalogEntries({ ...m, candidates: [publishCandidate()], apply: true, now: PUBLISHED_AT });
+    expect(m.CatalogSong.findByPk).toHaveBeenCalled();
+    expect(report.desynced).toHaveLength(0);
+    expect(report.resynced).toBe(1);
   });
 
   test('l’horodatage reposé vient du returning de NOTRE écriture', async () => {
@@ -1507,7 +1607,7 @@ describe('formatPublishReport', () => {
     return lines.join('\n');
   };
   const base = {
-    candidates: 0, published: 0, resynced: 0, publishedWithoutData: [],
+    candidates: 0, published: 0, repaired: 0, resynced: 0, publishedWithoutData: [],
     raced: [], desynced: [], failed: [], applied: false,
   };
 
@@ -1523,5 +1623,66 @@ describe('formatPublishReport', () => {
       desynced: [{ catalogUid: 'c1', label: 'X / Y' }] });
     expect(out).toMatch(/DÉSYNCHRONIS/i);
     expect(out).toMatch(/c1/);
+  });
+});
+
+
+describe('publishHasDataExpr — « vide » en SQL doit dire la même chose qu’en JS', () => {
+  const { publishHasDataExpr, PUBLISH_DATA_FIELDS } = require('../scripts/seed-catalog');
+
+  test('une chaîne vide ou blanche ne compte pas comme de la donnée', () => {
+    expect(publishHasDataExpr()).toMatch(/nullif\(btrim\(c\.key\), ''\) IS NOT NULL/);
+    expect(publishHasDataExpr()).toMatch(/nullif\(btrim\(c\.mode\), ''\) IS NOT NULL/);
+  });
+
+  test('un tableau ou un objet JSON vide ne compte pas non plus', () => {
+    expect(publishHasDataExpr()).toMatch(/c\.genre::text NOT IN \('\[\]', '\{\}'\)/);
+  });
+
+  test('la liste est PROPRE à publish : une colonne à valeur par défaut ne peut pas la fausser', () => {
+    // ENRICH_FIELDS veut dire « ce qui peut voyager » ; y réintroduire pitchStandard (défaut
+    // 440) rendrait has_data toujours vrai et viderait la liste « À REMPLIR » en silence.
+    expect(PUBLISH_DATA_FIELDS).not.toContain('pitchStandard');
+    expect(publishHasDataExpr()).not.toMatch(/pitch_standard/);
+  });
+});
+
+describe('selectPublishCandidates — dédoublonnage et typage', () => {
+  const { selectPublishCandidates } = require('../scripts/seed-catalog');
+  const row = over => ({
+    catalog_uid: 'c1', catalog_title: 'Hysteria', catalog_artist: 'Muse',
+    already_published: false, song_count: '2', has_data: true, ...over,
+  });
+
+  test('une fiche à N chansons revient N fois et ne compte qu’une', async () => {
+    const sequelize = { query: jest.fn().mockResolvedValue([row(), row(), row({ catalog_uid: 'c2' })]) };
+    const out = await selectPublishCandidates(sequelize);
+    expect(out).toHaveLength(2);
+    expect(out[0]).toMatchObject({ catalogUid: 'c1', songCount: 2, hasData: true, alreadyPublished: false });
+  });
+
+  test('le bigint de Postgres arrive en chaîne et est normalisé', async () => {
+    const sequelize = { query: jest.fn().mockResolvedValue([row({ song_count: '7' })]) };
+    const [c] = await selectPublishCandidates(sequelize);
+    expect(c.songCount).toBe(7);
+    expect(typeof c.songCount).toBe('number');
+  });
+});
+
+describe('buildFillGuard — garder sur ce qu’on a VU, pas sur une idée du vide', () => {
+  const { buildFillGuard } = require('../scripts/seed-catalog');
+
+  test('une colonne vue à NULL est gardée par IS NULL', () => {
+    expect(buildFillGuard({ bpm: 186 }, { bpm: null })).toEqual({ bpm: null });
+  });
+
+  test('une colonne vue à chaîne vide est gardée sur CETTE valeur, sinon la fiche entière est perdue', () => {
+    // Le garde d'origine émettait IS NULL : une fiche à mode = '' ne matchait rien et TOUS
+    // ses champs étaient perdus, à chaque relance. 31 fiches de la base sont dans ce cas.
+    expect(buildFillGuard({ mode: 'Major' }, { mode: '' })).toEqual({ mode: { [Op.or]: [null, ''] } });
+  });
+
+  test('une colonne vue à tableau vide aussi', () => {
+    expect(buildFillGuard({ genre: ['Rock'] }, { genre: [] })).toEqual({ genre: { [Op.or]: [null, []] } });
   });
 });

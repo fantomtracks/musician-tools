@@ -873,7 +873,15 @@ const ENRICH_FIELDS = [
 // Plain strings: trimmed before being written. `createCatalogEntry` trims album on the API
 // path; skipping it here would let « C » and « C  » become two distinct facet chips, one of
 // which matches nothing.
-const ENRICH_TEXT_FIELDS = new Set(['album', 'key', 'timeSignature']);
+// Trimmed before writing. `album`, `key` and `timeSignature` have no shared normalizer, so
+// this set is what protects them — `createCatalogEntry` trims album on the API path, and an
+// untrimmed « C  » would produce a second facet chip that matches nothing.
+//
+// `mode` is listed for consistency but the entry is INERT: `normalizeMode` already trims. No
+// test can kill it, and that is stated here rather than dressed up with a test that would
+// pass either way. The review finding that flagged mode as "missing" was right about the
+// symptom; its real cause was the write guard below, which judged emptiness by assumption.
+const ENRICH_TEXT_FIELDS = new Set(['album', 'key', 'mode', 'timeSignature']);
 
 // JSONB columns with no model-level validator on either side. A legacy row can hold a bare
 // string where an array is expected; copied as-is into a shared fiche it would be skipped by
@@ -989,10 +997,17 @@ function computeFill(catalogValues, songValues) {
 // empty. Without it, `fill` is computed from a snapshot taken before the batch started, and a
 // value the curator typed mid-run would be silently overwritten — which the code comment and
 // the tests both promised would never happen.
-function buildFillGuard(fill) {
+function buildFillGuard(fill, observed) {
   const guard = {};
   for (const field of Object.keys(fill)) {
-    guard[field] = ENRICH_TEXT_FIELDS.has(field) ? { [Op.or]: [null, ''] } : null;
+    const seen = observed[field];
+    // Guard on what the SELECT actually SAW, not on a guess about what "empty" looks like.
+    // The first version emitted `IS NULL` (plus `= ''` for three text fields) while
+    // `isEmptyValue` also treats '  ', [] and {} as holes — so a fiche holding `mode = ''`
+    // produced a where that matched NOTHING, and every other column queued for that fiche
+    // was lost with it, on every re-run, reported as « remplie depuis la sélection ».
+    // Measured: this database holds 31 fiches with an empty string and 15 with an empty array.
+    guard[field] = (seen === null || seen === undefined) ? null : { [Op.or]: [null, seen] };
   }
   return guard;
 }
@@ -1039,9 +1054,20 @@ async function enrichCatalogEntries({ CatalogSong, Song, candidates, apply = fal
     // phase SELF-HEALING: a fiche written by a previous run whose re-sync failed has no holes
     // left, so the old code returned before ever reaching the re-sync and the song stayed
     // desynced for good.
-    const resyncIfNeeded = async (catalogUpdatedAt) => {
+    const resyncIfNeeded = async (catalogUpdatedAt, { repairOnly = false } = {}) => {
       if (!needsResync(catalogUpdatedAt, c.songSyncedAt)) return true;
       if (!apply) { report.resynced += 1; return true; }
+      // On the repair path the timestamp comes from the SELECT and can be minutes old on a
+      // 125-row batch; a curator saving in between would leave us stamping a stale value and
+      // reporting success. Re-read it. The write path does not need this: it uses `returning`.
+      if (repairOnly) {
+        const current = await CatalogSong.findByPk(c.catalogUid, { attributes: ['updatedAt'] });
+        if (!current || !current.updatedAt) {
+          report.desynced.push({ catalogUid: c.catalogUid, label: c.label, songUid: c.songUid, reason: 'fiche introuvable à la réparation' });
+          return false;
+        }
+        catalogUpdatedAt = current.updatedAt;
+      }
       const [synced = 0] = (await Song.update(
         { sourceCatalogSyncedAt: catalogUpdatedAt },
         { where: { uid: c.songUid, sourceCatalogUid: c.catalogUid }, silent: true }
@@ -1049,7 +1075,13 @@ async function enrichCatalogEntries({ CatalogSong, Song, candidates, apply = fal
       if (!synced) {
         // The song was deleted or detached since the SELECT — or a second song was attached
         // and this one no longer matches. Either way the marker is NOT what we think.
-        report.desynced.push({ catalogUid: c.catalogUid, label: c.label, songUid: c.songUid });
+        report.desynced.push({
+          catalogUid: c.catalogUid, label: c.label, songUid: c.songUid,
+          // « fiche écrite, marqueur pas reposé » is false on the repair path: nothing was
+          // written to the fiche there, only the repair failed. Saying otherwise sends the
+          // operator looking for a change that does not exist.
+          reason: repairOnly ? 'réparation du marqueur seule — la fiche n’a pas été modifiée' : undefined,
+        });
         return false;
       }
       report.resynced += 1;
@@ -1057,16 +1089,22 @@ async function enrichCatalogEntries({ CatalogSong, Song, candidates, apply = fal
     };
 
     try {
+      // Recorded BEFORE the early exit: when EVERY value was refused, `fill` is empty and the
+      // old code returned without ever pushing the reasons — the operator saw « source REFUSÉE
+      // (bpm) » with no way to know whether it was out of range or the wrong shape.
+      for (const d of dropped) report.dropped.push({ label: c.label, ...d });
+
       if (!fields.length) {
         classifyNoFill();
-        await resyncIfNeeded(c.catalogUpdatedAt);
+        await resyncIfNeeded(c.catalogUpdatedAt, { repairOnly: true });
         continue;
       }
 
-      for (const d of dropped) report.dropped.push({ label: c.label, ...d });
-
       if (!apply) {
         report.enriched += 1;
+        // A write is guaranteed to bump updatedAt, hence guaranteed to need a re-stamp. Not
+        // counting it made the dry-run announce 2 where --apply then did 75.
+        report.resynced += 1;
         report.fills.push({ label: c.label, fields });
         for (const f of fields) report.byField[f] = (report.byField[f] || 0) + 1;
         continue;
@@ -1076,7 +1114,7 @@ async function enrichCatalogEntries({ CatalogSong, Song, candidates, apply = fal
       // NOW", which may be a concurrent curator's write — stamping that on the song would
       // mark THEIR change as already seen. This answers "what did MY write produce".
       const [affected = 0, rows = []] = (await CatalogSong.update(fill, {
-        where: { uid: c.catalogUid, publishedAt: null, ...buildFillGuard(fill) },
+        where: { uid: c.catalogUid, publishedAt: null, ...buildFillGuard(fill, c.catalog) },
         returning: true,
       })) || [];
 
@@ -1234,15 +1272,41 @@ async function runEnrich(db, opts) {
 // (catalogcontroller.js:200) does `entry.update({ publishedAt })` and re-syncs nothing.
 // Out of scope here (AC8 forbids touching controllers); reported in deferred-work.
 
+// « Ce qui rend une fiche non vide » is NOT the same question as « ce qui peut voyager d'une
+// chanson vers une fiche ». Borrowing ENRICH_FIELDS coupled the À REMPLIR worklist to a list
+// that may grow: the day `pitchStandard` (DEFAULT 440) is added back, `IS NOT NULL` would be
+// true for every fiche and the worklist would silently empty. Hence its own constant.
+const PUBLISH_DATA_FIELDS = ['album', 'key', 'bpm', 'mode', 'timeSignature', 'durationSeconds', 'language', 'genre', 'streamingLinks'];
+const PUBLISH_TEXT = new Set(['album', 'key', 'mode', 'timeSignature']);
+const PUBLISH_JSON = new Set(['language', 'genre', 'streamingLinks']);
+
+// Mirrors isEmptyValue IN SQL. `col IS NOT NULL` counted '' and '[]' as data, so a fiche whose
+// only non-null column was `key = ''` was excluded from the worklist — exactly the shell the
+// worklist exists to name.
+const publishHasDataExpr = () => PUBLISH_DATA_FIELDS.map(f => {
+  const col = `c.${ENRICH_COLUMNS[f]}`;
+  if (PUBLISH_TEXT.has(f)) return `nullif(btrim(${col}), '') IS NOT NULL`;
+  if (PUBLISH_JSON.has(f)) return `(${col} IS NOT NULL AND ${col}::text NOT IN ('[]', '{}'))`;
+  return `${col} IS NOT NULL`;
+}).join(' OR ');
+
+// Selects drafts to publish AND already-published fiches whose songs have drifted. That second
+// half is what makes the phase REPAIRABLE: without it, a publication whose re-sync failed left
+// the fiche published, therefore invisible to every phase, and its owners kept the banner for
+// good.
 const PUBLISH_CANDIDATES_SQL = `
   SELECT c.uid    AS catalog_uid,
          c.title  AS catalog_title,
          c.artist AS catalog_artist,
+         (c.published_at IS NOT NULL) AS already_published,
          count(s.uid) OVER (PARTITION BY c.uid) AS song_count,
-         (${ENRICH_FIELDS.map(f => `c.${ENRICH_COLUMNS[f]} IS NOT NULL`).join(' OR ')}) AS has_data
+         (${publishHasDataExpr()}) AS has_data
     FROM "CatalogSongs" c
     LEFT JOIN "Songs" s ON s.source_catalog_uid = c.uid
    WHERE c.published_at IS NULL
+      OR EXISTS (SELECT 1 FROM "Songs" d
+                  WHERE d.source_catalog_uid = c.uid
+                    AND (d.source_catalog_synced_at IS NULL OR c."updatedAt" > d.source_catalog_synced_at))
    ORDER BY c.artist, c.title
 `;
 
@@ -1258,6 +1322,7 @@ async function selectPublishCandidates(sequelize) {
       label: describeSong(r.catalog_artist, r.catalog_title),
       songCount: Number(r.song_count),
       hasData: !!r.has_data,
+      alreadyPublished: !!r.already_published,
     });
   }
   return out;
@@ -1265,7 +1330,7 @@ async function selectPublishCandidates(sequelize) {
 
 async function publishCatalogEntries({ CatalogSong, Song, candidates, apply = false, now = new Date(), log = () => {} }) {
   const report = {
-    candidates: 0, published: 0, resynced: 0, publishedWithoutData: [],
+    candidates: 0, published: 0, repaired: 0, resynced: 0, publishedWithoutData: [],
     raced: [], desynced: [], failed: [], applied: !!apply,
   };
 
@@ -1278,37 +1343,72 @@ async function publishCatalogEntries({ CatalogSong, Song, candidates, apply = fa
       if (!c.hasData) report.publishedWithoutData.push({ catalogUid: c.catalogUid, label: c.label });
     };
 
-    if (!apply) { report.published += 1; noteWithoutData(); continue; }
+    if (!apply) {
+      if (!c.alreadyPublished) { report.published += 1; noteWithoutData(); }
+      else report.repaired += 1;
+      // The dry-run must be able to answer « combien de personnes vais-je re-estampiller ».
+      report.resynced += c.songCount;
+      continue;
+    }
 
+    let publishedNow = false;
+    let stamp = null;
+
+    // The publication itself. Failing here means nothing was written — an honest « échec ».
     try {
-      const [affected = 0, rows = []] = (await CatalogSong.update(
-        { publishedAt: now },
-        {
-          // Re-checks the draft state at write time: a fiche the curator published by hand
-          // since the SELECT keeps ITS date, which means something.
-          where: { uid: c.catalogUid, publishedAt: null },
-          // The timestamp OUR write produced, not whatever a concurrent writer left behind.
-          returning: true,
+      if (c.alreadyPublished) {
+        // Repair pass: the fiche is already public, only its songs drifted. Read the current
+        // timestamp; do NOT touch published_at, which would rewrite a date that means something.
+        const current = await CatalogSong.findByPk(c.catalogUid, { attributes: ['updatedAt'] });
+        if (!current || !current.updatedAt) {
+          report.failed.push({ catalogUid: c.catalogUid, label: c.label, reason: 'fiche introuvable à la réparation' });
+          continue;
         }
-      )) || [];
+        stamp = current.updatedAt;
+      } else {
+        const [affected = 0, rows = []] = (await CatalogSong.update(
+          { publishedAt: now },
+          {
+            // Re-checks the draft state at write time: a fiche the curator published by hand
+            // since the SELECT keeps ITS date, which means something.
+            where: { uid: c.catalogUid, publishedAt: null },
+            // The timestamp OUR write produced, not whatever a concurrent writer left behind.
+            returning: true,
+          }
+        )) || [];
 
-      if (!affected) { report.raced.push({ catalogUid: c.catalogUid, label: c.label }); continue; }
+        if (!affected) { report.raced.push({ catalogUid: c.catalogUid, label: c.label }); continue; }
 
-      report.published += 1;
-      noteWithoutData();
-      log(`      ✎ publiée : ${c.label}`);
+        publishedNow = true;
+        report.published += 1;
+        noteWithoutData();
+        log(`      ✎ publiée : ${c.label}`);
 
-      if (!c.songCount) continue; // nobody has it: nothing to re-sync
+        const written = rows && rows[0];
+        // Fall back to a re-read rather than declaring a desync: the write DID succeed, and a
+        // dialect that ignores `returning` would otherwise mark all 75 as desynced.
+        stamp = (written && written.updatedAt)
+          || (await CatalogSong.findByPk(c.catalogUid, { attributes: ['updatedAt'] }) || {}).updatedAt
+          || null;
+      }
+    } catch (error) {
+      report.failed.push({ catalogUid: c.catalogUid, label: c.label, reason: (error && error.message) || String(error) });
+      continue;
+    }
 
-      const written = rows && rows[0];
-      if (!written || !written.updatedAt) {
-        report.desynced.push({ catalogUid: c.catalogUid, label: c.label, reason: 'fiche publiée mais horodatage illisible' });
+    if (!c.songCount) continue; // nobody has it: nothing to re-sync
+
+    // The re-sync has its OWN guard. Folding it into the block above counted a fiche as
+    // published AND failed at the same time, while leaving it out of `desynced` — the one list
+    // that says who will see the banner.
+    try {
+      if (!stamp) {
+        report.desynced.push({ catalogUid: c.catalogUid, label: c.label, reason: 'horodatage illisible' });
         continue;
       }
-
       // ALL the songs of this fiche, in one statement — `sourceCatalogUid`, not `uid`.
       const [synced = 0] = (await Song.update(
-        { sourceCatalogSyncedAt: written.updatedAt },
+        { sourceCatalogSyncedAt: stamp },
         { where: { sourceCatalogUid: c.catalogUid }, silent: true }
       )) || [];
 
@@ -1316,9 +1416,16 @@ async function publishCatalogEntries({ CatalogSong, Song, candidates, apply = fa
         report.desynced.push({ catalogUid: c.catalogUid, label: c.label, reason: 'aucune chanson resynchronisée' });
         continue;
       }
+      if (synced < c.songCount) {
+        report.desynced.push({ catalogUid: c.catalogUid, label: c.label, reason: `${synced}/${c.songCount} chansons resynchronisées seulement` });
+      }
       report.resynced += synced;
+      if (c.alreadyPublished) { report.repaired += 1; log(`      ⟲ marqueur réparé : ${c.label}`); }
     } catch (error) {
-      report.failed.push({ catalogUid: c.catalogUid, label: c.label, reason: (error && error.message) || String(error) });
+      report.desynced.push({
+        catalogUid: c.catalogUid, label: c.label,
+        reason: `${publishedNow ? 'fiche publiée' : 'fiche déjà publique'} mais resynchronisation impossible : ${(error && error.message) || error}`,
+      });
     }
   }
   return report;
@@ -1327,9 +1434,17 @@ async function publishCatalogEntries({ CatalogSong, Song, candidates, apply = fa
 function formatPublishReport(report, { log = console.log } = {}) {
   log('');
   log(report.applied ? '=== PUBLICATION APPLIQUÉE ===' : '=== DRY-RUN — aucune écriture ===');
-  log(`  ${label('fiches brouillon')}: ${report.candidates}`);
+  // « fiches brouillon » était faux : depuis que la requête ramène aussi les fiches DÉJÀ
+  // publiques dont une chanson a dérivé, tous les candidats ne sont pas des brouillons.
+  log(`  ${label('fiches à traiter')}: ${report.candidates}`);
   log(`  ${label(report.applied ? 'publiées' : 'à publier')}: ${report.published}`);
-  if (report.resynced) log(`  ${label('marqueurs resynchro.')}: ${report.resynced}   (personne ne verra « nouvelle version disponible »)`);
+  if (report.repaired) log(`  ${label('marqueurs réparés')}: ${report.repaired}   (fiches déjà publiques dont une chanson avait dérivé)`);
+  if (report.resynced) {
+    // The reassurance only holds if nothing landed in `desynced` — printing it above the list
+    // of people who WILL see the banner would be a lie by layout.
+    const promise = report.desynced.length ? '' : '   (personne ne verra « nouvelle version disponible »)';
+    log(`  ${label(report.applied ? 'marqueurs resynchro.' : 'marqueurs à resynchro.')}: ${report.resynced}${promise}`);
+  }
 
   if (report.publishedWithoutData.length) {
     log(`  ${label('À REMPLIR')}: ${report.publishedWithoutData.length}   publiées sans aucune donnée — votre liste de travail :`);
@@ -1622,7 +1737,7 @@ module.exports = {
   ENRICH_FIELDS, ENRICH_TEXT_FIELDS, ENRICH_COLUMNS, buildFillGuard, needsResync, ENRICH_CANDIDATES_SQL, selectEnrichCandidates, computeFill,
   enrichCatalogEntries, formatEnrichReport, runEnrich,
   // Story 23.6 — publish phase
-  PUBLISH_CANDIDATES_SQL, selectPublishCandidates, publishCatalogEntries, formatPublishReport, runPublish,
+  PUBLISH_CANDIDATES_SQL, PUBLISH_DATA_FIELDS, publishHasDataExpr, selectPublishCandidates, publishCatalogEntries, formatPublishReport, runPublish,
 };
 
 if (require.main === module) {
