@@ -4,7 +4,7 @@ baseline_commit: a43b9a65811691c737a7f4e556b11a2ab84863fe
 
 # Story 23.3: Alias — rattacher les saisies divergentes et corriger l'orthographe
 
-Status: ready-for-dev
+Status: review
 
 <!-- Note: Validation is optional. Run validate-create-story for quality check before dev-story. -->
 
@@ -77,37 +77,37 @@ C'est le **contrat FR4** (`models/sessionitem.js:41-42` : *« an entry keeps its
 
 ## Tasks / Subtasks
 
-- [ ] **Task 1 — Lecture de la table d'alias** (AC: 1)
-  - [ ] `parseAliasCsv(text)` sur le modèle de `parseSeedCsv` : réutiliser `splitCsvLine` (déjà RFC4180-ish, gère `Guns N' Roses` et une virgule entre guillemets), NFC, BOM, en-tête vérifié, lignes incomplètes rapportées.
-  - [ ] Refuser un **doublon de fold d'alias** dans le fichier : deux lignes qui rattacheraient la même saisie à deux fiches différentes doivent lever, pas se résoudre premier-gagnant.
-  - [ ] ⚠️ **Un alias dont le fold égale son propre fold canonique est inutile** (la phase exacte l'a déjà pris) : le signaler comme sauté plutôt que de le traiter.
-- [ ] **Task 2 — Sélection des candidats en SQL** (AC: 2, 5)
-  - [ ] Une requête par alias, ou une requête paramétrée sur la liste — mais **le rapprochement reste en SQL**, sur l'expression de l'index (`lower(s.title)`, `coalesce(lower(s.artist),'')`), jamais un `toLowerCase()` JS comparé en mémoire.
-  - [ ] Résoudre l'entrée Catalog **canonique** (fold de `artist,title`) et récupérer son `uid` + `updatedAt`. Absente ⇒ AC5.
-  - [ ] `s.source_catalog_uid IS NULL` dans la sélection (invariant 2).
-- [ ] **Task 3 — Détection de collision de renommage** (AC: 4)
-  - [ ] Avant d'écrire : existe-t-il une **autre** Song du **même** `user_uid` dont le fold d'identité égale déjà la forme canonique ? Si oui → rattacher sans renommer, et consigner.
-  - [ ] ⚠️ **La vérification préalable ne suffit pas.** L'index est un index unique : deux exécutions concurrentes, ou une chanson créée entre-temps, peuvent lever une **23505** au moment de l'`UPDATE`. Attraper `SequelizeUniqueConstraintError`, **nommer la contrainte** (comme le fait `seedCatalog`), et retomber sur « rattacher sans renommer » plutôt que de faire échouer la ligne.
-- [ ] **Task 4 — L'écriture** (AC: 3, 4, 6)
-  - [ ] `Song.update({ sourceCatalogUid, sourceCatalogSyncedAt, title, artist }, { where: … })` — 4 champs, pas un de plus.
-  - [ ] Le `where` re-vérifie **à l'écriture** : `{ uid, sourceCatalogUid: null, title: <saisie>, artist: <saisie> }`, la discipline de 23.2. 0 ligne touchée ⇒ seau « non écrites », pas « rattachées ».
-  - [ ] Décider et **documenter** le sort de `silent` : 23.2 l'a mis parce que reposer une métadonnée n'est pas une édition. **Ici on modifie vraiment la chanson de l'utilisateur** — l'argument s'inverse. Trancher explicitement dans les Completion Notes, pas par copier-coller.
-  - [ ] Garde par ligne (`try` englobant lecture et écriture).
-- [ ] **Task 5 — Rapport** (AC: 7, 8)
-  - [ ] Avant/après par utilisateur : `AC DC / Back in black` → `AC/DC / Back in Black`.
-  - [ ] Sections distinctes : rattachées+renommées, rattachées **sans** renommage (collision), refusées (entrée canonique absente), échecs.
-  - [ ] Une ligne explicite sur `SessionItems.label` **dès qu'au moins une renommée a une session à son actif** — sinon c'est du bruit. Le cas existe en dev : `Little Lord Fentanyl (feat. Pucifer)`.
-  - [ ] Jamais d'email dans le rapport.
-- [ ] **Task 6 — Compteurs de sécurité** (AC: 9)
-  - [ ] Réutiliser `countGuardedTables` et `diffCounts` — **ne pas les réécrire**.
-- [ ] **Task 7 — Tests** (AC: 1, 3, 4, 5, 6)
-  - [ ] Étendre `backend/__tests__/seedCatalog.test.js` (modèles mockés) : en-tête d'alias refusé ; doublon de fold d'alias refusé ; l'`update` porte sur **exactement 4 champs** ; le `where` re-vérifie la saisie ; collision détectée ⇒ rattachée sans renommage ; **23505 concurrente ⇒ même repli, contrainte nommée** ; entrée canonique absente ⇒ refus avec raison ; dry-run n'écrit rien ; phase inconnue refusée.
-  - [ ] **Vérifier les nouveaux gardes par mutation**, comme en review 23.2 : casser le garde de collision doit faire échouer un test. Un test qui ne meurt pas quand on casse ce qu'il teste ne teste rien.
-  - [ ] Baseline backend à **mesurer** avant de commencer (438 au dernier relevé — le vérifier, pas le recopier).
-- [ ] **Task 8 — Validation** (AC: 10)
-  - [ ] `cd backend && npm test` + `npm run lint`. `git diff --stat` : script + test uniquement.
-  - [ ] **Exécuter réellement le dry-run** de la phase alias et lire sa sortie. ⚠️ `NODE_ENV=development` **ne se connecte pas** à la base locale (SSL en dur dans `config.js`, cf. deferred-work) : utiliser `DB_ENABLE_SSL= NODE_ENV=test`.
-  - [ ] Comparer le nombre de candidats à la mesure de cadrage : **8 en dev**, chez un seul utilisateur. Un chiffre différent doit être expliqué, pas accepté.
+- [x] **Task 1 — Lecture de la table d'alias** (AC: 1)
+  - [x] `parseAliasCsv(text)` sur le modèle de `parseSeedCsv` : réutiliser `splitCsvLine` (déjà RFC4180-ish, gère `Guns N' Roses` et une virgule entre guillemets), NFC, BOM, en-tête vérifié, lignes incomplètes rapportées.
+  - [x] Refuser un **doublon de fold d'alias** dans le fichier : deux lignes qui rattacheraient la même saisie à deux fiches différentes doivent lever, pas se résoudre premier-gagnant.
+  - [x] ⚠️ **Un alias dont le fold égale son propre fold canonique est inutile** (la phase exacte l'a déjà pris) : le signaler comme sauté plutôt que de le traiter.
+- [x] **Task 2 — Sélection des candidats en SQL** (AC: 2, 5)
+  - [x] Une requête par alias, ou une requête paramétrée sur la liste — mais **le rapprochement reste en SQL**, sur l'expression de l'index (`lower(s.title)`, `coalesce(lower(s.artist),'')`), jamais un `toLowerCase()` JS comparé en mémoire.
+  - [x] Résoudre l'entrée Catalog **canonique** (fold de `artist,title`) et récupérer son `uid` + `updatedAt`. Absente ⇒ AC5.
+  - [x] `s.source_catalog_uid IS NULL` dans la sélection (invariant 2).
+- [x] **Task 3 — Détection de collision de renommage** (AC: 4)
+  - [x] Avant d'écrire : existe-t-il une **autre** Song du **même** `user_uid` dont le fold d'identité égale déjà la forme canonique ? Si oui → rattacher sans renommer, et consigner.
+  - [x] ⚠️ **La vérification préalable ne suffit pas.** L'index est un index unique : deux exécutions concurrentes, ou une chanson créée entre-temps, peuvent lever une **23505** au moment de l'`UPDATE`. Attraper `SequelizeUniqueConstraintError`, **nommer la contrainte** (comme le fait `seedCatalog`), et retomber sur « rattacher sans renommer » plutôt que de faire échouer la ligne.
+- [x] **Task 4 — L'écriture** (AC: 3, 4, 6)
+  - [x] `Song.update({ sourceCatalogUid, sourceCatalogSyncedAt, title, artist }, { where: … })` — 4 champs, pas un de plus.
+  - [x] Le `where` re-vérifie **à l'écriture** : `{ uid, sourceCatalogUid: null, title: <saisie>, artist: <saisie> }`, la discipline de 23.2. 0 ligne touchée ⇒ seau « non écrites », pas « rattachées ».
+  - [x] Décider et **documenter** le sort de `silent` : 23.2 l'a mis parce que reposer une métadonnée n'est pas une édition. **Ici on modifie vraiment la chanson de l'utilisateur** — l'argument s'inverse. Trancher explicitement dans les Completion Notes, pas par copier-coller.
+  - [x] Garde par ligne (`try` englobant lecture et écriture).
+- [x] **Task 5 — Rapport** (AC: 7, 8)
+  - [x] Avant/après par utilisateur : `AC DC / Back in black` → `AC/DC / Back in Black`.
+  - [x] Sections distinctes : rattachées+renommées, rattachées **sans** renommage (collision), refusées (entrée canonique absente), échecs.
+  - [x] Une ligne explicite sur `SessionItems.label` **dès qu'au moins une renommée a une session à son actif** — sinon c'est du bruit. Le cas existe en dev : `Little Lord Fentanyl (feat. Pucifer)`.
+  - [x] Jamais d'email dans le rapport.
+- [x] **Task 6 — Compteurs de sécurité** (AC: 9)
+  - [x] Réutiliser `countGuardedTables` et `diffCounts` — **ne pas les réécrire**.
+- [x] **Task 7 — Tests** (AC: 1, 3, 4, 5, 6)
+  - [x] Étendre `backend/__tests__/seedCatalog.test.js` (modèles mockés) : en-tête d'alias refusé ; doublon de fold d'alias refusé ; l'`update` porte sur **exactement 4 champs** ; le `where` re-vérifie la saisie ; collision détectée ⇒ rattachée sans renommage ; **23505 concurrente ⇒ même repli, contrainte nommée** ; entrée canonique absente ⇒ refus avec raison ; dry-run n'écrit rien ; phase inconnue refusée.
+  - [x] **Vérifier les nouveaux gardes par mutation**, comme en review 23.2 : casser le garde de collision doit faire échouer un test. Un test qui ne meurt pas quand on casse ce qu'il teste ne teste rien.
+  - [x] Baseline backend à **mesurer** avant de commencer (438 au dernier relevé — le vérifier, pas le recopier).
+- [x] **Task 8 — Validation** (AC: 10)
+  - [x] `cd backend && npm test` + `npm run lint`. `git diff --stat` : script + test uniquement.
+  - [x] **Exécuter réellement le dry-run** de la phase alias et lire sa sortie. ⚠️ `NODE_ENV=development` **ne se connecte pas** à la base locale (SSL en dur dans `config.js`, cf. deferred-work) : utiliser `DB_ENABLE_SSL= NODE_ENV=test`.
+  - [x] Comparer le nombre de candidats à la mesure de cadrage : **8 en dev**, chez un seul utilisateur. Un chiffre différent doit être expliqué, pas accepté.
 
 ## Dev Notes
 
@@ -149,14 +149,78 @@ Les deux stories précédentes posaient des métadonnées. **Celle-ci réécrit 
 
 ### Agent Model Used
 
+claude-opus-5[1m] (dev-story)
+
 ### Debug Log References
+
+**Baseline backend mesurée** avant de commencer : **438 tests / 25 suites** (le chiffre annoncé dans la story, vérifié et non recopié). Après : **464 / 25** (+26).
+
+**Le dry-run réel a refusé les 8 candidats — et c'est le bon comportement.** La base de dev ne contient que 5 entrées Catalog : le seed de 23.1 n'y a jamais été appliqué. Chaque alias pointe donc vers une fiche absente, et l'AC5 s'est déclenchée pour de vrai plutôt que dans un mock :
+
+```
+Compteurs       : Songs=91  SongPlays=102  SessionItems=67  PlaylistSongs=4
+Alias           : 9 exploitables, 0 sautés
+  candidats       : 8
+  à renommer      : 0
+  REFUSÉES        : 8
+      ✗ song 55ef6b30… : entrée canonique absente du Catalog (AC/DC / Back in Black)
+      …
+```
+
+Code de sortie : **1**. Un refus n'est pas un skip — il veut dire qu'un alias pointe dans le vide et que quelqu'un doit décider.
+
+**Le chemin de renommage a donc été exercé séparément**, en insérant les 82 entrées du seed dans une **transaction annulée** et en rejouant la requête exacte du script contre Postgres :
+
+```
+avant                                         | apres                                          | fiche | collisions | sessions
+AC DC / Back in black                         | AC/DC / Back in Black                          | t     |     0      |    0
+System of a Down / Chop suey !                | System of a Down / Chop Suey!                  | t     |     0      |    0
+Beatles / Come together                       | The Beatles / Come Together                    | t     |     0      |    0
+Alan Parson Project / Eye in the sky          | The Alan Parsons Project / Eye in the Sky      | t     |     0      |    0
+AC DC / Highway to hell                       | AC/DC / Highway to Hell                        | t     |     0      |    0
+Beatles / I want you (she's so heavy)         | The Beatles / I Want You (She's So Heavy)      | t     |     0      |    0
+Primus / Little Lord Fentanyl (feat. Pucifer) | Primus / Little Lord Fentanyl (feat. Puscifer) | t     |     0      |    1
+Guns n roses / My Michelle                    | Guns N' Roses / My Michelle                    | t     |     0      |    0
+```
+
+Les 8 fiches canoniques sont trouvées, **zéro collision**, et `Little Lord Fentanyl` porte bien **1 SessionItem** — donc la note FR4 se déclenchera à l'exécution réelle, ce qui était l'objet de l'AC8. État de la base avant et après : `5 | 91 | 6` dans les deux cas.
+
+**Les 6 gardes de cette story sont vérifiés par mutation** (Task 7), pas seulement couverts :
+
+| mutation | tests qui meurent |
+|---|---|
+| le garde de collision ne bloque plus le renommage | 2 |
+| la 23505 ne retombe plus sur le rattachement seul | 2 |
+| une entrée canonique absente n'est plus refusée | 1 |
+| le `where` ne re-vérifie plus la saisie | 1 |
+| un alias contradictoire est résolu premier-gagnant | 1 |
+| le renommage devient silencieux | 1 |
 
 ### Completion Notes List
 
+- **La décision laissée ouverte par la story est tranchée, et dans l'autre sens que 23.2.** Le renommage **ne** passe **pas** `silent`. En 23.2 on reposait une métadonnée de provenance et masquer `updatedAt` était honnête ; ici la chanson de l'utilisateur change vraiment, et geler `updatedAt` ferait mentir la ligne sur sa propre histoire. En revanche le chemin « rattacher **sans** renommer » (collision) reste `silent`, parce que lui n'écrit que la provenance. Un test verrouille les deux sens, et la mutation le confirme.
+- **La collision est détectée en SQL et rattrapée à l'écriture.** Le pré-contrôle compte, sur le **même** utilisateur et en excluant la chanson elle-même, les lignes dont le fold égale déjà la forme canonique. Ça ne suffit pas : `songs_user_uid_title_artist_ci` est un index unique, et une chanson créée entre le SELECT et l'UPDATE lèverait une 23505. Le `catch` retombe alors sur « rattacher sans renommer » en **nommant la contrainte**, au lieu de faire échouer la ligne. Zéro collision en dev — la garde existe pour la prod, qui est inconnue d'ici.
+- **Un alias qui se contredit fait lever, il n'est pas arbitré.** Deux lignes envoyant la même saisie vers deux fiches différentes ⇒ `SeedFileError`. Deux lignes **strictement identiques** ⇒ simple doublon sauté : c'est de la redondance, pas une contradiction. La distinction est testée.
+- **Un alias dont le fold égale déjà sa forme canonique est sauté** : la phase exacte de 23.2 l'a forcément pris, et le « renommer » vers l'orthographe qu'il a déjà n'aurait aucun sens. Aucun cas dans le fichier actuel (vérifié au cadrage), mais le fichier vivra.
+- **La table d'alias voyage en paramètres liés**, pas interpolée : ces chaînes viennent d'un fichier et l'une d'elles contient légitimement une apostrophe (`Guns N' Roses`). Le premier tuple est casté en `::text` — sans ça Postgres refuse d'inférer le type des paramètres dans un `VALUES`.
+- **`LEFT JOIN` sur `CatalogSongs`, pas `JOIN`** : une fiche canonique absente doit **remonter** pour être refusée et nommée. Avec un `JOIN`, elle disparaîtrait de la liste des candidats et le rapport dirait « rien à faire » — le cas s'est produit pour de vrai sur la base de dev, et c'est cette ligne qui l'a rendu visible.
+- **La note FR4 n'apparaît que si elle s'applique.** `SessionItems.label` est un instantané volontaire : après correction, l'historique gardera « Pucifer ». Le rapport le dit **uniquement** quand au moins une renommée a un historique — un avertissement inconditionnel est du bruit, et le bruit est ce qui rend les vrais avertissements invisibles. Un test verrouille les deux branches.
+- **Un refus met le code de sortie à 1**, au même titre qu'un échec. C'est délibéré : « l'alias pointe vers une fiche qui n'existe pas » demande une décision humaine, pas un haussement d'épaules.
+- **Ordre des phases documenté dans l'en-tête du script** : seed → attach → alias. Si la phase alias tournait avant l'exact-fold, une chanson que le fold exact aurait prise pourrait être renommée par un alias dont elle n'avait pas besoin.
+- **`--file` est désormais refusé pour toute phase autre que `seed`**, avec un message propre à la phase — la phase alias lit bien un CSV, mais un CSV versionné et fixe, pas celui qu'on lui passerait.
+- **Non couvert par les tests unitaires, et assumé** : que le fold SQL coïncide avec `songs_user_uid_title_artist_ci`. C'est du Postgres ; la répétition en transaction annulée ci-dessus en donne la preuve empirique, la validation formelle reste l'objet de 23.4.
+
 ### File List
+
+- `backend/scripts/seed-catalog.js` — MODIFIÉ (phase alias : lecture de la table, SQL de rapprochement + sondes de collision et d'historique, écriture, rapport avant/après)
+- `backend/__tests__/seedCatalog.test.js` — MODIFIÉ (+26 tests)
+- `_bmad-output/implementation-artifacts/sprint-status.yaml` — MODIFIÉ (suivi)
+
+Inchangé et volontairement non régénéré : `backend/scripts/seed/catalog-seed-aliases.csv`. Aucun modèle, migration, contrôleur, route ni front (AC10, vérifié par `git diff --name-only`).
 
 ## Change Log
 
 | Date | Version | Description | Author |
 |------|---------|-------------|--------|
 | 2026-08-10 | 0.1 | Story créée (create-story). Troisième phase du même script. Seule story de l'epic qui réécrit `title`/`artist` d'un utilisateur, donc invariant 1 levé pour les 9 lignes nommées uniquement. Table d'alias vérifiée avant rédaction : 9 cibles présentes, 0 alias mort, 0 collision entre alias, tout en NFC ; 8 des 9 matchent en dev, chez un seul utilisateur, avec 0 collision de renommage. Le cas `Little Lord Fentanyl (feat. Pucifer)` (1 SongPlay, 1 SessionItem) rend concret le snapshot FR4 de `SessionItems.label`. | northwood |
+| 2026-08-10 | 0.2 | Phase alias implémentée. Rapprochement, détection de collision et comptage d'historique en SQL, table d'alias en paramètres liés. Renommage NON silencieux (décision inverse de 23.2, argumentée) ; collision ⇒ rattachement sans renommage, y compris en repli d'une 23505 concurrente ; fiche canonique absente ⇒ refus et code de sortie 1. Backend 438 → 464. Les 6 gardes vérifiés par mutation. Dry-run réel exécuté : les 8 candidats refusés faute de Catalog seedé en local — comportement attendu, AC5 validée sur du réel ; chemin de renommage exercé à part en transaction annulée (8 fiches trouvées, 0 collision, 1 SessionItem qui déclenchera la note FR4). | northwood |

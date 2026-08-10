@@ -600,3 +600,254 @@ describe('runAttach — un écart de compteur fait échouer le lot, il ne se con
     expect(logs.join('\n')).toMatch(/connection terminated/);
   });
 });
+
+// --- Story 23.3 — alias phase ------------------------------------------------
+//
+// C'est la SEULE phase qui réécrit le title/artist d'un utilisateur. Les tests
+// pèsent donc surtout sur ce qu'elle refuse de faire : ne pas renommer quand ça
+// collisionnerait avec une autre chanson du même user, ne pas inventer d'entrée
+// Catalog manquante, ne rien écrire au-delà des 4 champs annoncés.
+const {
+  parseAliasCsv, buildAliasCandidatesSql, selectAliasCandidates,
+  attachAliasSongs, formatAliasReport, runAlias,
+} = require('../scripts/seed-catalog');
+
+const ALIAS_HEADER = 'aliasArtist,aliasTitle,artist,title\n';
+const aliasCandidate = over => ({
+  songUid: 'song-1', userUid: 'user-a',
+  songTitle: 'Back in black', songArtist: 'AC DC',
+  canonTitle: 'Back in Black', canonArtist: 'AC/DC',
+  catalogUid: 'cat-1', catalogUpdatedAt: new Date('2026-08-01T10:00:00Z'),
+  collisionCount: 0, sessionItemCount: 0, ...over,
+});
+
+describe('parseAliasCsv', () => {
+  test('lit les 4 colonnes et rend la saisie et la forme canonique', () => {
+    const { rows, skipped } = parseAliasCsv(ALIAS_HEADER + 'AC DC,Back in black,AC/DC,Back in Black\n');
+    expect(rows).toEqual([{
+      aliasArtist: 'AC DC', aliasTitle: 'Back in black', artist: 'AC/DC', title: 'Back in Black',
+    }]);
+    expect(skipped).toHaveLength(0);
+  });
+
+  test('un en-tête inattendu est refusé, jamais deviné', () => {
+    expect(() => parseAliasCsv('artist,title\nMuse,Hysteria\n')).toThrow(/[Ee]n-tête/);
+  });
+
+  test('un alias dont le fold égale déjà sa forme canonique est sauté : la phase exacte l’a pris', () => {
+    const { rows, skipped } = parseAliasCsv(ALIAS_HEADER + 'Muse,hysteria,Muse,Hysteria\n');
+    expect(rows).toHaveLength(0);
+    expect(skipped[0].reason).toMatch(/identique à la forme canonique/);
+  });
+
+  test('deux lignes qui enverraient la MÊME saisie vers deux fiches différentes lèvent', () => {
+    const text = ALIAS_HEADER
+      + 'Beatles,Come together,The Beatles,Come Together\n'
+      + 'Beatles,Come together,The Fab Four,Come Together\n';
+    expect(() => parseAliasCsv(text)).toThrow(/conflit/i);
+  });
+
+  test('une ligne strictement identique répétée est sautée, pas fatale', () => {
+    const line = 'AC DC,Back in black,AC/DC,Back in Black\n';
+    const { rows, skipped } = parseAliasCsv(ALIAS_HEADER + line + line);
+    expect(rows).toHaveLength(1);
+    expect(skipped[0].reason).toMatch(/doublon/);
+  });
+
+  test('une ligne incomplète est sautée avec sa raison', () => {
+    const { rows, skipped } = parseAliasCsv(ALIAS_HEADER + 'AC DC,,AC/DC,Back in Black\n');
+    expect(rows).toHaveLength(0);
+    expect(skipped[0].reason).toMatch(/incomplète/);
+  });
+
+  test('le vrai fichier versionné est lisible et donne 9 alias exploitables', () => {
+    const fs = require('node:fs');
+    const path = require('node:path');
+    const text = fs.readFileSync(path.join(__dirname, '..', 'scripts', 'seed', 'catalog-seed-aliases.csv'), 'utf8');
+    const { rows, skipped } = parseAliasCsv(text);
+    expect(rows).toHaveLength(9);
+    expect(skipped).toHaveLength(0);
+  });
+});
+
+describe('buildAliasCandidatesSql — le rapprochement ET la détection de collision sont en SQL', () => {
+  const sql = () => buildAliasCandidatesSql(2);
+
+  test('il ne sélectionne que les Songs sans source', () => {
+    expect(sql()).toMatch(/s\.source_catalog_uid IS NULL/);
+  });
+
+  test('il joint la saisie sur le fold d’identité, accents conservés', () => {
+    expect(sql()).toMatch(/lower\(s\.title\)\s*=\s*lower\(a\.alias_title\)/);
+    expect(sql()).not.toMatch(/unaccent/i);
+  });
+
+  test('l’entrée canonique est jointe en LEFT JOIN : absente, la ligne remonte quand même pour être refusée', () => {
+    expect(sql()).toMatch(/LEFT JOIN "CatalogSongs"/);
+  });
+
+  test('la collision est comptée sur le MÊME utilisateur et en excluant la chanson elle-même', () => {
+    expect(sql()).toMatch(/o\.user_uid\s*=\s*s\.user_uid/);
+    expect(sql()).toMatch(/o\.uid\s*<>\s*s\.uid/);
+  });
+
+  test('un tuple de bind par alias, typé pour que Postgres ne se plaigne pas du type des paramètres', () => {
+    expect(buildAliasCandidatesSql(1)).toMatch(/\$1::text/);
+    expect(sql()).toMatch(/\$5/);        // 2 alias × 4 colonnes
+    expect(sql()).not.toMatch(/\$9/);
+  });
+
+  test('selectAliasCandidates passe les binds à plat et normalise les compteurs bigint', async () => {
+    const sequelize = {
+      query: jest.fn().mockResolvedValue([{
+        song_uid: 's1', user_uid: 'u1', song_title: 'Back in black', song_artist: 'AC DC',
+        canon_title: 'Back in Black', canon_artist: 'AC/DC', catalog_uid: 'c1',
+        catalog_updated_at: '2026-08-01T10:00:00.000Z', collision_count: '0', session_item_count: '2',
+      }]),
+    };
+    const rows = await selectAliasCandidates(sequelize, [
+      { aliasArtist: 'AC DC', aliasTitle: 'Back in black', artist: 'AC/DC', title: 'Back in Black' },
+    ]);
+    expect(sequelize.query.mock.calls[0][1].bind).toEqual(['Back in black', 'AC DC', 'Back in Black', 'AC/DC']);
+    expect(rows[0]).toMatchObject({ songUid: 's1', collisionCount: 0, sessionItemCount: 2, catalogUid: 'c1' });
+  });
+
+  test('aucun alias exploitable ⇒ aucune requête lancée', async () => {
+    const sequelize = { query: jest.fn() };
+    await expect(selectAliasCandidates(sequelize, [])).resolves.toEqual([]);
+    expect(sequelize.query).not.toHaveBeenCalled();
+  });
+});
+
+describe('attachAliasSongs — corriger l’orthographe sans jamais écraser', () => {
+  const makeSong = () => ({ update: jest.fn().mockResolvedValue([1]) });
+
+  test('le dry-run n’écrit rien', async () => {
+    const Song = makeSong();
+    const report = await attachAliasSongs({ Song, candidates: [aliasCandidate()], apply: false });
+    expect(Song.update).not.toHaveBeenCalled();
+    expect(report.renamed).toBe(1);
+  });
+
+  test('la renommée écrit EXACTEMENT 4 champs : les 2 de provenance + title + artist', async () => {
+    const Song = makeSong();
+    await attachAliasSongs({ Song, candidates: [aliasCandidate()], apply: true });
+    const [values] = Song.update.mock.calls[0];
+    expect(Object.keys(values).sort()).toEqual(['artist', 'sourceCatalogSyncedAt', 'sourceCatalogUid', 'title']);
+    expect(values).toMatchObject({ title: 'Back in Black', artist: 'AC/DC' });
+  });
+
+  test('le where re-vérifie la SAISIE, pas la forme canonique : sinon on renomme une chanson déjà modifiée', async () => {
+    const Song = makeSong();
+    await attachAliasSongs({ Song, candidates: [aliasCandidate()], apply: true });
+    expect(Song.update.mock.calls[0][1].where).toEqual({
+      uid: 'song-1', sourceCatalogUid: null, title: 'Back in black', artist: 'AC DC',
+    });
+  });
+
+  test('une renommée qui collisionnerait rattache SANS renommer, et le signale', async () => {
+    const Song = makeSong();
+    const report = await attachAliasSongs({
+      Song, candidates: [aliasCandidate({ collisionCount: 1 })], apply: true,
+    });
+    const [values] = Song.update.mock.calls[0];
+    expect(Object.keys(values).sort()).toEqual(['sourceCatalogSyncedAt', 'sourceCatalogUid']); // pas de rename
+    expect(report.renamed).toBe(0);
+    expect(report.attachedOnly).toHaveLength(1);
+    expect(report.attachedOnly[0]).toMatchObject({ songUid: 'song-1', reason: expect.stringMatching(/collision/i) });
+  });
+
+  test('une 23505 concurrente retombe sur « rattacher sans renommer », en nommant la contrainte', async () => {
+    // Le pré-contrôle disait 0 collision, mais la chanson a été créée entre-temps.
+    const conflict = Object.assign(new Error('dup'), {
+      name: 'SequelizeUniqueConstraintError',
+      parent: { constraint: 'songs_user_uid_title_artist_ci' },
+    });
+    const Song = { update: jest.fn().mockRejectedValueOnce(conflict).mockResolvedValueOnce([1]) };
+    const report = await attachAliasSongs({ Song, candidates: [aliasCandidate()], apply: true });
+    expect(Song.update).toHaveBeenCalledTimes(2);
+    expect(Object.keys(Song.update.mock.calls[1][0]).sort()).toEqual(['sourceCatalogSyncedAt', 'sourceCatalogUid']);
+    expect(report.renamed).toBe(0);
+    expect(report.attachedOnly[0].reason).toMatch(/songs_user_uid_title_artist_ci/);
+  });
+
+  test('une entrée canonique absente du Catalog est REFUSÉE, jamais créée à la volée', async () => {
+    const Song = makeSong();
+    const report = await attachAliasSongs({
+      Song, candidates: [aliasCandidate({ catalogUid: null, catalogUpdatedAt: null })], apply: true,
+    });
+    expect(Song.update).not.toHaveBeenCalled();
+    expect(report.refused[0].reason).toMatch(/absente du Catalog/);
+  });
+
+  test('idempotence : plus aucun candidat au second passage', async () => {
+    const Song = makeSong();
+    const report = await attachAliasSongs({ Song, candidates: [], apply: true });
+    expect(Song.update).not.toHaveBeenCalled();
+    expect(report.renamed).toBe(0);
+    expect(report.candidates).toBe(0);
+  });
+
+  test('une erreur en cours de lot ne jette pas le rapport des lignes déjà écrites', async () => {
+    const Song = { update: jest.fn().mockResolvedValueOnce([1]).mockRejectedValueOnce(new Error('connection terminated')) };
+    const report = await attachAliasSongs({
+      Song,
+      candidates: [aliasCandidate({ songUid: 's1' }), aliasCandidate({ songUid: 's2' })],
+      apply: true,
+    });
+    expect(report.renamed).toBe(1);
+    expect(report.failed[0].reason).toMatch(/connection terminated/);
+  });
+
+  test('renommer BUMPE updatedAt, poser la seule provenance ne le bumpe pas', async () => {
+    // 23.2 utilisait silent parce qu’on ne posait qu’une métadonnée. Ici la chanson de
+    // l’utilisateur change vraiment : masquer updatedAt serait un mensonge sur la ligne.
+    const Song = makeSong();
+    await attachAliasSongs({ Song, candidates: [aliasCandidate()], apply: true });
+    expect(Song.update.mock.calls[0][1].silent).toBeUndefined();
+
+    const Song2 = makeSong();
+    await attachAliasSongs({ Song: Song2, candidates: [aliasCandidate({ collisionCount: 1 })], apply: true });
+    expect(Song2.update.mock.calls[0][1].silent).toBe(true);
+  });
+});
+
+describe('formatAliasReport — l’avant/après que northwood lit avant d’autoriser la prod', () => {
+  const capture = report => {
+    const lines = [];
+    formatAliasReport(report, { log: l => lines.push(l) });
+    return lines.join('\n');
+  };
+  const base = {
+    candidates: 0, renamed: 0, attachedOnly: [], refused: [], failed: [],
+    renames: [], sessionItemsAffected: 0, applied: false,
+  };
+
+  test('chaque renommée est affichée avant → après, groupée par utilisateur', () => {
+    const out = capture({
+      ...base, candidates: 1, renamed: 1,
+      renames: [{ userUid: 'user-a', before: 'AC DC / Back in black', after: 'AC/DC / Back in Black' }],
+    });
+    expect(out).toMatch(/user-a/);
+    expect(out).toMatch(/AC DC \/ Back in black.*→.*AC\/DC \/ Back in Black/);
+  });
+
+  test('le snapshot FR4 est signalé UNIQUEMENT si une renommée a un historique de session', () => {
+    const withHistory = capture({ ...base, candidates: 1, renamed: 1, sessionItemsAffected: 3 });
+    expect(withHistory).toMatch(/SessionItems|historique des sessions/i);
+    expect(withHistory).toMatch(/3/);
+
+    const withoutHistory = capture({ ...base, candidates: 1, renamed: 1, sessionItemsAffected: 0 });
+    expect(withoutHistory).not.toMatch(/historique des sessions/i);
+  });
+
+  test('un refus et une collision ne se lisent jamais comme un succès', () => {
+    const out = capture({
+      ...base, candidates: 2, applied: true,
+      attachedOnly: [{ songUid: 's1', userUid: 'u1', reason: 'collision avec une autre chanson du même utilisateur' }],
+      refused: [{ songUid: 's2', userUid: 'u1', reason: 'entrée canonique absente du Catalog' }],
+    });
+    expect(out).toMatch(/collision/i);
+    expect(out).toMatch(/absente du Catalog/);
+  });
+});

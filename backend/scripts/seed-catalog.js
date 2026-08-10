@@ -13,6 +13,11 @@
 //   NODE_ENV=development node scripts/seed-catalog.js --file=seed/other.csv
 //   NODE_ENV=development node scripts/seed-catalog.js --phase=attach     # dry-run of the attach
 //   NODE_ENV=development node scripts/seed-catalog.js --phase=attach --apply
+//   NODE_ENV=development node scripts/seed-catalog.js --phase=alias      # dry-run of the alias pass
+//   NODE_ENV=development node scripts/seed-catalog.js --phase=alias --apply
+//
+// Phase order matters: seed → attach → alias. The alias pass must run AFTER the exact-fold
+// attach, so a song the exact match would have taken is never renamed by an alias.
 //
 // The two phases share the host guard, the dry-run default and the argument parsing on
 // purpose — the attach phase needs them MORE than the seed phase did, because it writes
@@ -42,7 +47,7 @@ const { fn, col, where: whereFn, Op, QueryTypes } = require('sequelize');
 
 const DEFAULT_FILE = path.join(__dirname, 'seed', 'catalog-seed.csv');
 const KNOWN_FLAGS = ['--apply', '--allow-remote'];
-const PHASES = ['seed', 'attach'];
+const PHASES = ['seed', 'attach', 'alias'];
 // Captured at MODULE LOAD, before anything can require config.js and let dotenv
 // rewrite it. Informational only — the guard below trusts the host, not this.
 const NODE_ENV_AT_STARTUP = process.env.NODE_ENV;
@@ -415,6 +420,342 @@ function formatAttachReport(report, { log = console.log } = {}) {
   log('');
 }
 
+// --- Alias (story 23.3) ------------------------------------------------------
+//
+// The ONLY phase that rewrites what a user typed. Decision F: cleaning the seed CSV fixed
+// the Catalog's spelling, which broke the exact-fold match for the 9 entries whose typo
+// was corrected. northwood: « je ne veux pas que les utilisateurs payent ». So the original
+// spelling becomes an alias, and the user's row is corrected to the canonical form.
+//
+// It runs AFTER the exact-fold phase on purpose: a song the exact phase would have taken
+// must not be renamed by an alias it did not need.
+
+const ALIAS_FILE = path.join(__dirname, 'seed', 'catalog-seed-aliases.csv');
+
+function parseAliasCsv(text) {
+  const rows = [];
+  const skipped = [];
+  const seen = new Map(); // alias fold -> canonical fold, to catch a file that contradicts itself
+
+  const clean = String(text).replace(/^﻿/, '').normalize('NFC');
+  const lines = clean.split(/\r?\n/);
+
+  let headerSeen = false;
+  for (const raw of lines) {
+    if (!raw.trim()) continue;
+
+    const fields = splitCsvLine(raw);
+    if (fields === null) {
+      throw new SeedFileError(`Guillemet non fermé — champ multi-ligne non supporté : ${raw.slice(0, 80)}`);
+    }
+
+    if (!headerSeen) {
+      headerSeen = true;
+      const [c1 = '', c2 = '', c3 = '', c4 = ''] = fields.map(f => f.toLowerCase());
+      if (c1 !== 'aliasartist' || c2 !== 'aliastitle' || c3 !== 'artist' || c4 !== 'title') {
+        // Same refusal as parseSeedCsv: guessing the column order here would rename users'
+        // songs towards the wrong string.
+        throw new SeedFileError(`En-tête attendu « aliasArtist,aliasTitle,artist,title », lu « ${fields.join(',')} »`);
+      }
+      continue;
+    }
+
+    const [aliasArtistRaw = '', aliasTitleRaw = '', artistRaw = '', titleRaw = ''] = fields;
+    const aliasTitle = aliasTitleRaw.trim();
+    const aliasArtist = aliasArtistRaw.trim();
+    const title = titleRaw.trim();
+    const artist = artistRaw.trim();
+
+    if (!aliasTitle || !title) {
+      skipped.push({ aliasArtist, aliasTitle, reason: 'ligne vide ou incomplète' });
+      continue;
+    }
+
+    const aliasKey = identityKey(aliasTitle, aliasArtist);
+    const canonKey = identityKey(title, artist);
+
+    if (aliasKey === canonKey) {
+      // The exact-fold phase already matched this one; treating it as an alias would mean
+      // "renaming" a song to the spelling it already has.
+      skipped.push({ aliasArtist, aliasTitle, reason: 'alias identique à la forme canonique' });
+      continue;
+    }
+
+    if (seen.has(aliasKey)) {
+      if (seen.get(aliasKey) !== canonKey) {
+        // Two rows sending the SAME typed spelling to two different Catalog entries. There
+        // is no defensible way to pick one, and picking silently would rename a user's song
+        // towards a fiche nobody chose.
+        throw new SeedFileError(`Conflit dans la table d'alias : « ${aliasArtist} / ${aliasTitle} » pointe vers deux fiches différentes`);
+      }
+      skipped.push({ aliasArtist, aliasTitle, reason: 'doublon interne au fichier' });
+      continue;
+    }
+    seen.set(aliasKey, canonKey);
+
+    rows.push({ aliasArtist, aliasTitle, artist, title });
+  }
+
+  if (!headerSeen) throw new SeedFileError('Fichier vide : aucun en-tête trouvé');
+  return { rows, skipped };
+}
+
+// The alias table travels as bind parameters rather than being interpolated: these strings
+// come from a file, and one of them legitimately contains a quote (Guns N' Roses).
+//
+// The collision probe is the load-bearing part. `songs_user_uid_title_artist_ci` makes
+// identity unique PER USER, so renaming « AC DC / Back in black » can collide with a
+// « AC/DC / Back in Black » the same user already owns. Counting it in SQL — same user,
+// excluding the row itself, on the index expression — is the only honest way to know
+// before writing. It is still not sufficient: see the 23505 fallback below.
+//
+// LEFT JOIN on CatalogSongs, not JOIN: a missing canonical entry must come back so it can
+// be REFUSED and reported, not silently vanish from the candidate list.
+function buildAliasCandidatesSql(count) {
+  const tuples = Array.from({ length: count }, (_, i) => {
+    const b = i * 4;
+    // Postgres cannot infer a bind parameter's type inside VALUES; casting the first tuple
+    // is enough to type the whole column.
+    const cast = i === 0 ? '::text' : '';
+    return `($${b + 1}${cast}, $${b + 2}${cast}, $${b + 3}${cast}, $${b + 4}${cast})`;
+  }).join(', ');
+
+  return `
+  WITH alias(alias_title, alias_artist, canon_title, canon_artist) AS (VALUES ${tuples})
+  SELECT s.uid          AS song_uid,
+         s.user_uid     AS user_uid,
+         s.title        AS song_title,
+         s.artist       AS song_artist,
+         a.canon_title  AS canon_title,
+         a.canon_artist AS canon_artist,
+         c.uid          AS catalog_uid,
+         c."updatedAt"  AS catalog_updated_at,
+         (SELECT count(*) FROM "Songs" o
+           WHERE o.user_uid = s.user_uid
+             AND o.uid <> s.uid
+             AND lower(o.title) = lower(a.canon_title)
+             AND coalesce(lower(o.artist), '') = coalesce(lower(a.canon_artist), '')) AS collision_count,
+         (SELECT count(*) FROM "SessionItems" i WHERE i.song_uid = s.uid)             AS session_item_count
+    FROM "Songs" s
+    JOIN alias a
+      ON lower(s.title) = lower(a.alias_title)
+     AND coalesce(lower(s.artist), '') = coalesce(lower(a.alias_artist), '')
+    LEFT JOIN "CatalogSongs" c
+      ON lower(c.title) = lower(a.canon_title)
+     AND coalesce(lower(c.artist), '') = coalesce(lower(a.canon_artist), '')
+   WHERE s.source_catalog_uid IS NULL
+   ORDER BY s.user_uid, s.title
+`;
+}
+
+async function selectAliasCandidates(sequelize, aliasRows) {
+  if (!aliasRows.length) return []; // an empty VALUES list is a syntax error, not an empty result
+  const bind = [];
+  for (const r of aliasRows) bind.push(r.aliasTitle, r.aliasArtist, r.title, r.artist);
+
+  const rows = await sequelize.query(buildAliasCandidatesSql(aliasRows.length), { type: QueryTypes.SELECT, bind });
+  return rows.map(r => ({
+    songUid: r.song_uid,
+    userUid: r.user_uid,
+    songTitle: r.song_title,
+    songArtist: r.song_artist,
+    canonTitle: r.canon_title,
+    canonArtist: r.canon_artist,
+    catalogUid: r.catalog_uid,
+    catalogUpdatedAt: r.catalog_updated_at,
+    collisionCount: Number(r.collision_count),   // bigint arrives as a string
+    sessionItemCount: Number(r.session_item_count),
+  }));
+}
+
+const describeSong = (artist, title) => `${artist || '—'} / ${title}`;
+
+async function attachAliasSongs({ Song, candidates, apply = false }) {
+  const report = {
+    candidates: 0, renamed: 0, attachedOnly: [], refused: [], failed: [], raced: [],
+    renames: [], sessionItemsAffected: 0, applied: !!apply,
+  };
+  const seen = new Set();
+
+  for (const c of candidates) {
+    if (seen.has(c.songUid)) continue;
+    seen.add(c.songUid);
+    report.candidates += 1;
+
+    // The alias points at an entry that is not in the Catalog: the seed phase has not run,
+    // or the curator deleted the fiche. Creating it here would be the seed phase's job done
+    // badly, in the wrong place, from a file that only carries a spelling.
+    if (!c.catalogUid) {
+      report.refused.push({
+        songUid: c.songUid, userUid: c.userUid,
+        reason: `entrée canonique absente du Catalog (${describeSong(c.canonArtist, c.canonTitle)})`,
+      });
+      continue;
+    }
+
+    const provenance = { sourceCatalogUid: c.catalogUid, sourceCatalogSyncedAt: c.catalogUpdatedAt };
+    // The where re-checks the TYPED spelling, not the canonical one: if the user edited the
+    // song since the SELECT, it is no longer the row we decided about.
+    const where = { uid: c.songUid, sourceCatalogUid: null, title: c.songTitle, artist: c.songArtist };
+
+    const tallyRename = () => {
+      report.renamed += 1;
+      report.renames.push({
+        userUid: c.userUid,
+        before: describeSong(c.songArtist, c.songTitle),
+        after: describeSong(c.canonArtist, c.canonTitle),
+      });
+      report.sessionItemsAffected += c.sessionItemCount || 0;
+    };
+
+    // Attach without touching the spelling. `silent` here for the same reason as 23.2: this
+    // path writes provenance only, which is metadata about the row, not an edit of it.
+    const attachWithoutRenaming = async reason => {
+      const [affected = 0] = (await Song.update(provenance, { where, silent: true })) || [];
+      if (!affected) { report.raced.push({ songUid: c.songUid, userUid: c.userUid }); return; }
+      report.attachedOnly.push({ songUid: c.songUid, userUid: c.userUid, reason });
+    };
+
+    if (!apply) {
+      if (c.collisionCount > 0) {
+        report.attachedOnly.push({
+          songUid: c.songUid, userUid: c.userUid,
+          reason: 'collision avec une autre chanson du même utilisateur',
+        });
+      } else tallyRename();
+      continue;
+    }
+
+    try {
+      if (c.collisionCount > 0) {
+        await attachWithoutRenaming('collision avec une autre chanson du même utilisateur');
+        continue;
+      }
+
+      const [affected = 0] = (await Song.update(
+        { ...provenance, title: c.canonTitle, artist: c.canonArtist || null },
+        // Deliberately NOT silent, unlike 23.2 and unlike the branch above: there we posted
+        // a provenance marker, here the user's song genuinely changes. Freezing updatedAt
+        // would make the row claim it had not been modified when it had.
+        { where }
+      )) || [];
+
+      if (!affected) { report.raced.push({ songUid: c.songUid, userUid: c.userUid }); continue; }
+      tallyRename();
+    } catch (error) {
+      if (error && error.name === 'SequelizeUniqueConstraintError') {
+        // The pre-check said no collision, but the index disagreed: a concurrent run, or a
+        // song the user created in between. The index is the authority. Fall back to the
+        // link alone rather than failing the row — and NAME the constraint instead of
+        // assuming which one fired.
+        const constraint = (error.parent && error.parent.constraint) || error.constraint || 'contrainte inconnue';
+        try {
+          await attachWithoutRenaming(`collision détectée à l'écriture (${constraint})`);
+        } catch (fallbackError) {
+          report.failed.push({
+            songUid: c.songUid, userUid: c.userUid,
+            reason: `repli après conflit impossible : ${(fallbackError && fallbackError.message) || fallbackError}`,
+          });
+        }
+        continue;
+      }
+      report.failed.push({ songUid: c.songUid, userUid: c.userUid, reason: (error && error.message) || String(error) });
+    }
+  }
+  return report;
+}
+
+function formatAliasReport(report, { log = console.log } = {}) {
+  log('');
+  log(report.applied ? '=== ALIAS APPLIQUÉ ===' : '=== DRY-RUN — aucune écriture ===');
+  log(`  ${label('candidats')}: ${report.candidates}`);
+  log(`  ${label(report.applied ? 'renommées' : 'à renommer')}: ${report.renamed}`);
+
+  if (report.attachedOnly.length) {
+    log(`  ${label('rattachées SANS renommage')}: ${report.attachedOnly.length}`);
+    for (const a of report.attachedOnly) log(`      • song ${a.songUid} — ${a.reason}`);
+  }
+  if (report.refused.length) {
+    log(`  ${label('REFUSÉES')}: ${report.refused.length}`);
+    for (const r of report.refused) log(`      ✗ song ${r.songUid} : ${r.reason}`);
+  }
+  if (report.raced && report.raced.length) {
+    log(`  ${label('non écrites')}: ${report.raced.length}   (modifiées depuis la sélection)`);
+  }
+  if (report.failed.length) {
+    log(`  ${label('ÉCHECS')}: ${report.failed.length}   ⚠️  le lot n'est PAS complet`);
+    for (const f of report.failed) log(`      ✗ song ${f.songUid} : ${f.reason}`);
+  }
+
+  if (report.renames.length) {
+    const byUser = report.renames.reduce((acc, r) => {
+      (acc[r.userUid] = acc[r.userUid] || []).push(r);
+      return acc;
+    }, {});
+    log('  avant → après, par utilisateur :');
+    for (const [userUid, list] of Object.entries(byUser)) {
+      log(`      ${userUid} :`);
+      for (const r of list) log(`          ${r.before}  →  ${r.after}`);
+    }
+  }
+
+  // Only when it actually applies — an unconditional disclaimer is noise, and noise is what
+  // makes real warnings invisible.
+  if (report.sessionItemsAffected > 0) {
+    log(`  ℹ️  ${report.sessionItemsAffected} entrée(s) d'historique des sessions gardent l'ANCIENNE orthographe.`);
+    log('      SessionItems.label est un instantané volontaire (FR4) : ce n\'est pas un bug, rien à corriger.');
+  }
+  log('');
+}
+
+// The alias run. Same skeleton as runAttach — counters, report, exit codes — because the
+// two phases must not drift apart on the safety rails.
+async function runAlias(db, opts) {
+  const before = await countGuardedTables(db);
+  console.log(`${label('Compteurs')}: ${formatCounts(before)}`);
+
+  let parsed;
+  try {
+    parsed = parseAliasCsv(fs.readFileSync(ALIAS_FILE, 'utf8'));
+  } catch (error) {
+    console.error(error instanceof SeedFileError ? error.message : `Table d'alias illisible : ${ALIAS_FILE}\n${error.message}`);
+    process.exitCode = 1;
+    return;
+  }
+  console.log(`${label('Alias')}: ${parsed.rows.length} exploitables, ${parsed.skipped.length} sautés`);
+  for (const s of parsed.skipped) console.log(`      • ${s.aliasArtist || '—'} / ${s.aliasTitle}  (${s.reason})`);
+
+  let report;
+  try {
+    const candidates = await selectAliasCandidates(db.sequelize, parsed.rows);
+    report = await attachAliasSongs({ Song: db.Song, candidates, apply: opts.apply });
+  } catch (error) {
+    console.error(`Échec : ${error.message}`);
+    process.exitCode = 1;
+    return;
+  }
+
+  formatAliasReport(report);
+
+  if (opts.apply) {
+    const after = await countGuardedTables(db);
+    console.log(`${label('Compteurs après')}: ${formatCounts(after)}`);
+    const drift = diffCounts(before, after);
+    if (drift.length) {
+      console.error('\n⚠️  COMPTEURS MODIFIÉS — cette phase renomme, elle ne crée ni ne supprime :');
+      for (const d of drift) console.error(`      ${d.table} : ${d.before} → ${d.after}`);
+      console.error("Cause la plus probable : un utilisateur écrivait pendant l'exécution — vérifiez-le d'abord.");
+      process.exitCode = 1;
+      return;
+    }
+  }
+
+  // A refusal is not a skip: it means an alias points at a fiche that is not there, and the
+  // operator has to decide. Failing loudly keeps it out of the "all good" pile.
+  if (report.failed.length || report.refused.length) process.exitCode = 1;
+  else if (!opts.apply) console.log('Relancez avec --apply pour écrire.');
+}
+
 // --- Entry point -----------------------------------------------------------
 
 function parseArgs(argv) {
@@ -444,10 +785,12 @@ function parseArgs(argv) {
   }
 
   const fileArg = argv.find(a => a.startsWith('--file='));
-  if (fileArg && phase === 'attach') {
-    // The attach phase reads the database, not the CSV. Honouring --apply while ignoring
-    // --file would let the operator believe a different input was used.
-    throw new SeedFileError('--file n’a pas de sens en --phase=attach : cette phase lit la base, pas le CSV');
+  if (fileArg && phase !== 'seed') {
+    // Only the seed phase takes an input file. Honouring --apply while ignoring --file
+    // would let the operator believe a different input was used.
+    const why = phase === 'attach' ? 'cette phase lit la base, pas le CSV'
+      : 'cette phase lit la table d’alias versionnée';
+    throw new SeedFileError(`--file n’a pas de sens en --phase=${phase} : ${why}`);
   }
 
   return {
@@ -527,7 +870,7 @@ async function main(argv) {
   if (NODE_ENV_AT_STARTUP !== process.env.NODE_ENV) {
     console.log('                ⚠️ .env a modifié NODE_ENV APRÈS le choix de la connexion — ne vous fiez pas à cette valeur, fiez-vous à la base ci-dessus.');
   }
-  console.log(`${label('Phase')}: ${opts.phase}${opts.phase === 'attach' ? '  (rattachement des Songs existantes)' : '  (création des entrées Catalog)'}`);
+  console.log(`${label('Phase')}: ${opts.phase}${{ attach: '  (rattachement des Songs existantes)', alias: '  (alias + correction orthographique)' }[opts.phase] || '  (création des entrées Catalog)'}`);
   if (opts.phase === 'seed') console.log(`${label('Fichier')}: ${opts.file}`);
   console.log(`${label('Mode')}: ${opts.apply ? '--apply (ÉCRITURE)' : 'dry-run (aucune écriture)'}`);
 
@@ -543,6 +886,18 @@ async function main(argv) {
     );
     process.exitCode = 1;
     await Promise.resolve(db.sequelize.close()).catch(() => {});
+    return;
+  }
+
+  if (opts.phase === 'alias') {
+    try {
+      await runAlias(db, opts);
+    } catch (error) {
+      console.error(`Échec : ${(error && error.message) || error}`);
+      process.exitCode = 1;
+    } finally {
+      await Promise.resolve(db.sequelize.close()).catch(() => {});
+    }
     return;
   }
 
@@ -599,6 +954,9 @@ module.exports = {
   // Story 23.2 — attach phase
   ATTACH_CANDIDATES_SQL, selectAttachCandidates, attachSongs, countGuardedTables, diffCounts,
   formatAttachReport, runAttach,
+  // Story 23.3 — alias phase
+  ALIAS_FILE, parseAliasCsv, buildAliasCandidatesSql, selectAliasCandidates, attachAliasSongs,
+  formatAliasReport, runAlias,
 };
 
 if (require.main === module) {
