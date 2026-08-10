@@ -2048,16 +2048,19 @@ Demandé par northwood (relevé `deferred-work` 2026-08-08), cadré 2026-08-10. 
 - **B — `sourceCatalogSyncedAt` backfillé à `catalog.updatedAt`**, corollaire de A : à `NULL`, toutes les chansons rattachées afficheraient « mise à jour disponible » dès la publication, pour proposer un refresh appauvrissant.
 - **C — Script one-off manuel**, idempotent et ré-exécutable, avec `--dry-run`. **Pas une migration** : un seed de contenu n'a rien à faire dans le pipeline de schéma, et northwood veut choisir le moment. Séquence imposée : `make db-backup-prod` → `make db-restore` en local → dry-run → exécution locale → **vérification navigateur** → seulement ensuite la prod.
 - **D — Epic minimale** : seed + rattachement. Les liens streaming éditables et l'instrument à l'import restent des candidates séparées, malgré leur affinité.
+- **F — Table d'alias + correction orthographique chez l'utilisateur** (northwood, 2026-08-10, après mesure). Corriger une typo dans le Catalog **casse le rapprochement exact-fold de la chanson d'origine** : mesuré, **9 entrées sur 82**, dont 7 chez le même beta-testeur. northwood : *« je ne veux pas que les utilisateurs payent »*. Donc (1) le CSV d'origine devient une **table d'alias** `fold(saisie) → entrée canonique`, utilisée **en plus** du fold exact au rattachement ; (2) pour ces lignes, la Song de l'utilisateur est **renommée** vers l'orthographe canonique. Le Catalog est propre **et** personne ne perd de lien.
 - **E — Nettoyage du CSV à la main avant seed** : ~82 lignes, une passe. Déchet de test exclu, typos corrigées (`Jamiroquoi`, `AC DC`…). Ne pas attendre le folding d'article / les alias : **une typo seedée se fige dans un pool partagé**, ce qui est bien pire qu'un lien manquant.
 
 ### Invariants non négociables
 
-1. **Jamais recréer une Song de user.** Toute la donnée d'entraînement (`SongPlays`, `SessionItems` + leur snapshot FR4, `playlist_songs`, `lastPlayed`, instrument et tuning perso) pend au `Song.uid` existant. Le rattachement est **exclusivement** un `UPDATE Songs SET source_catalog_uid = …, source_catalog_synced_at = …` — jamais de delete/recreate, **jamais** de réécriture de `title`/`artist` (l'identité reste celle du user, c'est déjà la discipline de `refreshSongFromCatalog`).
+1. **Jamais recréer une Song de user.** Toute la donnée d'entraînement (`SongPlays`, `SessionItems` + leur snapshot FR4, `playlist_songs`, `lastPlayed`, instrument et tuning perso) pend au `Song.uid` existant. Le rattachement est un `UPDATE` sur la ligne en place — **jamais** de delete/recreate.
+   **⚠️ AMENDÉ par la décision F** : cet invariant interdisait aussi toute réécriture de `title`/`artist`. Il est **levé pour le seul cas listé dans la table d'alias** (9 lignes nommément identifiées), et uniquement pour aligner l'orthographe sur la fiche canonique. Il reste entier partout ailleurs — et la sémantique de `refreshSongFromCatalog`, qui ne touche jamais `title`/`artist`, n'est **pas** modifiée.
+   **Conséquences vérifiées de cette levée** : (a) `songs_user_uid_title_artist_ci` rend l'unicité par utilisateur — une renommée **peut** collisionner avec une autre chanson du même user, donc garde obligatoire et rapport ; (b) `SessionItems.label` est un **snapshot FR4** (« an entry keeps its display name even after the song is deleted ») — l'historique des sessions **garde l'ancienne orthographe**, c'est le contrat, pas une régression. À dire à northwood plutôt qu'à découvrir.
 2. **Ne jamais toucher une Song déjà rattachée** (`sourceCatalogUid IS NOT NULL`) — elle vient d'un vrai « Add from Catalog ».
 3. **Le fold doit être celui de l'app** : `lower` + `f_unaccent` en SQL (`catalogcontroller.foldedLike`), pas un `toLowerCase()` JS — l'écart entre les deux est une dette déjà relevée en 17.1.
 4. **Rattachement par requête sur la base, pas ligne à ligne depuis le CSV** : le CSV est un instantané du 2026-07-25, la prod a bougé depuis. Le CSV ne sert qu'à **créer les entrées**. Corollaire : le script rattache aussi les chansons arrivées depuis, et reste ré-exécutable.
 
-**Ordre imposé : 23.1 → 23.2 → 23.3.**
+**Ordre imposé : 23.1 → 23.2 → 23.3 → 23.4.**
 
 ### Story 23.1: Script de seed — créer les entrées Catalog en brouillon
 
@@ -2110,10 +2113,37 @@ afin de bénéficier des enrichissements du curateur sans rien perdre de ma donn
 **When** le script est lancé
 **Then** il rapporte le nombre de Songs qui seraient rattachées, **par user**, sans rien écrire
 
-**And** le rapprochement est **exact-fold uniquement** : `Beatles` ≠ `The Beatles`, `AC DC` ≠ `AC/DC` — les rapprochements approximatifs relèvent des candidates « identité artiste », hors périmètre
-`[scripts/seed-catalog.js, backend/models/song.js (lecture seule)]`
+**And** cette phase est **exact-fold uniquement** ; les 9 saisies que le nettoyage a fait diverger sont traitées en 23.3 par la table d'alias, et les rapprochements réellement approximatifs (`Beatles` ≠ `The Beatles` chez un futur user) restent hors périmètre — ils relèvent des candidates « identité artiste »
+`[backend/scripts/seed-catalog.js, backend/models/song.js (lecture seule)]`
 
-### Story 23.3: Répétition sur dump prod, garde-fous chiffrés, puis exécution
+### Story 23.3: Alias — rattacher les saisies divergentes et corriger l'orthographe
+
+En tant qu'**utilisateur beta dont la saisie contenait une faute**,
+je veux que ma chanson soit quand même reliée au Catalog, et son orthographe corrigée,
+afin de ne pas être pénalisé parce que j'avais tapé « AC DC ».
+
+**Acceptance Criteria:**
+
+**Given** `backend/scripts/seed/catalog-seed-aliases.csv` (colonnes `aliasArtist,aliasTitle,artist,title`, **9 lignes**, générées depuis l'export d'origine)
+**When** la phase alias s'exécute après le rattachement exact-fold
+**Then** toute Song dont le fold correspond à un **alias** est rattachée à l'entrée canonique correspondante, avec le même `source_catalog_synced_at` que la phase exacte
+
+**Given** une Song rattachée par alias
+**When** la correction orthographique s'applique
+**Then** son `title` et son `artist` sont réécrits vers la forme canonique — **et rien d'autre** : ni `instrument`, ni `notes`, ni `lastPlayed`, ni aucun champ intrinsèque
+
+**Given** une renommée qui entrerait en collision avec une autre chanson **du même utilisateur** (`songs_user_uid_title_artist_ci`)
+**When** le script la rencontre
+**Then** il **ne renomme pas**, rattache quand même, et le **signale nommément** dans le rapport — une collision se règle à la main, jamais en écrasant
+
+**Given** `--dry-run`
+**When** la phase alias est simulée
+**Then** elle liste, par utilisateur, les rattachements et les renommées prévues, **avant/après**, sans rien écrire
+
+**And** l'historique des sessions n'est **pas** réécrit : `SessionItems.label` est un snapshot FR4 volontaire, les anciennes entrées gardent l'orthographe d'alors — comportement attendu, à mentionner dans le rapport pour qu'il ne soit pas pris pour un bug
+`[backend/scripts/seed-catalog.js, backend/scripts/seed/catalog-seed-aliases.csv]`
+
+### Story 23.4: Répétition sur dump prod, garde-fous chiffrés, puis exécution
 
 En tant que **northwood**,
 je veux répéter l'opération sur une copie de la prod et vérifier des compteurs avant de toucher aux vraies données,
