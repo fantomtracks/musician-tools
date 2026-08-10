@@ -2029,3 +2029,109 @@ afin de ne plus les ajouter une par une ni d'avoir à tout prendre ou rien.
 
 **And** front-only ; UI en anglais, dark mode, a11y (≥44px) ; tests (`StrictMode`) couvrant browse + collection publique, succès / doublon / échec partiel ; front vert
 `[src/components/CatalogList.tsx, src/pages/Catalog.tsx, src/pages/CatalogCollection.tsx, src/services/catalogService.ts (addToSonglist existant), src/components/BulkActionBar.tsx]`
+
+## Epic 23: Amorcer le Catalog depuis les chansons de la prod
+
+Demandé par northwood (relevé `deferred-work` 2026-08-08), cadré 2026-08-10. Les Epics 19 → 22 ont construit tout l'outillage du Catalog — browse, facettes, collections, provenance, sélection groupée — **au-dessus d'un pool quasi vide** (5 entrées constatées en QA). Cette epic remplit le pool en **promouvant les chansons déjà saisies en prod** en entrées Catalog partagées, et en **rattachant les chansons personnelles existantes** à leur entrée, sans qu'aucun beta-testeur ne perde une miette de sa donnée d'entraînement.
+
+**Aucun modèle à inventer.** Le lien Song → Catalog est le couple `Song.sourceCatalogUid` / `Song.sourceCatalogSyncedAt` (Epic 21, `song.js:132,140`), l'UI de provenance est `CatalogSourceBanner` + `POST /api/songs/:uid/refresh-from-catalog`. Il n'y a que de la **donnée à créer et à brancher**.
+
+### État réel du code et de la donnée (mesuré, pas estimé)
+
+- **CSV** `backups/songs_par_user_20260725_004820.csv` : **87 lignes**, colonnes `user,email,artist,title` **uniquement** — donc aucun `key`/`bpm`/`mode`/`timeSignature`/`durationSeconds`. **Zéro doublon** sur la clé foldée `(lower(artist), lower(title))`. ~5 lignes de déchet de test à exclure → **~82 entrées réelles**.
+- **⚠️ CORRECTION D'UNE NOTE DU PROJET** : les notes de la story 19.6 décrivent l'index canonique du Catalog comme « PARTIEL (published only, 409 au Publish) ». **C'est faux.** La migration `20260716000100` dit explicitement *« the 19.1 canonical unique index is untouched, so every row (draft or published) is unique »*, et aucune migration ne crée d'index partiel ni ne supprime `catalog_songs_title_artist_ci`. L'unicité est **globale, brouillons compris** — donc **une collision se produit à la CRÉATION, pas à la publication**. Vérifié : « Numb » est déjà au Catalog et figure dans le CSV. Le seed **doit** sauter ce qui existe déjà.
+- **Le CSV contient des emails d'utilisateurs.** Toute entrée du script versionnée dans le dépôt doit être réduite à `artist,title` — ni `user`, ni `email`.
+
+### Décisions verrouillées (northwood, 2026-08-10)
+
+- **A — Seed en BROUILLON** (`publishedAt = NULL`). Une fiche seedée n'a que titre + artiste : publiée, un « Refresh » écraserait la tonalité et le tempo du user avec du vide (`refreshSongFromCatalog` écrit `catalog[f] ?? null`). En brouillon, le lien est posé mais dormant — `getSong` n'émet pas `sourceCatalog`, la bannière ne s'affiche pas, le refresh 409. **Le lien s'allume tout seul quand le curateur publie**, une fois la fiche enrichie. La sémantique du Refresh livrée en Epic 21 n'est **pas** touchée.
+- **B — `sourceCatalogSyncedAt` backfillé à `catalog.updatedAt`**, corollaire de A : à `NULL`, toutes les chansons rattachées afficheraient « mise à jour disponible » dès la publication, pour proposer un refresh appauvrissant.
+- **C — Script one-off manuel**, idempotent et ré-exécutable, avec `--dry-run`. **Pas une migration** : un seed de contenu n'a rien à faire dans le pipeline de schéma, et northwood veut choisir le moment. Séquence imposée : `make db-backup-prod` → `make db-restore` en local → dry-run → exécution locale → **vérification navigateur** → seulement ensuite la prod.
+- **D — Epic minimale** : seed + rattachement. Les liens streaming éditables et l'instrument à l'import restent des candidates séparées, malgré leur affinité.
+- **E — Nettoyage du CSV à la main avant seed** : ~82 lignes, une passe. Déchet de test exclu, typos corrigées (`Jamiroquoi`, `AC DC`…). Ne pas attendre le folding d'article / les alias : **une typo seedée se fige dans un pool partagé**, ce qui est bien pire qu'un lien manquant.
+
+### Invariants non négociables
+
+1. **Jamais recréer une Song de user.** Toute la donnée d'entraînement (`SongPlays`, `SessionItems` + leur snapshot FR4, `playlist_songs`, `lastPlayed`, instrument et tuning perso) pend au `Song.uid` existant. Le rattachement est **exclusivement** un `UPDATE Songs SET source_catalog_uid = …, source_catalog_synced_at = …` — jamais de delete/recreate, **jamais** de réécriture de `title`/`artist` (l'identité reste celle du user, c'est déjà la discipline de `refreshSongFromCatalog`).
+2. **Ne jamais toucher une Song déjà rattachée** (`sourceCatalogUid IS NOT NULL`) — elle vient d'un vrai « Add from Catalog ».
+3. **Le fold doit être celui de l'app** : `lower` + `f_unaccent` en SQL (`catalogcontroller.foldedLike`), pas un `toLowerCase()` JS — l'écart entre les deux est une dette déjà relevée en 17.1.
+4. **Rattachement par requête sur la base, pas ligne à ligne depuis le CSV** : le CSV est un instantané du 2026-07-25, la prod a bougé depuis. Le CSV ne sert qu'à **créer les entrées**. Corollaire : le script rattache aussi les chansons arrivées depuis, et reste ré-exécutable.
+
+**Ordre imposé : 23.1 → 23.2 → 23.3.**
+
+### Story 23.1: Script de seed — créer les entrées Catalog en brouillon
+
+En tant que **curateur**,
+je veux créer d'un coup les entrées Catalog correspondant aux chansons déjà saisies en prod,
+afin que le Catalog cesse d'être vide et devienne curable.
+
+**Acceptance Criteria:**
+
+**Given** un fichier d'entrée réduit à `artist,title` (ni `user`, ni `email`) et nettoyé à la main
+**When** le script est lancé avec `--dry-run`
+**Then** il **n'écrit rien** et rapporte : nombre de lignes lues, nombre d'entrées à créer, nombre sautées **avec leur raison** (déjà au Catalog / ligne vide / doublon interne)
+
+**Given** une entrée dont le fold `(lower(title), COALESCE(lower(artist),''))` existe **déjà** dans `CatalogSongs`
+**When** le script s'exécute
+**Then** elle est **sautée**, pas créée — l'index canonique est global et couvre les brouillons, une insertion lèverait 23505 (cas réel : « Numb »)
+
+**Given** une exécution réelle
+**When** les entrées sont créées
+**Then** elles le sont avec `publishedAt = NULL` (décision A), `title` et `artist` seuls renseignés, et **aucun** autre champ inventé
+
+**Given** un script relancé une seconde fois
+**When** il s'exécute
+**Then** il ne crée **rien** de nouveau et le rapporte — l'idempotence est vérifiée, pas supposée
+
+**And** aucune migration, aucun changement de modèle, aucun endpoint ; le script vit dans `scripts/` et n'est **pas** branché au déploiement
+`[scripts/seed-catalog.js (nouveau), backend/models/catalogsong.js (lecture seule)]`
+
+### Story 23.2: Script de rattachement — brancher les Songs existantes sur leur entrée
+
+En tant qu'**utilisateur beta**,
+je veux que les chansons que j'ai déjà saisies soient reconnues comme venant du Catalog,
+afin de bénéficier des enrichissements du curateur sans rien perdre de ma donnée.
+
+**Acceptance Criteria:**
+
+**Given** les Songs de **toute la base** (pas les lignes du CSV — invariant 4)
+**When** le script rapproche par le fold SQL de l'app (`lower` + `f_unaccent`, invariant 3)
+**Then** chaque Song dont le fold correspond exactement à une entrée Catalog reçoit `source_catalog_uid` **et** `source_catalog_synced_at = catalog.updatedAt` (décision B)
+
+**Given** une Song qui a **déjà** un `sourceCatalogUid`
+**When** le script s'exécute
+**Then** elle n'est **pas** touchée (invariant 2)
+
+**Given** l'exécution complète
+**When** on compare la base avant et après
+**Then** `COUNT(*) FROM "Songs"` est **inchangé**, et les compteurs de `SongPlays`, `SessionItems` et `playlist_songs` sont **inchangés** — aucune Song n'a été recréée, aucun `title`/`artist` réécrit (invariant 1)
+
+**Given** `--dry-run`
+**When** le script est lancé
+**Then** il rapporte le nombre de Songs qui seraient rattachées, **par user**, sans rien écrire
+
+**And** le rapprochement est **exact-fold uniquement** : `Beatles` ≠ `The Beatles`, `AC DC` ≠ `AC/DC` — les rapprochements approximatifs relèvent des candidates « identité artiste », hors périmètre
+`[scripts/seed-catalog.js, backend/models/song.js (lecture seule)]`
+
+### Story 23.3: Répétition sur dump prod, garde-fous chiffrés, puis exécution
+
+En tant que **northwood**,
+je veux répéter l'opération sur une copie de la prod et vérifier des compteurs avant de toucher aux vraies données,
+afin que le seed ne soit jamais un pari.
+
+**Acceptance Criteria:**
+
+**Given** la séquence imposée (décision C)
+**When** l'opération est préparée
+**Then** elle est jouée dans l'ordre : `make db-backup-prod` → `make db-restore` en local → `--dry-run` → exécution locale → **vérification navigateur** sur une fiche rattachée (bannière absente tant que la fiche est brouillon) → exécution prod
+
+**Given** l'exécution locale sur le dump prod
+**When** le rapport de vérification est produit
+**Then** il compare **avant/après** : `COUNT(*)` de `Songs`, `SongPlays`, `SessionItems`, `playlist_songs` (tous **inchangés**), N entrées Catalog créées = N attendu, M Songs rattachées = M attendu
+
+**Given** un écart entre attendu et constaté
+**When** la vérification échoue
+**Then** l'exécution en prod **ne se fait pas** — le dump est le filet, pas la consolation
+
+**And** le rapport est archivé dans `_bmad-output/implementation-artifacts/` ; ⚠️ `make db-restore` exige un client **pg17** (cf. `deferred-work`, section db-restore)
+`[Makefile (existant), _bmad-output/implementation-artifacts/epic-23-seed-report-*.md]`
