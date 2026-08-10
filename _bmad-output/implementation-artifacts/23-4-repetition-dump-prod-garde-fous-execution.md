@@ -4,7 +4,7 @@ baseline_commit: 2c460cb
 
 # Story 23.4: Répétition sur dump prod, garde-fous chiffrés, puis exécution
 
-Status: ready-for-dev
+Status: in-progress
 
 <!-- Note: Validation is optional. Run validate-create-story for quality check before dev-story. -->
 
@@ -61,9 +61,11 @@ Elle a donc dérivé dans les deux sens. **Tout chiffre mesuré jusqu'ici vaut p
 
 ## Tasks / Subtasks
 
-- [ ] **Task 1 — Filet local** (AC: 1)
-  - [ ] `make db-backup`, puis **vérifier que le fichier existe et n'est pas vide** (le Makefile écrit un `.tmp` promu seulement en cas de succès — mais le vérifier reste gratuit).
-  - [ ] Noter le chemin du fichier dans le rapport : c'est le retour arrière.
+- [x] **Task 1 — Filet local** (AC: 1)
+  - [x] `make db-backup`, puis **vérifier que le fichier existe et n'est pas vide** (le Makefile écrit un `.tmp` promu seulement en cas de succès — mais le vérifier reste gratuit).
+  - [x] Noter le chemin du fichier dans le rapport : c'est le retour arrière.
+
+  **Fait le 2026-08-10.** Fichier : `backups/musician_tools_20260810_195354.dump`, **276 275 octets**, reconnu `PostgreSQL custom database dump - v1.16-0`. Vérifié au-delà de « le fichier existe » : `pg_restore --list` y trouve **48 tables avec données**, dont `Songs`, `Users`, `CatalogSongs`, `SongPlays`, `SessionItems`. État sauvegardé : **91 Songs, 6 Users, 5 CatalogSongs, 102 SongPlays, 67 SessionItems**. C'est le retour arrière si la restauration du dump prod tourne mal.
 - [ ] **Task 2 — Dump prod frais** (AC: 2)
   - [ ] `make db-backup-prod` (lit `DATABASE_URL_PROD` depuis `backend/.env`). ⚠️ **Lecture seule sur la prod** — `pg_dump` n'écrit rien.
   - [ ] Vérifier la taille du fichier produit et l'horodater dans le rapport.
