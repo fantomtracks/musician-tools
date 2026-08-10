@@ -4,7 +4,7 @@ baseline_commit: 3416f6f919a8b7363d94813c8e78a2221b8158dc
 
 # Story 23.1: Script de seed — créer les entrées Catalog en brouillon
 
-Status: review
+Status: done
 
 <!-- Note: Validation is optional. Run validate-create-story for quality check before dev-story. -->
 
@@ -72,6 +72,43 @@ Première story d'**Epic 23**. Les Epics 19 → 22 ont construit tout l'outillag
 - [x] **Task 6 — Validation** (AC: 8)
   - [x] `cd backend && npm test` et `npm run lint`. Baseline backend à mesurer **avant** de commencer (`cd backend && npm test 2>&1 | tail -3`) — la rétro Epic 22 interdit d'écrire un compteur non mesuré.
   - [x] `git diff --stat` doit ne montrer que le script, son test, et éventuellement `package.json` — aucun modèle, aucune migration, aucun contrôleur.
+
+### Review Findings
+
+Code review 2026-08-10 — **PARTIELLE** : Blind Hunter rendu (5 High, 7 Med, 6 Low) ; Edge Case Hunter et Acceptance Auditor **plantés** (21 min sans écriture, tués) — la couche Auditor en est à 5 échecs sur 6. Sa partie mécanique a été refaite à la main. 14 patchés, 2 deferred, 3 dismiss.
+
+**⚠️ LE PLUS GRAVE N'EST PAS DANS LA LISTE DU BLIND HUNTER — il est sorti de l'exécution réelle du script pendant le triage.**
+
+`node scripts/seed-catalog.js --apply` dans un shell nu **visait la base de PRODUCTION** en affichant « Environnement : development ». Chaîne exacte : `db.js:2` calcule `env = NODE_ENV || 'production'` **avant** que `config.js` n'ait chargé `.env` → la connexion est bâtie sur `DATABASE_URL_PROD` ; puis `config.js` charge `.env`, qui **remplit** `NODE_ENV=development` ; ma bannière, lue après, affichait donc la valeur réécrite. Seule une erreur de certificat TLS a empêché 82 écritures dans le Catalog partagé de production.
+
+**Conséquence de conception** : le garde ne peut pas porter sur `NODE_ENV` — c'est une variable que `dotenv` réécrit *après* le choix de la connexion. Il porte désormais sur **l'hôte réellement résolu** (`db.sequelize.config.host`) : toute écriture sur une base non locale est **refusée** sauf `--allow-remote`. Vérifié en conditions réelles : la même commande s'arrête, nomme la cible, explique le piège, et sort en code 1. Le piège lui-même dépasse ce script → **deferred en HIGH**.
+
+**Patchés — les 5 High du Blind Hunter**
+
+- [x] [Review][Patch] **`--apply` n'était gardé que par une ligne imprimée** (High) — remplacé par un refus effectif, keyé sur l'hôte (voir ci-dessus).
+- [x] [Review][Patch] **Un en-tête pas en ligne 0 était inséré comme une chanson** (High) — le skip testait `index === 0` alors que le skip des lignes vides ne décale pas l'index. L'en-tête est maintenant la **première ligne non vide**. Test dédié.
+- [x] [Review][Patch] **L'ordre des colonnes était supposé** (High) — un fichier `title,artist` aurait seedé 82 lignes inversées en silence. L'en-tête est **validé**, un écart **abandonne** le lot.
+- [x] [Review][Patch] **Un lot entièrement en échec sortait en code 0 en affichant « SEED APPLIQUÉ »** (High) — `report.failed` n'était jamais consulté. Code de sortie 1 dès qu'une ligne échoue, et le rapport crie « le lot n'est PAS complet ».
+- [x] [Review][Patch] **Une erreur de lecture en cours de lot jetait le rapport entier** (High) — `findExisting` était hors du `try` par ligne : 40 lignes écrites, aucune trace de lesquelles. Toute la ligne est gardée, le rapport survit.
+
+**Patchés — les Med et Low retenus**
+
+- [x] [Review][Patch] **Argument non reconnu ignoré** — `--file chemin` (forme avec espace) était ignoré pendant que `--apply` était honoré : le fichier **par défaut** partait en base. Tout argument inconnu est désormais refusé.
+- [x] [Review][Patch] **Guillemet non fermé** — un champ multi-ligne fabriquait une ligne parasite **et** en perdait une vraie. Le parsing abandonne au lieu de deviner.
+- [x] [Review][Patch] **Unicode NFC/NFD** — « é » composé et décomposé donnaient deux entrées (Postgres `lower()` compare des octets). Normalisation NFC à la lecture + suppression du BOM. Le fichier livré est déjà NFC (vérifié).
+- [x] [Review][Patch] **`SequelizeUniqueConstraintError` classé sans vérifier laquelle** — une violation sur une *autre* contrainte se cachait dans un décompte anodin. La contrainte est nommée dans le rapport.
+- [x] [Review][Patch] **Le détail des sautées pouvait masquer tous les skips base** — le bruit de parsing passait devant et le `slice(20)` tronquait. Les skips base sont affichés en premier.
+- [x] [Review][Patch] **`close()` supposé thenable** — `await close().catch()` lèverait un `TypeError` masquant l'erreur réelle si `close()` ne renvoie pas de promesse. `Promise.resolve(...)`.
+- [x] [Review][Patch] **`main`, `formatReport`, `parseArgs` et `identityKey` n'étaient pas testés** — c'était pourtant la surface qui produit les chiffres sur lesquels un humain décide. 20 tests ajoutés (33 au total pour ce fichier).
+- [x] [Review][Patch] **Le séparateur d'`identityKey`** — le `|` pouvait faire collisionner deux paires distinctes. **Et mon premier correctif l'a remplacé par une ESPACE, bien pire** : `('a b','c')` et `('a','b c')` sont des titres ordinaires et collisionnaient. Séparateur passé à `NUL`, impossible dans une valeur texte Postgres, avec un test paramétré sur pipe / espace / tiret / virgule.
+- [x] [Review][Patch] **Commentaire faux** — il affirmait que le skip et l'index « ne peuvent jamais diverger ». Ils le peuvent, sur une ligne pré-existante non trimée. Corrigé, et le cas est deferred.
+
+**Deferred (2)** → `deferred-work.md` 2026-08-10 : le piège `NODE_ENV`/`dotenv` **app-wide** (HIGH — il dépasse ce script et piégera le prochain outil ponctuel) ; le trim du script face à une ligne historique non trimée en base (LOW).
+
+**Dismiss (3)** : ① « le fichier de seed est absent du diff » — il est versionné depuis le commit `3416f6f`, mon découpage de diff l'excluait. ② Colonnes surnuméraires et guillemets internes silencieusement ignorés — tolérable pour cette charge, et l'en-tête est désormais validé, donc un fichier à 3 colonnes serait refusé. ③ « `target` peut valoir *inconnu* et le script continue » — obsolète : la cible vient maintenant de `sequelize.config`, et une cible non locale bloque l'écriture.
+
+**Vérifications mécaniques** (à la place de l'Auditor planté) : **AC1** — `grep` sur `package.json`, `backend/package.json`, `both.Dockerfile`, `fly.toml` et `backend/migrations/` : **aucune** référence au script hors de lui-même et de son test. **Correction « Numb »** — j'avais raté **deux** occurrences en corrigeant (une dans l'AC de l'epic, une dans le bloc de cadrage du suivi) ; corrigées, plus aucune trace. Compteurs : backend **405** tests (baseline 372).
+
 
 ## Dev Notes
 
@@ -146,5 +183,5 @@ claude-opus-5[1m] (dev-story)
 
 | Date | Version | Description | Author |
 |------|---------|-------------|--------|
-| 2026-08-10 | 1.0 | dev-story — script de seed + 13 tests. Backend **385/385** (baseline 372 mesurée avant), lint clean. Le script s'exécute réellement et échoue proprement sur la connexion SSL locale (environnement, pas la story) ; les 82 lignes réelles traversent parsing et décision. **Correction d'une affirmation fausse de mon cadrage** : « Numb » n'est pas dans le CSV, le grep avait matché « My Number ». | northwood |
+| 2026-08-10 | 1.1 | code review (partielle : Blind Hunter seul, 2 couches plantées) — 14 patch, 2 defer, 3 dismiss. **Le finding majeur vient de l'exécution réelle, pas des couches** : un `--apply` dans un shell nu visait la PROD en affichant « development » (dotenv réécrit NODE_ENV après le choix de la connexion) ; seule une erreur TLS a empêché 82 écritures. Le garde porte désormais sur l'hôte résolu, refus vérifié en réel. Backend **405** tests. | northwood |\n| 2026-08-10 | 1.0 | dev-story — script de seed + 13 tests. Backend **385/385** (baseline 372 mesurée avant), lint clean. Le script s'exécute réellement et échoue proprement sur la connexion SSL locale (environnement, pas la story) ; les 82 lignes réelles traversent parsing et décision. **Correction d'une affirmation fausse de mon cadrage** : « Numb » n'est pas dans le CSV, le grep avait matché « My Number ». | northwood |
 | 2026-08-10 | 0.1 | Story créée (create-story). Deux découvertes : l'index canonique du Catalog couvre les brouillons (la note de 19.6 est fausse) donc le skip est obligatoire ; et l'invariant 3 de l'epic confond le fold de RECHERCHE (`f_unaccent`) avec le fold d'IDENTITÉ (`lower` + `COALESCE`, accents conservés) — c'est le second qu'il faut, le suivre à la lettre aurait produit de faux skips. | northwood |

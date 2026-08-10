@@ -2076,7 +2076,7 @@ afin que le Catalog cesse d'être vide et devienne curable.
 
 **Given** une entrée dont le fold `(lower(title), COALESCE(lower(artist),''))` existe **déjà** dans `CatalogSongs`
 **When** le script s'exécute
-**Then** elle est **sautée**, pas créée — l'index canonique est global et couvre les brouillons, une insertion lèverait 23505 (cas réel : « Numb »)
+**Then** elle est **sautée**, pas créée — l'index canonique est global et couvre les brouillons, une insertion lèverait 23505
 
 **Given** une exécution réelle
 **When** les entrées sont créées
