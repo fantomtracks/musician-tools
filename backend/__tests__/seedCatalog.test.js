@@ -11,7 +11,7 @@ jest.mock('../models', () => ({
   sequelize: { close: jest.fn() },
 }));
 
-const { Op } = require('sequelize');
+const { Op, QueryTypes } = require('sequelize');
 const { CatalogSong } = require('../models');
 const { parseSeedCsv, seedCatalog } = require('../scripts/seed-catalog');
 
@@ -265,5 +265,338 @@ describe('seedCatalog — a read error mid-batch does not discard the report', (
     CatalogSong.create.mockRejectedValueOnce(conflict);
     const report = await seedCatalog({ CatalogSong, rows: [{ artist: 'Muse', title: 'Hysteria' }], apply: true });
     expect(report.skipped[0].reason).toBe('conflit d’unicité (catalog_songs_title_artist_ci)');
+  });
+});
+
+// --- Story 23.2 — attach phase -----------------------------------------------
+//
+// This phase writes into the users' PERSONAL Songs, not into a shared pool, so the
+// tests below are weighted towards proving what the script does NOT do: it does not
+// touch a Song that already has a source, it does not write any column beyond the two
+// provenance ones, and it refuses an ambiguous match instead of picking one.
+//
+// What they cannot exercise: that the SQL fold agrees with the functional index
+// `songs_user_uid_title_artist_ci`. That is Postgres, validated on the dev DB in 23.4.
+// The unit test asserts the shape of the statement instead.
+const {
+  ATTACH_CANDIDATES_SQL, selectAttachCandidates, attachSongs,
+  countGuardedTables, diffCounts, formatAttachReport,
+} = require('../scripts/seed-catalog');
+
+const makeSong = () => ({ update: jest.fn().mockResolvedValue([1]) });
+
+const candidate = over => ({
+  songUid: 'song-1', userUid: 'user-a', songTitle: 'Hysteria', songArtist: 'Muse',
+  catalogUid: 'cat-1', catalogUpdatedAt: new Date('2026-08-01T10:00:00Z'), matchCount: 1, ...over,
+});
+
+describe('parseArgs — la phase', () => {
+  test('la phase par défaut est seed, le comportement historique', () => {
+    expect(parseArgs([]).phase).toBe('seed');
+  });
+
+  test('--phase=attach est accepté', () => {
+    expect(parseArgs(['--phase=attach', '--apply']).phase).toBe('attach');
+  });
+
+  test('une phase inconnue est refusée, jamais rabattue sur seed', () => {
+    // Assertion sur le message SPÉCIFIQUE : le message générique d’argument inconnu
+    // contient déjà « --phase=seed|attach », donc /[Pp]hase/ passerait même si le garde
+    // disparaissait de la liste blanche.
+    expect(() => parseArgs(['--phase=attachh'])).toThrow(/Phase inconnue/);
+    expect(() => parseArgs(['--phase='])).toThrow(/Phase inconnue/);
+  });
+
+  test('--file n’a aucun sens en phase attach : refusé plutôt qu’ignoré', () => {
+    expect(() => parseArgs(['--phase=attach', '--file=seed/x.csv'])).toThrow(/n’a pas de sens en --phase=attach/);
+  });
+
+  test('un drapeau répété est refusé, jamais résolu premier-gagnant', () => {
+    expect(() => parseArgs(['--phase=seed', '--phase=attach'])).toThrow(/spécifié plusieurs fois/);
+    expect(() => parseArgs(['--file=a.csv', '--file=b.csv'])).toThrow(/spécifié plusieurs fois/);
+  });
+});
+
+describe('ATTACH_CANDIDATES_SQL — le rapprochement se fait en SQL, pas en JS', () => {
+  test('il ne sélectionne que les Songs sans source', () => {
+    expect(ATTACH_CANDIDATES_SQL).toMatch(/s\.source_catalog_uid IS NULL/);
+  });
+
+  test('il joint sur l’expression de l’index d’identité, accents conservés', () => {
+    expect(ATTACH_CANDIDATES_SQL).toMatch(/lower\(s\.title\)\s*=\s*lower\(c\.title\)/);
+    expect(ATTACH_CANDIDATES_SQL).toMatch(/coalesce\(lower\(s\.artist\), ''\)\s*=\s*coalesce\(lower\(c\.artist\), ''\)/);
+    expect(ATTACH_CANDIDATES_SQL).not.toMatch(/unaccent/i); // that fold is for SEARCH only, whatever it is named
+  });
+
+  test('il compte les entrées Catalog en concurrence pour détecter l’ambiguïté', () => {
+    expect(ATTACH_CANDIDATES_SQL).toMatch(/count\(\*\) OVER \(PARTITION BY s\.uid\)/i);
+  });
+
+  test('il ne filtre pas sur published_at : les entrées seedées sont des brouillons', () => {
+    expect(ATTACH_CANDIDATES_SQL).not.toMatch(/published/i); // catches published_at AND publishedAt
+  });
+
+  test('selectAttachCandidates normalise les colonnes SQL et le compte bigint (string en pg)', async () => {
+    const sequelize = {
+      query: jest.fn().mockResolvedValue([{
+        song_uid: 's1', user_uid: 'u1', song_title: 'Hysteria', song_artist: 'Muse',
+        catalog_uid: 'c1', catalog_updated_at: '2026-08-01T10:00:00.000Z', match_count: '2',
+      }]),
+    };
+    const rows = await selectAttachCandidates(sequelize);
+    expect(rows).toEqual([{
+      songUid: 's1', userUid: 'u1', songTitle: 'Hysteria', songArtist: 'Muse', catalogUid: 'c1',
+      catalogUpdatedAt: '2026-08-01T10:00:00.000Z', matchCount: 2,
+    }]);
+    // QueryTypes.SELECT n’est pas décoratif : en RAW, Sequelize renvoie [rows, metadata].
+    expect(sequelize.query).toHaveBeenCalledWith(ATTACH_CANDIDATES_SQL, { type: QueryTypes.SELECT });
+  });
+
+  test('une ligne inexploitable fait échouer la sélection au lieu d’aller jusqu’à l’UPDATE', async () => {
+    // Ce que produirait un QueryTypes manquant : des champs undefined et matchCount NaN.
+    // NaN > 1 est FAUX, donc sans ce garde la ligne passait la sonde d’ambiguïté et
+    // arrivait à update({ sourceCatalogUid: undefined }, { where: { uid: undefined } }).
+    const sequelize = { query: jest.fn().mockResolvedValue([{ song_uid: undefined, match_count: undefined }]) };
+    await expect(selectAttachCandidates(sequelize)).rejects.toThrow(/inexploitable/);
+  });
+});
+
+describe('attachSongs — ce qui est écrit, et rien d’autre', () => {
+  test('le dry-run n’écrit rien mais compte ce qui serait rattaché', async () => {
+    const Song = makeSong();
+    const report = await attachSongs({ Song, candidates: [candidate()], apply: false });
+    expect(Song.update).not.toHaveBeenCalled();
+    expect(report.attached).toBe(1);
+    expect(report.applied).toBe(false);
+  });
+
+  test('l’update ne porte QUE sur les deux colonnes de provenance', async () => {
+    const Song = makeSong();
+    await attachSongs({ Song, candidates: [candidate()], apply: true });
+    const [values] = Song.update.mock.calls[0];
+    expect(Object.keys(values).sort()).toEqual(['sourceCatalogSyncedAt', 'sourceCatalogUid']);
+  });
+
+  test('syncedAt vaut le updatedAt de l’entrée Catalog, pas l’heure du script', async () => {
+    const Song = makeSong();
+    const catalogUpdatedAt = new Date('2026-07-01T08:30:00Z');
+    await attachSongs({ Song, candidates: [candidate({ catalogUpdatedAt })], apply: true });
+    expect(Song.update.mock.calls[0][0].sourceCatalogSyncedAt).toBe(catalogUpdatedAt);
+  });
+
+  test('le where re-vérifie sourceCatalogUid IS NULL à l’écriture, pas seulement à la sélection', async () => {
+    const Song = makeSong();
+    await attachSongs({ Song, candidates: [candidate()], apply: true });
+    const [, options] = Song.update.mock.calls[0];
+    expect(options.where).toEqual({
+      uid: 'song-1', sourceCatalogUid: null, title: 'Hysteria', artist: 'Muse',
+    });
+  });
+
+  test('le where re-vérifie AUSSI le titre et l’artiste : une chanson renommée entre le SELECT et l’UPDATE n’est pas estampillée', async () => {
+    // 0 ligne touchée = la chanson ne ressemble plus à celle qu’on avait sélectionnée.
+    const Song = { update: jest.fn().mockResolvedValue([0]) };
+    const report = await attachSongs({ Song, candidates: [candidate()], apply: true });
+    expect(Song.update.mock.calls[0][1].where).toMatchObject({ title: 'Hysteria', artist: 'Muse' });
+    expect(report.attached).toBe(0);
+    expect(report.raced).toHaveLength(1);
+  });
+
+  test('silent: true — sans lui, updatedAt serait poussé sur les songlists entières de cinq personnes', async () => {
+    const Song = makeSong();
+    await attachSongs({ Song, candidates: [candidate()], apply: true });
+    // Assertion sur l’objet ENTIER : toute option ajoutée plus tard devient un choix délibéré.
+    expect(Song.update.mock.calls[0][1]).toEqual({
+      where: { uid: 'song-1', sourceCatalogUid: null, title: 'Hysteria', artist: 'Muse' },
+      silent: true,
+    });
+  });
+
+  test('une Song rattachée entre-temps (0 ligne touchée) n’est pas comptée comme rattachée', async () => {
+    const Song = { update: jest.fn().mockResolvedValue([0]) };
+    const report = await attachSongs({ Song, candidates: [candidate()], apply: true });
+    expect(report.attached).toBe(0);
+    expect(report.raced).toHaveLength(1);
+  });
+
+  test('un candidat ambigu est REFUSÉ, jamais arbitré au hasard', async () => {
+    const Song = makeSong();
+    const report = await attachSongs({
+      Song,
+      candidates: [
+        candidate({ catalogUid: 'cat-1', matchCount: 2 }),
+        candidate({ catalogUid: 'cat-2', matchCount: 2 }),
+      ],
+      apply: true,
+    });
+    expect(Song.update).not.toHaveBeenCalled();
+    expect(report.attached).toBe(0);
+    expect(report.ambiguous).toEqual([{ songUid: 'song-1', userUid: 'user-a', matches: 2 }]);
+    expect(report.candidates).toBe(1); // one SONG, not two rows
+  });
+
+  test('idempotence : plus aucun candidat au second passage', async () => {
+    const Song = makeSong();
+    const report = await attachSongs({ Song, candidates: [], apply: true });
+    expect(report.attached).toBe(0);
+    expect(report.candidates).toBe(0);
+    expect(Song.update).not.toHaveBeenCalled();
+  });
+
+  test('une erreur en cours de lot ne jette pas le rapport des lignes déjà écrites', async () => {
+    const Song = { update: jest.fn().mockResolvedValueOnce([1]).mockRejectedValueOnce(new Error('connection terminated')) };
+    const report = await attachSongs({
+      Song,
+      candidates: [candidate({ songUid: 's1' }), candidate({ songUid: 's2' })],
+      apply: true,
+    });
+    expect(report.attached).toBe(1);
+    expect(report.failed[0].reason).toMatch(/connection terminated/);
+  });
+
+  test('le rapport regroupe par utilisateur, sans jamais afficher d’email', async () => {
+    const Song = makeSong();
+    const report = await attachSongs({
+      Song,
+      candidates: [
+        candidate({ songUid: 's1', userUid: 'user-a' }),
+        candidate({ songUid: 's2', userUid: 'user-a' }),
+        candidate({ songUid: 's3', userUid: 'user-b' }),
+      ],
+      apply: false,
+    });
+    expect(report.byUser).toEqual({ 'user-a': 2, 'user-b': 1 });
+  });
+});
+
+describe('compteurs de sécurité — la preuve mécanique de l’invariant « jamais recréer une Song »', () => {
+  test('les quatre tables porteuses de donnée d’entraînement sont comptées', async () => {
+    const db = {
+      Song: { count: jest.fn().mockResolvedValue(120) },
+      SongPlay: { count: jest.fn().mockResolvedValue(900) },
+      SessionItem: { count: jest.fn().mockResolvedValue(40) },
+      PlaylistSong: { count: jest.fn().mockResolvedValue(12) },
+    };
+    await expect(countGuardedTables(db)).resolves.toEqual({
+      Songs: 120, SongPlays: 900, SessionItems: 40, PlaylistSongs: 12,
+    });
+  });
+
+  test('un écart est nommé table par table', () => {
+    const before = { Songs: 120, SongPlays: 900, SessionItems: 40, PlaylistSongs: 12 };
+    expect(diffCounts(before, { ...before })).toEqual([]);
+    expect(diffCounts(before, { ...before, SongPlays: 899 })).toEqual([
+      { table: 'SongPlays', before: 900, after: 899 },
+    ]);
+  });
+});
+
+describe('formatAttachReport — ce qu’un opérateur lit avant d’autoriser la prod', () => {
+  const capture = report => {
+    const lines = [];
+    formatAttachReport(report, { log: l => lines.push(l) });
+    return lines.join('\n');
+  };
+  const base = { candidates: 0, attached: 0, ambiguous: [], raced: [], failed: [], byUser: {}, applied: false };
+
+  test('le dry-run dit clairement que rien n’a été écrit et détaille par utilisateur', () => {
+    const out = capture({ ...base, candidates: 3, attached: 3, byUser: { 'user-a': 2, 'user-b': 1 } });
+    expect(out).toMatch(/DRY-RUN — aucune écriture/);
+    expect(out).toMatch(/user-a\s*:\s*2/);
+    expect(out).toMatch(/user-b\s*:\s*1/);
+  });
+
+  test('un candidat ambigu est crié, pas noyé', () => {
+    const out = capture({ ...base, candidates: 1, ambiguous: [{ songUid: 'song-1', userUid: 'user-a', matches: 2 }], applied: true });
+    expect(out).toMatch(/AMBIGU/i);
+    expect(out).toMatch(/song-1/);
+  });
+
+  test('un lot avec échecs ne se lit jamais comme un succès', () => {
+    const out = capture({ ...base, candidates: 1, failed: [{ songUid: 'song-1', userUid: 'user-a', reason: 'connection reset' }], applied: true });
+    expect(out).toMatch(/ÉCHECS/);
+    expect(out).toMatch(/connection reset/);
+  });
+});
+
+describe('runAttach — un écart de compteur fait échouer le lot, il ne se contente pas de le dire', () => {
+  const { runAttach } = require('../scripts/seed-catalog');
+
+  // Counts change between the two reads: the second call to each count() returns one less.
+  const makeDb = ({ before, after, candidates = [] }) => {
+    const counter = key => {
+      let calls = 0;
+      return jest.fn(async () => { calls += 1; return calls === 1 ? before[key] : after[key]; });
+    };
+    return {
+      Song: { count: counter('Songs'), update: jest.fn().mockResolvedValue([1]) },
+      SongPlay: { count: counter('SongPlays') },
+      SessionItem: { count: counter('SessionItems') },
+      PlaylistSong: { count: counter('PlaylistSongs') },
+      sequelize: { query: jest.fn().mockResolvedValue(candidates) },
+    };
+  };
+  const stable = { Songs: 120, SongPlays: 900, SessionItems: 40, PlaylistSongs: 12 };
+  const row = over => ({ song_uid: 's1', user_uid: 'u1', song_title: 'Hysteria', song_artist: 'Muse', catalog_uid: 'c1', catalog_updated_at: '2026-08-01T10:00:00.000Z', match_count: '1', ...over });
+
+  let logs;
+  beforeEach(() => {
+    logs = [];
+    process.exitCode = undefined;
+    jest.spyOn(console, 'log').mockImplementation(l => logs.push(String(l)));
+    jest.spyOn(console, 'error').mockImplementation(l => logs.push(String(l)));
+  });
+  afterEach(() => {
+    jest.restoreAllMocks();
+    process.exitCode = undefined;
+  });
+
+  test('une ligne de SongPlays disparue ⇒ code de sortie 1 et un message qui nomme la table', async () => {
+    const db = makeDb({ before: stable, after: { ...stable, SongPlays: 899 }, candidates: [row()] });
+    await runAttach(db, { apply: true, phase: 'attach' });
+    expect(process.exitCode).toBe(1);
+    expect(logs.join('\n')).toMatch(/COMPTEURS MODIFIÉS/);
+    expect(logs.join('\n')).toMatch(/SongPlays : 900 → 899/);
+  });
+
+  test('compteurs stables ⇒ code de sortie inchangé', async () => {
+    const db = makeDb({ before: stable, after: stable, candidates: [row()] });
+    await runAttach(db, { apply: true, phase: 'attach' });
+    expect(process.exitCode).toBeUndefined();
+    expect(db.Song.update).toHaveBeenCalledTimes(1);
+  });
+
+  test('un candidat ambigu suffit à faire échouer le lot', async () => {
+    const db = makeDb({ before: stable, after: stable, candidates: [row({ match_count: '2' }), row({ catalog_uid: 'c2', match_count: '2' })] });
+    await runAttach(db, { apply: true, phase: 'attach' });
+    expect(db.Song.update).not.toHaveBeenCalled();
+    expect(process.exitCode).toBe(1);
+  });
+
+  test('le dry-run n’écrit rien, ne compare pas les compteurs, et invite à --apply', async () => {
+    const db = makeDb({ before: stable, after: { ...stable, SongPlays: 1 }, candidates: [row()] });
+    await runAttach(db, { apply: false, phase: 'attach' });
+    expect(db.Song.update).not.toHaveBeenCalled();
+    expect(db.SongPlay.count).toHaveBeenCalledTimes(1);      // photo de référence, pas de comparaison
+    expect(process.exitCode).toBeUndefined();
+    expect(logs.join('\n')).toMatch(/Relancez avec --apply/);
+  });
+
+  test('un lot où RIEN n’a été écrit ne se lit pas comme « déjà fait » : sortie 1', async () => {
+    // Toutes les écritures rebondissent (0 ligne touchée). Sans ce garde, la sortie disait
+    // « candidats : 1 / rattachées : 0 / non écrites : 1 » avec un code de sortie 0.
+    const db = makeDb({ before: stable, after: stable, candidates: [row()] });
+    db.Song.update.mockResolvedValue([0]);
+    await runAttach(db, { apply: true, phase: 'attach' });
+    expect(process.exitCode).toBe(1);
+    expect(logs.join('\n')).toMatch(/AUCUNE écriture n'a abouti/);
+  });
+
+  test('un SELECT qui casse est signalé et fait échouer, il ne passe pas pour « 0 candidat »', async () => {
+    const db = makeDb({ before: stable, after: stable });
+    db.sequelize.query.mockRejectedValue(new Error('connection terminated'));
+    await runAttach(db, { apply: true, phase: 'attach' });
+    expect(process.exitCode).toBe(1);
+    expect(logs.join('\n')).toMatch(/connection terminated/);
   });
 });

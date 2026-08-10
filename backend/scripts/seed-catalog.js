@@ -1,15 +1,22 @@
 'use strict';
 
 // Story 23.1 — seed the shared Catalog from the songs already entered in production.
+// Story 23.2 — attach the users' existing Songs to the entry they match.
 //
 // MANUAL one-off script (epic 23, decision C). It is deliberately NOT wired to the
 // deploy: `release_command` runs migrations only, and a content seed has no business in
 // the schema pipeline. Run it by hand, dry-run first.
 //
 //   cd backend
-//   NODE_ENV=development node scripts/seed-catalog.js              # dry-run (default)
-//   NODE_ENV=development node scripts/seed-catalog.js --apply      # writes
+//   NODE_ENV=development node scripts/seed-catalog.js                    # dry-run (default)
+//   NODE_ENV=development node scripts/seed-catalog.js --apply            # writes
 //   NODE_ENV=development node scripts/seed-catalog.js --file=seed/other.csv
+//   NODE_ENV=development node scripts/seed-catalog.js --phase=attach     # dry-run of the attach
+//   NODE_ENV=development node scripts/seed-catalog.js --phase=attach --apply
+//
+// The two phases share the host guard, the dry-run default and the argument parsing on
+// purpose — the attach phase needs them MORE than the seed phase did, because it writes
+// into the users' personal Songs rather than into a shared pool.
 //
 // ⚠️ THE GUARD KEYS ON THE RESOLVED DATABASE HOST, NOT ON NODE_ENV — and that is not
 // a stylistic choice, it is a measured one. With NODE_ENV unset, db.js computes
@@ -31,10 +38,11 @@
 
 const fs = require('node:fs');
 const path = require('node:path');
-const { fn, col, where: whereFn, Op } = require('sequelize');
+const { fn, col, where: whereFn, Op, QueryTypes } = require('sequelize');
 
 const DEFAULT_FILE = path.join(__dirname, 'seed', 'catalog-seed.csv');
 const KNOWN_FLAGS = ['--apply', '--allow-remote'];
+const PHASES = ['seed', 'attach'];
 // Captured at MODULE LOAD, before anything can require config.js and let dotenv
 // rewrite it. Informational only — the guard below trusts the host, not this.
 const NODE_ENV_AT_STARTUP = process.env.NODE_ENV;
@@ -223,21 +231,278 @@ function formatReport(report, { log = console.log } = {}) {
   log('');
 }
 
+// --- Attach (story 23.2) -----------------------------------------------------
+
+// The matching happens HERE, in SQL, and not by loading every Song into JS: the JS fold
+// (identityKey) and the index expression are two implementations of the same rule and can
+// drift apart — they already disagree on surrounding whitespace.
+//
+// Be honest about how strong that is: this statement is a THIRD hand-typed spelling of the
+// same rule, and nothing automated proves it matches the index. It was verified by hand
+// against the dev database (story 23.2) and is verified again in 23.4. Note also that
+// `songs_user_uid_title_artist_ci` leads on `user_uid`, which this join deliberately does
+// NOT constrain — so that index cannot serve this join, and "agrees with the index" is a
+// claim about the EXPRESSION only, not about the plan.
+//
+// `count(*) OVER (PARTITION BY s.uid)` is the ambiguity probe. In theory it is always 1:
+// `catalog_songs_title_artist_ci` makes the fold unique on the Catalog side. Measuring it
+// anyway costs nothing, and a 2 means the canonical index is not doing its job — a state
+// worth refusing rather than resolving by picking whichever row came back first.
+//
+// `s.title`/`s.artist` come back so the UPDATE can re-check them: they are half of what
+// made this row a candidate, and the row can change between the SELECT and the write.
+//
+// No `published_at` filter: every entry seeded by 23.1 is a DRAFT (decision A), so
+// filtering on published would attach exactly nothing. The link stays dormant until the
+// curator publishes.
+const ATTACH_CANDIDATES_SQL = `
+  SELECT s.uid                              AS song_uid,
+         s.user_uid                         AS user_uid,
+         s.title                            AS song_title,
+         s.artist                           AS song_artist,
+         c.uid                              AS catalog_uid,
+         c."updatedAt"                      AS catalog_updated_at,
+         count(*) OVER (PARTITION BY s.uid) AS match_count
+    FROM "Songs" s
+    JOIN "CatalogSongs" c
+      ON lower(s.title) = lower(c.title)
+     AND coalesce(lower(s.artist), '') = coalesce(lower(c.artist), '')
+   WHERE s.source_catalog_uid IS NULL
+   ORDER BY s.user_uid, s.title
+`;
+
+async function selectAttachCandidates(sequelize) {
+  const rows = await sequelize.query(ATTACH_CANDIDATES_SQL, { type: QueryTypes.SELECT });
+  return rows.map((r, i) => {
+    const candidate = {
+      songUid: r.song_uid,
+      userUid: r.user_uid,
+      songTitle: r.song_title,
+      songArtist: r.song_artist,
+      catalogUid: r.catalog_uid,
+      catalogUpdatedAt: r.catalog_updated_at,
+      // pg returns bigint as a STRING: `'2' > 1` is true by coercion but `'2' > '10'` is
+      // not, so normalise rather than trust the comparison.
+      matchCount: Number(r.match_count),
+    };
+    // Refuse a malformed row instead of carrying it into an UPDATE. Without this, dropping
+    // `type: QueryTypes.SELECT` would make Sequelize return [rows, metadata]; every field
+    // would be undefined and matchCount NaN — and `NaN > 1` is FALSE, so the ambiguity
+    // probe would wave it straight through to `update({...}, { where: { uid: undefined } })`.
+    if (!candidate.songUid || !candidate.catalogUid || !Number.isFinite(candidate.matchCount) || candidate.matchCount < 1) {
+      throw new Error(
+        `Ligne ${i} inexploitable renvoyée par la requête de rattachement (song=${candidate.songUid}, ` +
+        `catalog=${candidate.catalogUid}, match_count=${r.match_count}) — la requête ne renvoie pas la forme attendue.`
+      );
+    }
+    return candidate;
+  });
+}
+
+// The tables whose rows ARE the users' practice history. Counted through the models so
+// the table names come from one place (the model layer) instead of being re-typed here —
+// `PlaylistSongs` in particular is camelCase in the database, not `playlist_songs`.
+async function countGuardedTables(db) {
+  const [Songs, SongPlays, SessionItems, PlaylistSongs] = await Promise.all([
+    db.Song.count(), db.SongPlay.count(), db.SessionItem.count(), db.PlaylistSong.count(),
+  ]);
+  return { Songs, SongPlays, SessionItems, PlaylistSongs };
+}
+
+function diffCounts(before, after) {
+  return Object.keys(before)
+    .filter(table => before[table] !== after[table])
+    .map(table => ({ table, before: before[table], after: after[table] }));
+}
+
+async function attachSongs({ Song, candidates, apply = false }) {
+  const report = { candidates: 0, attached: 0, ambiguous: [], raced: [], failed: [], byUser: {}, applied: !!apply };
+  const seen = new Set();
+
+  for (const c of candidates) {
+    // An ambiguous song comes back as several rows; it is ONE song to decide about.
+    if (seen.has(c.songUid)) continue;
+    seen.add(c.songUid);
+    report.candidates += 1;
+
+    if (c.matchCount > 1) {
+      report.ambiguous.push({ songUid: c.songUid, userUid: c.userUid, matches: c.matchCount });
+      continue;
+    }
+
+    const tally = () => {
+      report.attached += 1;
+      report.byUser[c.userUid] = (report.byUser[c.userUid] || 0) + 1;
+    };
+
+    // Same per-row guard as the seed phase: a connection dropping mid-batch must not
+    // discard the record of what has ALREADY been written to the users' rows.
+    try {
+      if (!apply) { tally(); continue; } // dry-run: counted, never written
+
+      const [affected = 0] = (await Song.update(
+        { sourceCatalogUid: c.catalogUid, sourceCatalogSyncedAt: c.catalogUpdatedAt },
+        {
+          // The where re-checks AT WRITE TIME every condition that made this row a
+          // candidate, not just the source. Checking only `sourceCatalogUid IS NULL` left
+          // a window: the user renames "Yesterday" to "Yesterday (live)" between the
+          // SELECT and the UPDATE, the uid still matches, the source is still NULL — and
+          // we stamp a provenance towards an entry the song no longer matches, reported
+          // as a success. Title and artist are compared exactly (not folded) on purpose:
+          // any edit at all should cost us the write rather than risk a wrong link.
+          where: { uid: c.songUid, sourceCatalogUid: null, title: c.songTitle, artist: c.songArtist },
+          // No updatedAt bump: this is a metadata backfill, not a user edit. Touching
+          // updatedAt on five users' whole songlists would falsify the row's own history
+          // and make the "only two columns" claim untrue.
+          silent: true,
+        }
+      )) || [];
+
+      // 0 rows means the song no longer looks like the one we selected: attached by a
+      // concurrent run, or edited since. We cannot tell which from here, and the label
+      // must not pretend otherwise.
+      if (!affected) { report.raced.push({ songUid: c.songUid, userUid: c.userUid }); continue; }
+      tally();
+    } catch (error) {
+      report.failed.push({ songUid: c.songUid, userUid: c.userUid, reason: (error && error.message) || String(error) });
+    }
+  }
+  return report;
+}
+
+function formatCounts(counts) {
+  return Object.entries(counts).map(([t, n]) => `${t}=${n}`).join('  ');
+}
+
+// One width for every label in the run, computed rather than hand-counted: the header and
+// the report are what an operator reads to decide whether to authorise a production write,
+// and hand-aligned spaces drift the moment a label is added (they already had, on
+// « Compteurs après »). Accented labels count in code points here, which is what padEnd
+// uses too, so the columns line up for the strings actually in play.
+const LABEL_WIDTH = 16;
+const label = text => text.padEnd(LABEL_WIDTH);
+
+function formatAttachReport(report, { log = console.log } = {}) {
+  log('');
+  log(report.applied ? '=== RATTACHEMENT APPLIQUÉ ===' : '=== DRY-RUN — aucune écriture ===');
+  log(`  ${label('candidats')}: ${report.candidates}`);
+  log(`  ${label(report.applied ? 'rattachées' : 'à rattacher')}: ${report.attached}`);
+  if (report.raced.length) log(`  ${label('non écrites')}: ${report.raced.length}   (rattachées entre-temps, ou modifiées depuis la sélection)`);
+
+  if (report.ambiguous.length) {
+    log(`  ${label('AMBIGUËS')}: ${report.ambiguous.length}   ⚠️  refusées — plusieurs entrées Catalog pour un même fold`);
+    for (const a of report.ambiguous) log(`      ✗ song ${a.songUid} — ${a.matches} entrées candidates`);
+  }
+  if (report.failed.length) {
+    log(`  ${label('ÉCHECS')}: ${report.failed.length}   ⚠️  le lot n'est PAS complet`);
+    for (const f of report.failed) log(`      ✗ song ${f.songUid} : ${f.reason}`);
+  }
+
+  // A batch where NOTHING was written and everything bounced is not "someone else already
+  // did the work" — it reads that way, which is exactly the danger. Say it plainly.
+  if (report.applied && report.candidates > 0 && report.attached === 0 && report.raced.length === report.candidates) {
+    log(`  ⚠️  AUCUNE écriture n'a abouti alors que ${report.candidates} candidat(s) avaient été sélectionnés.`);
+    log("      Ce n'est pas un lot déjà fait : vérifiez la correspondance colonnes/attributs avant de relancer.");
+  }
+
+  // Per user, never per email: the script has no need for one, and the versioned CSV
+  // deliberately contains none.
+  const users = Object.entries(report.byUser);
+  if (users.length) {
+    log('  par utilisateur :');
+    for (const [userUid, count] of users) log(`      ${userUid} : ${count}`);
+  }
+  log('');
+}
+
 // --- Entry point -----------------------------------------------------------
 
 function parseArgs(argv) {
-  const unknown = argv.filter(a => !KNOWN_FLAGS.includes(a) && !a.startsWith('--file='));
+  const unknown = argv.filter(a => !KNOWN_FLAGS.includes(a) && !a.startsWith('--file=') && !a.startsWith('--phase='));
   if (unknown.length) {
     // `--file path` (space form) lands here too, which is the point: it used to be
     // ignored while --apply was honoured, writing the DEFAULT file to the database.
-    throw new SeedFileError(`Argument non reconnu : ${unknown.join(' ')} — attendus : ${KNOWN_FLAGS.join(', ')}, --file=<chemin>`);
+    throw new SeedFileError(`Argument non reconnu : ${unknown.join(' ')} — attendus : ${KNOWN_FLAGS.join(', ')}, --file=<chemin>, --phase=${PHASES.join('|')}`);
   }
+
+  // A repeated flag was silently resolved first-wins: `--phase=seed --phase=attach` ran
+  // the SEED phase. Same discipline as the unknown argument — never guess which one the
+  // operator meant, especially when one of the two writes 82 rows.
+  for (const prefix of ['--phase=', '--file=']) {
+    const given = argv.filter(a => a.startsWith(prefix));
+    if (given.length > 1) {
+      throw new SeedFileError(`${prefix.slice(0, -1)} est spécifié plusieurs fois : ${given.join(' ')} — n'en gardez qu'un`);
+    }
+  }
+
+  const phaseArg = argv.find(a => a.startsWith('--phase='));
+  const phase = phaseArg ? phaseArg.slice('--phase='.length) : 'seed';
+  if (!PHASES.includes(phase)) {
+    // Never fall back to the default: `--phase=attachh` silently running the SEED phase
+    // with --apply would write 82 rows the operator did not ask for.
+    throw new SeedFileError(`Phase inconnue : « ${phase} » — attendues : ${PHASES.join(', ')}`);
+  }
+
   const fileArg = argv.find(a => a.startsWith('--file='));
+  if (fileArg && phase === 'attach') {
+    // The attach phase reads the database, not the CSV. Honouring --apply while ignoring
+    // --file would let the operator believe a different input was used.
+    throw new SeedFileError('--file n’a pas de sens en --phase=attach : cette phase lit la base, pas le CSV');
+  }
+
   return {
     apply: argv.includes('--apply'),
     allowRemote: argv.includes('--allow-remote'),
+    phase,
     file: fileArg ? path.resolve(process.cwd(), fileArg.slice('--file='.length)) : DEFAULT_FILE,
   };
+}
+
+// The attach run, counters included. Kept out of main() so the argument/guard preamble
+// stays one block and the two phases cannot drift apart on it.
+async function runAttach(db, opts) {
+  const before = await countGuardedTables(db);
+  console.log(`${label('Compteurs')}: ${formatCounts(before)}`);
+
+  let report;
+  try {
+    const candidates = await selectAttachCandidates(db.sequelize);
+    report = await attachSongs({ Song: db.Song, candidates, apply: opts.apply });
+  } catch (error) {
+    // attachSongs guards every row, so reaching here means the SELECT itself failed.
+    console.error(`Échec : ${error.message}`);
+    process.exitCode = 1;
+    return;
+  }
+
+  formatAttachReport(report);
+
+  if (opts.apply) {
+    // Invariant 1's safety net: this phase only ever UPDATEs two columns, so none of these
+    // counts should move. Read it as a TRIPWIRE, not as proof — a live database moves on
+    // its own (a user logging a practice adds a SongPlays row), and a delete plus an insert
+    // in the same table would leave the total untouched. It catches a destructive edit to
+    // this script; it does not certify the run.
+    const after = await countGuardedTables(db);
+    console.log(`${label('Compteurs après')}: ${formatCounts(after)}`);
+    const drift = diffCounts(before, after);
+    if (drift.length) {
+      console.error('\n⚠️  COMPTEURS MODIFIÉS — ce script ne doit RIEN créer ni supprimer :');
+      for (const d of drift) console.error(`      ${d.table} : ${d.before} → ${d.after}`);
+      console.error("Cause la plus probable : un utilisateur écrivait pendant l'exécution — vérifiez-le d'abord.");
+      console.error('Sinon, auditez la base : le script aurait créé ou supprimé des lignes.');
+      process.exitCode = 1;
+      return;
+    }
+  }
+
+  // An apply where every selected candidate bounced wrote nothing at all. Failing here
+  // stops it from reading as "already done" on the way out.
+  const allBounced = opts.apply && report.candidates > 0 && report.attached === 0
+    && report.raced.length === report.candidates;
+
+  if (report.failed.length || report.ambiguous.length || allBounced) process.exitCode = 1;
+  else if (!opts.apply) console.log('Relancez avec --apply pour écrire.');
 }
 
 async function main(argv) {
@@ -257,13 +522,14 @@ async function main(argv) {
   const host = cfg.host || '';
   const target = `${host || '?'}:${cfg.port || '?'}/${cfg.database || '?'}`;
 
-  console.log(`Base          : ${target}${isLocalHost(host) ? '  (locale)' : '  ⚠️ DISTANTE'}`);
-  console.log(`NODE_ENV      : au démarrage ${NODE_ENV_AT_STARTUP === undefined ? '(non défini)' : `« ${NODE_ENV_AT_STARTUP} »`}, après chargement « ${process.env.NODE_ENV} »`);
+  console.log(`${label('Base')}: ${target}${isLocalHost(host) ? '  (locale)' : '  ⚠️ DISTANTE'}`);
+  console.log(`${label('NODE_ENV')}: au démarrage ${NODE_ENV_AT_STARTUP === undefined ? '(non défini)' : `« ${NODE_ENV_AT_STARTUP} »`}, après chargement « ${process.env.NODE_ENV} »`);
   if (NODE_ENV_AT_STARTUP !== process.env.NODE_ENV) {
     console.log('                ⚠️ .env a modifié NODE_ENV APRÈS le choix de la connexion — ne vous fiez pas à cette valeur, fiez-vous à la base ci-dessus.');
   }
-  console.log(`Fichier       : ${opts.file}`);
-  console.log(opts.apply ? 'Mode          : --apply (ÉCRITURE)' : 'Mode          : dry-run (aucune écriture)');
+  console.log(`${label('Phase')}: ${opts.phase}${opts.phase === 'attach' ? '  (rattachement des Songs existantes)' : '  (création des entrées Catalog)'}`);
+  if (opts.phase === 'seed') console.log(`${label('Fichier')}: ${opts.file}`);
+  console.log(`${label('Mode')}: ${opts.apply ? '--apply (ÉCRITURE)' : 'dry-run (aucune écriture)'}`);
 
   // The refusal, keyed on the resolved host. Measured reason (see header): a plain
   // `node scripts/seed-catalog.js --apply` resolves to the PRODUCTION database while
@@ -277,6 +543,21 @@ async function main(argv) {
     );
     process.exitCode = 1;
     await Promise.resolve(db.sequelize.close()).catch(() => {});
+    return;
+  }
+
+  if (opts.phase === 'attach') {
+    // The counters live OUTSIDE runAttach's inner try, and the one that matters most runs
+    // AFTER the writes: a database error there would otherwise escape as a raw stack with
+    // the pool still open, killing precisely the step meant to show nothing was destroyed.
+    try {
+      await runAttach(db, opts);
+    } catch (error) {
+      console.error(`Échec : ${(error && error.message) || error}`);
+      process.exitCode = 1;
+    } finally {
+      await Promise.resolve(db.sequelize.close()).catch(() => {});
+    }
     return;
   }
 
@@ -313,8 +594,19 @@ async function main(argv) {
   await Promise.resolve(db.sequelize.close()).catch(() => {});
 }
 
-module.exports = { parseSeedCsv, seedCatalog, identityKey, formatReport, parseArgs, isLocalHost, SeedFileError, main };
+module.exports = {
+  parseSeedCsv, seedCatalog, identityKey, formatReport, parseArgs, isLocalHost, SeedFileError, main,
+  // Story 23.2 — attach phase
+  ATTACH_CANDIDATES_SQL, selectAttachCandidates, attachSongs, countGuardedTables, diffCounts,
+  formatAttachReport, runAttach,
+};
 
 if (require.main === module) {
-  main(process.argv.slice(2));
+  // Without this, anything escaping main surfaces as an unhandled rejection — a raw stack
+  // with no exit code, on a script whose whole job is to be legible while it writes to
+  // users' rows.
+  main(process.argv.slice(2)).catch(error => {
+    console.error(`Échec inattendu : ${(error && error.stack) || error}`);
+    process.exitCode = 1;
+  });
 }
