@@ -15,9 +15,12 @@
 //   NODE_ENV=development node scripts/seed-catalog.js --phase=attach --apply
 //   NODE_ENV=development node scripts/seed-catalog.js --phase=alias      # dry-run of the alias pass
 //   NODE_ENV=development node scripts/seed-catalog.js --phase=alias --apply
+//   NODE_ENV=development node scripts/seed-catalog.js --phase=enrich     # dry-run de l'enrichissement
+//   NODE_ENV=development node scripts/seed-catalog.js --phase=enrich --apply
 //
-// Phase order matters: seed → attach → alias. The alias pass must run AFTER the exact-fold
-// attach, so a song the exact match would have taken is never renamed by an alias.
+// Phase order matters: seed → attach → alias → enrich. The alias pass must run AFTER the
+// exact-fold attach, so a song the exact match would have taken is never renamed by an
+// alias; and enrich runs LAST because it travels along the link attach and alias create.
 //
 // The two phases share the host guard, the dry-run default and the argument parsing on
 // purpose — the attach phase needs them MORE than the seed phase did, because it writes
@@ -44,10 +47,11 @@
 const fs = require('node:fs');
 const path = require('node:path');
 const { fn, col, where: whereFn, Op, QueryTypes } = require('sequelize');
+const { normalizeInt, normalizeDurationSeconds, normalizeLanguage, normalizeMode } = require('../utils/normalize');
 
 const DEFAULT_FILE = path.join(__dirname, 'seed', 'catalog-seed.csv');
 const KNOWN_FLAGS = ['--apply', '--allow-remote'];
-const PHASES = ['seed', 'attach', 'alias'];
+const PHASES = ['seed', 'attach', 'alias', 'enrich'];
 // Captured at MODULE LOAD, before anything can require config.js and let dotenv
 // rewrite it. Informational only — the guard below trusts the host, not this.
 const NODE_ENV_AT_STARTUP = process.env.NODE_ENV;
@@ -832,6 +836,298 @@ async function runAlias(db, opts) {
 }
 
 
+// --- Enrich (story 23.5) -----------------------------------------------------
+//
+// Fills each DRAFT fiche from the single Song attached to it. Born from the 23.4
+// rehearsal: the original export carried only artist + title, so the seed could only
+// create empty fiches — but the restored prod dump carries key, bpm, genre and links.
+//
+// It runs LAST (seed → attach → alias → enrich) because it travels along the link that
+// attach and alias create: no link, no source.
+//
+// ⚠️ THE POINT OF THIS PHASE IS NOT THE COPY, IT IS THE SIDE EFFECT OF THE COPY.
+// Updating a fiche moves its updatedAt, and drift is computed against that date
+// (`getSong`: drift = syncedAt == null || catalog.updatedAt > syncedAt). Enriching 75
+// fiches without re-syncing would light up "a newer version is available" for 75 people
+// — precisely the alert decision B exists to prevent. The re-sync below is half the
+// story, not a finishing touch.
+
+// The closed list of what may travel from a personal Song into a SHARED fiche. Mirrors
+// songcontroller's INTRINSIC_REFRESH_FIELDS + the three JSON fields it deep-clones,
+// plus `album`. Everything else — notes, tuning, instrument, lastPlayed — is personal
+// and must never appear here. One list, used by the code AND by the test.
+const ENRICH_FIELDS = [
+  'album', 'key', 'bpm', 'mode', 'timeSignature', 'durationSeconds',
+  'language', 'genre', 'streamingLinks', 'pitchStandard',
+];
+
+// `pitchStandard` defaults to 440 on BOTH models, so a fiche always carries it and is
+// never literally "entirely empty". Judging emptiness on it would silence the signal
+// below for every fiche — measured, the bucket stopped firing at all. Emptiness is
+// therefore judged on the fields that actually carry information.
+const ENRICH_SIGNAL_FIELDS = ENRICH_FIELDS.filter(f => f !== 'pitchStandard');
+
+// Column name is identical on both tables (verified against information_schema), so one
+// mapping serves both sides.
+const ENRICH_COLUMNS = {
+  album: 'album', key: 'key', bpm: 'bpm', mode: 'mode', timeSignature: 'time_signature',
+  durationSeconds: 'duration_seconds', language: 'language', genre: 'genre',
+  streamingLinks: 'streaming_links', pitchStandard: 'pitch_standard',
+};
+
+// LEFT JOIN, not JOIN: a draft fiche attached to NO song must still come back so it can
+// be counted and reported rather than vanish. `count(s.uid)` (not `count(*)`) so the
+// empty row a LEFT JOIN produces counts as zero, not one.
+const ENRICH_CANDIDATES_SQL = `
+  SELECT c.uid   AS catalog_uid,
+         c.title AS catalog_title,
+         c.artist AS catalog_artist,
+         ${ENRICH_FIELDS.map(f => `c.${ENRICH_COLUMNS[f]} AS catalog_${ENRICH_COLUMNS[f]}`).join(',\n         ')},
+         s.uid AS song_uid,
+         ${ENRICH_FIELDS.map(f => `s.${ENRICH_COLUMNS[f]} AS song_${ENRICH_COLUMNS[f]}`).join(',\n         ')},
+         count(s.uid) OVER (PARTITION BY c.uid) AS song_count
+    FROM "CatalogSongs" c
+    LEFT JOIN "Songs" s ON s.source_catalog_uid = c.uid
+   WHERE c.published_at IS NULL
+   ORDER BY c.artist, c.title
+`;
+
+async function selectEnrichCandidates(sequelize) {
+  const rows = await sequelize.query(ENRICH_CANDIDATES_SQL, { type: QueryTypes.SELECT });
+  const pick = (row, prefix) => ENRICH_FIELDS.reduce((acc, f) => {
+    acc[f] = row[`${prefix}_${ENRICH_COLUMNS[f]}`];
+    return acc;
+  }, {});
+  return rows.map(r => ({
+    catalogUid: r.catalog_uid,
+    label: describeSong(r.catalog_artist, r.catalog_title),
+    songUid: r.song_uid,
+    songCount: Number(r.song_count),
+    catalog: pick(r, 'catalog'),
+    song: pick(r, 'song'),
+  }));
+}
+
+// A hole is anything that carries no information: null, undefined, a blank string, an
+// empty array, an empty object. The blank string matters — measured during framing, a
+// naive count claimed 75 songs had a key or bpm when the real answer was 61, because
+// `key = ''` is not NULL. Filling a hole with '' would leave the fiche looking complete
+// while being empty.
+function isEmptyValue(value) {
+  if (value === null || value === undefined) return true;
+  if (typeof value === 'string') return value.trim() === '';
+  if (Array.isArray(value)) return value.length === 0;
+  if (typeof value === 'object') return Object.keys(value).length === 0;
+  return false;
+}
+
+// Reuse the shared normalizers rather than re-typing the rules: a value a historical
+// Song tolerates can be out of range for a fiche, and the two sides must agree on shape
+// ("Major", not "major"). Bounds mirror songcontroller/catalogcontroller exactly.
+const NORMALIZE_ENRICH = {
+  bpm: value => normalizeInt(value, { min: 1, max: 1000 }),
+  pitchStandard: value => normalizeInt(value, { min: 380, max: 500 }),
+  durationSeconds: normalizeDurationSeconds,
+  language: normalizeLanguage,
+  mode: normalizeMode,
+};
+
+function computeFill(catalogValues, songValues) {
+  const fill = {};
+  const dropped = [];
+
+  for (const field of ENRICH_FIELDS) {
+    // The fiche wins whenever it already says something: the curator validated it.
+    if (!isEmptyValue(catalogValues[field])) continue;
+    const raw = songValues[field];
+    if (isEmptyValue(raw)) continue; // nothing to give
+
+    const normalize = NORMALIZE_ENRICH[field];
+    const value = normalize ? normalize(raw) : raw;
+
+    // The normalizers reject to null rather than clamp (see utils/normalize.js). A value
+    // that comes back empty was refused — say so instead of writing null over a hole,
+    // which would look like a successful fill.
+    if (isEmptyValue(value)) {
+      dropped.push({ field, reason: `valeur refusée par la normalisation : ${JSON.stringify(raw)}` });
+      continue;
+    }
+
+    // Deep clone: a shared fiche must never hold a reference into a user's row. Same
+    // discipline as refreshSongFromCatalog, which structuredClones the three JSON fields.
+    fill[field] = (value !== null && typeof value === 'object') ? structuredClone(value) : value;
+  }
+
+  return { fill, dropped };
+}
+
+async function enrichCatalogEntries({ CatalogSong, Song, candidates, apply = false, log = () => {} }) {
+  const report = {
+    candidates: 0, enriched: 0, nothingToDo: 0, sourceEmpty: [], withoutSource: 0,
+    ambiguous: [], dropped: [], raced: [], failed: [], fills: [], byField: {}, applied: !!apply,
+  };
+  const seen = new Set();
+
+  for (const c of candidates) {
+    if (seen.has(c.catalogUid)) continue; // an ambiguous fiche comes back as several rows
+    seen.add(c.catalogUid);
+    report.candidates += 1;
+
+    // No song attached: normal for a fiche the curator created by hand. Counted, not listed.
+    if (c.songCount === 0 || !c.songUid) { report.withoutSource += 1; continue; }
+
+    // Several songs attached: two users would disagree on the values, and picking one is
+    // not a fix. Same refusal as the ambiguity probes of 23.2 and 23.3.
+    if (c.songCount > 1) {
+      report.ambiguous.push({ catalogUid: c.catalogUid, label: c.label, songs: c.songCount });
+      continue;
+    }
+
+    const { fill, dropped } = computeFill(c.catalog, c.song);
+    for (const d of dropped) report.dropped.push({ label: c.label, ...d });
+
+    // Nothing to fill: do NOT touch the fiche. An empty UPDATE would still bump updatedAt
+    // and light up the drift banner for nothing — which is exactly what this phase exists
+    // to avoid. It is also what makes a second run a true no-op.
+    //
+    // Two very different reasons land here, and the first real run showed they must not
+    // share a label: a fiche the curator already filled, and a fiche whose source song has
+    // nothing to give. Calling the second one « déjà complète » reads as "job done" when in
+    // fact nobody ever entered a key, a tempo or a genre for that song.
+    if (!Object.keys(fill).length) {
+      // A fiche that is ENTIRELY empty and whose source gives nothing is worth naming: it
+      // will stay a shell, and the curator has to type it from scratch. A fiche that is
+      // merely full-as-it-can-be is the normal steady state and only needs a count —
+      // the first re-run announced « source SANS DONNÉE : 74 » right after enriching 73,
+      // which reads as a failure when nothing is wrong.
+      if (ENRICH_SIGNAL_FIELDS.every(f => isEmptyValue(c.catalog[f]))) {
+        report.sourceEmpty.push({ catalogUid: c.catalogUid, label: c.label });
+      } else report.nothingToDo += 1;
+      continue;
+    }
+
+    const tally = () => {
+      report.enriched += 1;
+      report.fills.push({ label: c.label, fields: Object.keys(fill) });
+      for (const f of Object.keys(fill)) report.byField[f] = (report.byField[f] || 0) + 1;
+    };
+
+    if (!apply) { tally(); continue; }
+
+    try {
+      const [affected = 0] = (await CatalogSong.update(fill, {
+        // Re-checks the draft state AT WRITE TIME: the curator may have published this
+        // fiche since the SELECT, and a published fiche is out of scope.
+        where: { uid: c.catalogUid, publishedAt: null },
+      })) || [];
+
+      if (!affected) { report.raced.push({ catalogUid: c.catalogUid, label: c.label }); continue; }
+
+      // Read the fiche's FRESH updatedAt and carry it to the attached song, so the drift
+      // stays false. Without this the phase would announce "a newer version is available"
+      // to every affected user. `silent` because the song itself did not change — only
+      // its synchronisation marker.
+      const fresh = await CatalogSong.findByPk(c.catalogUid);
+      await Song.update(
+        { sourceCatalogSyncedAt: fresh.updatedAt },
+        { where: { uid: c.songUid, sourceCatalogUid: c.catalogUid }, silent: true }
+      );
+
+      tally();
+      log(`      ✎ ${c.label} — ${Object.keys(fill).join(', ')}`);
+    } catch (error) {
+      report.failed.push({ catalogUid: c.catalogUid, label: c.label, reason: (error && error.message) || String(error) });
+    }
+  }
+  return report;
+}
+
+function formatEnrichReport(report, { log = console.log } = {}) {
+  log('');
+  log(report.applied ? '=== ENRICHISSEMENT APPLIQUÉ ===' : '=== DRY-RUN — aucune écriture ===');
+  log(`  ${label('fiches brouillon')}: ${report.candidates}`);
+  log(`  ${label(report.applied ? 'enrichies' : 'à enrichir')}: ${report.enriched}`);
+  if (report.nothingToDo) log(`  ${label('rien à combler')}: ${report.nothingToDo}   (la fiche porte déjà tout ce que sa source peut donner)`);
+  if (report.sourceEmpty.length) {
+    log(`  ${label('source SANS DONNÉE')}: ${report.sourceEmpty.length}   (la fiche reste vide : personne n'a renseigné cette chanson)`);
+    for (const e of report.sourceEmpty) log(`      • ${e.label}`);
+  }
+  if (report.withoutSource) log(`  ${label('sans chanson source')}: ${report.withoutSource}   (normal : personne ne les a)`);
+
+  if (report.ambiguous.length) {
+    log(`  ${label('AMBIGUËS')}: ${report.ambiguous.length}   ⚠️  plusieurs chansons rattachées — refusées, pas arbitrées`);
+    for (const a of report.ambiguous) log(`      ✗ ${a.label}  (${a.songs} chansons)  [${a.catalogUid}]`);
+  }
+  if (report.dropped.length) {
+    log(`  ${label('valeurs ÉCARTÉES')}: ${report.dropped.length}`);
+    for (const d of report.dropped) log(`      ✗ ${d.label} — ${d.field} : ${d.reason}`);
+  }
+  if (report.raced.length) {
+    log(`  ${label('non écrites')}: ${report.raced.length}   (publiées depuis la sélection)`);
+    for (const r of report.raced) log(`      ✗ ${r.label}  [${r.catalogUid}]`);
+  }
+  if (report.failed.length) {
+    log(`  ${label('ÉCHECS')}: ${report.failed.length}   ⚠️  le lot n'est PAS complet`);
+    for (const f of report.failed) log(`      ✗ ${f.label} : ${f.reason}`);
+  }
+
+  const totals = Object.entries(report.byField).sort((a, b) => b[1] - a[1]);
+  if (totals.length) {
+    log('  ce qui remonte, par champ :');
+    for (const [field, n] of totals) log(`      ${field.padEnd(18)}: ${n}`);
+  }
+  if (report.fills.length) {
+    log('  détail par fiche :');
+    for (const f of report.fills.slice(0, 25)) log(`      • ${f.label}  →  ${f.fields.join(', ')}`);
+    if (report.fills.length > 25) log(`      … et ${report.fills.length - 25} de plus`);
+  }
+  log('');
+}
+
+// The enrich run. Same skeleton as the other phases — counters, report, exit codes.
+async function runEnrich(db, opts) {
+  const before = await countGuardedTables(db);
+  console.log(`${label('Compteurs')}: ${formatCounts(before)}`);
+
+  let report;
+  try {
+    const candidates = await selectEnrichCandidates(db.sequelize);
+    report = await enrichCatalogEntries({
+      CatalogSong: db.CatalogSong, Song: db.Song, candidates, apply: opts.apply, log: console.log,
+    });
+  } catch (error) {
+    console.error(`Échec : ${error.message}`);
+    process.exitCode = 1;
+    return;
+  }
+
+  formatEnrichReport(report);
+
+  if (opts.apply) {
+    let after;
+    try {
+      after = await countGuardedTables(db);
+    } catch (error) {
+      console.error(`\n⚠️  ÉCRITURES APPLIQUÉES, mais le contrôle des compteurs est indisponible : ${(error && error.message) || error}`);
+      console.error('Relisez le rapport ci-dessus : il liste ce qui a été écrit.');
+      process.exitCode = 1;
+      return;
+    }
+    console.log(`${label('Compteurs après')}: ${formatCounts(after)}`);
+    const drift = diffCounts(before, after);
+    if (drift.length) {
+      console.error('\n⚠️  COMPTEURS MODIFIÉS — cette phase remplit des fiches, elle ne crée ni ne supprime :');
+      for (const d of drift) console.error(`      ${d.table} : ${d.before} → ${d.after}`);
+      console.error("Cause la plus probable : un utilisateur écrivait pendant l'exécution — vérifiez-le d'abord.");
+      process.exitCode = 1;
+      return;
+    }
+  }
+
+  if (report.failed.length || report.ambiguous.length || report.raced.length) process.exitCode = 1;
+  else if (!opts.apply) console.log('Relancez avec --apply pour écrire.');
+}
+
 // --- Entry point -----------------------------------------------------------
 
 function parseArgs(argv) {
@@ -946,7 +1242,7 @@ async function main(argv) {
   if (NODE_ENV_AT_STARTUP !== process.env.NODE_ENV) {
     console.log('                ⚠️ .env a modifié NODE_ENV APRÈS le choix de la connexion — ne vous fiez pas à cette valeur, fiez-vous à la base ci-dessus.');
   }
-  console.log(`${label('Phase')}: ${opts.phase}${{ attach: '  (rattachement des Songs existantes)', alias: '  (alias + correction orthographique)' }[opts.phase] || '  (création des entrées Catalog)'}`);
+  console.log(`${label('Phase')}: ${opts.phase}${{ attach: '  (rattachement des Songs existantes)', alias: '  (alias + correction orthographique)', enrich: '  (enrichissement des fiches brouillon)' }[opts.phase] || '  (création des entrées Catalog)'}`);
   if (opts.phase === 'seed') console.log(`${label('Fichier')}: ${opts.file}`);
   console.log(`${label('Mode')}: ${opts.apply ? '--apply (ÉCRITURE)' : 'dry-run (aucune écriture)'}`);
 
@@ -962,6 +1258,18 @@ async function main(argv) {
     );
     process.exitCode = 1;
     await Promise.resolve(db.sequelize.close()).catch(() => {});
+    return;
+  }
+
+  if (opts.phase === 'enrich') {
+    try {
+      await runEnrich(db, opts);
+    } catch (error) {
+      console.error(`Échec : ${(error && error.message) || error}`);
+      process.exitCode = 1;
+    } finally {
+      await Promise.resolve(db.sequelize.close()).catch(() => {});
+    }
     return;
   }
 
@@ -1033,6 +1341,9 @@ module.exports = {
   // Story 23.3 — alias phase
   ALIAS_FILE, ALIAS_BIND_COLUMNS, ALIAS_BIND_FIELDS, parseAliasCsv, buildAliasCandidatesSql, selectAliasCandidates, attachAliasSongs,
   formatAliasReport, runAlias,
+  // Story 23.5 — enrich phase
+  ENRICH_FIELDS, ENRICH_SIGNAL_FIELDS, ENRICH_COLUMNS, ENRICH_CANDIDATES_SQL, selectEnrichCandidates, computeFill,
+  enrichCatalogEntries, formatEnrichReport, runEnrich,
 };
 
 if (require.main === module) {

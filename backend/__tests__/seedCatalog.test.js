@@ -1042,3 +1042,263 @@ describe('runAlias — un alias qui ne trouve rien ne doit pas passer pour un su
     expect(process.exitCode).toBe(1);
   });
 });
+
+// --- Story 23.5 — enrich phase ------------------------------------------------
+//
+// Remonte les valeurs de la chanson rattachée dans sa fiche brouillon. Les tests
+// pèsent surtout sur ce que la phase ne doit PAS faire : écraser une valeur curée,
+// toucher une fiche publiée, arbitrer une fiche à plusieurs chansons — et sur
+// l'effet de bord central, la re-synchronisation qui évite d'allumer « mise à jour
+// disponible » chez tout le monde.
+const {
+  ENRICH_FIELDS, ENRICH_CANDIDATES_SQL, selectEnrichCandidates,
+  computeFill, enrichCatalogEntries, formatEnrichReport, runEnrich,
+} = require('../scripts/seed-catalog');
+
+const EMPTY_FICHE = {
+  album: null, key: null, bpm: null, mode: null, timeSignature: null,
+  durationSeconds: null, language: null, genre: null, streamingLinks: null, pitchStandard: null,
+};
+const FULL_SONG = {
+  album: 'Absolution', key: 'C', bpm: 186, mode: 'Major', timeSignature: '4/4',
+  durationSeconds: 227, language: ['English'], genre: ['Rock'],
+  streamingLinks: { spotify: 'x' }, pitchStandard: 440,
+};
+const enrichCandidate = over => ({
+  catalogUid: 'cat-1', label: 'Muse / Hysteria', songUid: 'song-1', songCount: 1,
+  catalog: { ...EMPTY_FICHE }, song: { ...FULL_SONG }, ...over,
+});
+const makeModels = (updatedAt = new Date('2026-08-10T21:00:00Z')) => ({
+  CatalogSong: {
+    update: jest.fn().mockResolvedValue([1]),
+    findByPk: jest.fn().mockResolvedValue({ updatedAt }),
+  },
+  Song: { update: jest.fn().mockResolvedValue([1]) },
+});
+
+describe('ENRICH_FIELDS — une seule liste, partagée par le code et le test', () => {
+  test('exactement les 10 champs partageables, aucun champ personnel', () => {
+    expect([...ENRICH_FIELDS].sort()).toEqual([
+      'album', 'bpm', 'durationSeconds', 'genre', 'key', 'language',
+      'mode', 'pitchStandard', 'streamingLinks', 'timeSignature',
+    ]);
+    for (const perso of ['notes', 'lastPlayed', 'myInstrumentUid', 'instrument', 'tuning', 'userUid']) {
+      expect(ENRICH_FIELDS).not.toContain(perso);
+    }
+  });
+});
+
+describe('ENRICH_SIGNAL_FIELDS — pitchStandard ne dit rien, il vaut 440 par défaut', () => {
+  test('le signal « fiche vide » exclut pitchStandard, sinon aucune fiche n’est jamais vide', () => {
+    const { ENRICH_SIGNAL_FIELDS } = require('../scripts/seed-catalog');
+    expect(ENRICH_SIGNAL_FIELDS).not.toContain('pitchStandard');
+    expect(ENRICH_SIGNAL_FIELDS).toHaveLength(ENRICH_FIELDS.length - 1);
+  });
+});
+
+describe('ENRICH_CANDIDATES_SQL', () => {
+  test('ne vise que les brouillons', () => {
+    expect(ENRICH_CANDIDATES_SQL).toMatch(/c\.published_at IS NULL/);
+  });
+  test('LEFT JOIN, pour qu’une fiche SANS chanson remonte quand même et soit comptée', () => {
+    expect(ENRICH_CANDIDATES_SQL).toMatch(/LEFT JOIN "Songs"/);
+  });
+  test('compte les chansons rattachées par fiche, en ignorant les lignes vides du LEFT JOIN', () => {
+    expect(ENRICH_CANDIDATES_SQL).toMatch(/count\(s\.uid\) OVER \(PARTITION BY c\.uid\)/i);
+  });
+});
+
+describe('computeFill — on comble les trous, on n’écrase jamais', () => {
+  test('une fiche vide reçoit tout ce que la chanson a', () => {
+    const { fill } = computeFill({ ...EMPTY_FICHE }, { ...FULL_SONG });
+    expect(Object.keys(fill).sort()).toEqual([...ENRICH_FIELDS].sort());
+    expect(fill.bpm).toBe(186);
+    expect(fill.key).toBe('C');
+  });
+
+  test('un champ DÉJÀ rempli dans la fiche n’est pas touché — le curateur fait autorité', () => {
+    const { fill } = computeFill({ ...EMPTY_FICHE, key: 'A', bpm: 93 }, { ...FULL_SONG });
+    expect(fill).not.toHaveProperty('key');
+    expect(fill).not.toHaveProperty('bpm');
+    expect(fill.mode).toBe('Major'); // les autres trous sont bien comblés
+  });
+
+  test('la CHAÎNE VIDE est un trou, des deux côtés', () => {
+    // Piège mesuré au cadrage : un comptage naïf annonçait 75, la vraie réponse était 61.
+    const { fill } = computeFill({ ...EMPTY_FICHE, key: '  ' }, { ...FULL_SONG });
+    expect(fill.key).toBe('C');                                    // '  ' côté fiche = trou
+
+    const { fill: f2 } = computeFill({ ...EMPTY_FICHE }, { ...FULL_SONG, key: '' });
+    expect(f2).not.toHaveProperty('key');                          // '' côté chanson = rien à donner
+  });
+
+  test('un tableau vide est un trou, pas une valeur', () => {
+    const { fill } = computeFill({ ...EMPTY_FICHE, genre: [] }, { ...FULL_SONG });
+    expect(fill.genre).toEqual(['Rock']);
+  });
+
+  test('les valeurs passent par la normalisation partagée', () => {
+    const { fill } = computeFill({ ...EMPTY_FICHE }, { ...FULL_SONG, mode: 'major', language: ['english'] });
+    expect(fill.mode).toBe('Major');
+    expect(fill.language).toEqual(['English']);
+  });
+
+  test('une valeur hors bornes est ÉCARTÉE et signalée, jamais insérée telle quelle', () => {
+    const { fill, dropped } = computeFill({ ...EMPTY_FICHE }, { ...FULL_SONG, bpm: 99999, pitchStandard: 12 });
+    expect(fill).not.toHaveProperty('bpm');
+    expect(fill).not.toHaveProperty('pitchStandard');
+    expect(dropped.map(d => d.field).sort()).toEqual(['bpm', 'pitchStandard']);
+  });
+
+  test('les objets JSON sont clonés : muter la chanson après coup ne change pas ce qui a été calculé', () => {
+    const song = { ...FULL_SONG, genre: ['Rock'], streamingLinks: { spotify: 'x' } };
+    const { fill } = computeFill({ ...EMPTY_FICHE }, song);
+    song.genre.push('Metal');
+    song.streamingLinks.spotify = 'MUTÉ';
+    expect(fill.genre).toEqual(['Rock']);
+    expect(fill.streamingLinks).toEqual({ spotify: 'x' });
+  });
+});
+
+describe('enrichCatalogEntries — écriture et re-synchronisation', () => {
+  test('le dry-run n’écrit rien mais compte ce qui serait comblé', async () => {
+    const m = makeModels();
+    const report = await enrichCatalogEntries({ ...m, candidates: [enrichCandidate()], apply: false });
+    expect(m.CatalogSong.update).not.toHaveBeenCalled();
+    expect(m.Song.update).not.toHaveBeenCalled();
+    expect(report.enriched).toBe(1);
+  });
+
+  test('LE CŒUR DE LA STORY : après l’écriture, syncedAt est re-posé depuis le updatedAt FRAIS de la fiche', async () => {
+    // Sans ça, modifier la fiche rend la drift vraie et allume « mise à jour
+    // disponible » chez la personne — exactement l’alerte que l’epic évite.
+    const updatedAt = new Date('2026-08-10T21:30:00Z');
+    const m = makeModels(updatedAt);
+    await enrichCatalogEntries({ ...m, candidates: [enrichCandidate()], apply: true });
+    expect(m.CatalogSong.findByPk).toHaveBeenCalledWith('cat-1');
+    expect(m.Song.update).toHaveBeenCalledTimes(1);
+    const [values, options] = m.Song.update.mock.calls[0];
+    expect(values).toEqual({ sourceCatalogSyncedAt: updatedAt });
+    expect(options).toEqual({ where: { uid: 'song-1', sourceCatalogUid: 'cat-1' }, silent: true });
+  });
+
+  test('le where de la fiche re-vérifie le brouillon au moment d’écrire', async () => {
+    const m = makeModels();
+    await enrichCatalogEntries({ ...m, candidates: [enrichCandidate()], apply: true });
+    expect(m.CatalogSong.update.mock.calls[0][1].where).toEqual({ uid: 'cat-1', publishedAt: null });
+  });
+
+  test('une fiche sans aucune chanson rattachée est ignorée, pas écrite', async () => {
+    const m = makeModels();
+    const report = await enrichCatalogEntries({
+      ...m, candidates: [enrichCandidate({ songCount: 0, songUid: null })], apply: true,
+    });
+    expect(m.CatalogSong.update).not.toHaveBeenCalled();
+    expect(report.withoutSource).toBe(1);
+  });
+
+  test('une fiche rattachée à PLUSIEURS chansons est refusée ET nommée, jamais arbitrée', async () => {
+    const m = makeModels();
+    const report = await enrichCatalogEntries({
+      ...m, candidates: [enrichCandidate({ songCount: 2 }), enrichCandidate({ songUid: 'song-2', songCount: 2 })], apply: true,
+    });
+    expect(m.CatalogSong.update).not.toHaveBeenCalled();
+    expect(report.ambiguous).toEqual([{ catalogUid: 'cat-1', label: 'Muse / Hysteria', songs: 2 }]);
+  });
+
+  test('« déjà complète » et « source vide » sont deux choses différentes', async () => {
+    // Vu au premier run réel : 2 fiches NEUVES étaient étiquetées « déjà complètes »
+    // alors que c'est leur chanson source qui n'avait rien à donner.
+    const m = makeModels();
+    const report = await enrichCatalogEntries({
+      ...m,
+      candidates: [enrichCandidate({ catalog: { ...EMPTY_FICHE, pitchStandard: 440 }, song: { ...EMPTY_FICHE, genre: [] } })],
+      apply: true,
+    });
+    expect(m.CatalogSong.update).not.toHaveBeenCalled();
+    expect(report.nothingToDo).toBe(0);
+    expect(report.sourceEmpty).toEqual([{ catalogUid: 'cat-1', label: 'Muse / Hysteria' }]);
+  });
+
+  test('idempotence : une fiche sans trou n’est même pas mise à jour', async () => {
+    const m = makeModels();
+    const report = await enrichCatalogEntries({
+      ...m, candidates: [enrichCandidate({ catalog: { ...FULL_SONG } })], apply: true,
+    });
+    expect(m.CatalogSong.update).not.toHaveBeenCalled();
+    expect(m.Song.update).not.toHaveBeenCalled();   // pas de fiche modifiée ⇒ pas de drift ⇒ rien à re-synchroniser
+    expect(report.enriched).toBe(0);
+    expect(report.nothingToDo).toBe(1);
+    expect(report.sourceEmpty).toHaveLength(0);   // pas « sans donnée » : elle est pleine
+  });
+
+  test('un second passage ne requalifie pas 73 fiches enrichies en « source sans donnée »', async () => {
+    // Défaut vu au premier re-run réel : les fiches partiellement remplies retombaient
+    // toutes dans « source SANS DONNÉE », ce qui faisait lire un succès comme un échec.
+    const m = makeModels();
+    const partiellementRemplie = { ...EMPTY_FICHE, bpm: 186, genre: ['Rock'] };
+    const report = await enrichCatalogEntries({
+      ...m,
+      candidates: [enrichCandidate({ catalog: partiellementRemplie, song: { ...EMPTY_FICHE, bpm: 186, genre: ['Rock'] } })],
+      apply: true,
+    });
+    expect(report.enriched).toBe(0);
+    expect(report.sourceEmpty).toHaveLength(0);
+    expect(report.nothingToDo).toBe(1);
+  });
+
+  test('0 ligne touchée (fiche publiée entre-temps) ⇒ ni écriture de suivi, ni comptée comme enrichie', async () => {
+    const m = makeModels();
+    m.CatalogSong.update.mockResolvedValue([0]);
+    const report = await enrichCatalogEntries({ ...m, candidates: [enrichCandidate()], apply: true });
+    expect(m.Song.update).not.toHaveBeenCalled();
+    expect(report.enriched).toBe(0);
+    expect(report.raced).toHaveLength(1);
+  });
+
+  test('une erreur en cours de lot ne jette pas le rapport des fiches déjà écrites', async () => {
+    const m = makeModels();
+    m.CatalogSong.update.mockResolvedValueOnce([1]).mockRejectedValueOnce(new Error('connection terminated'));
+    const report = await enrichCatalogEntries({
+      ...m,
+      candidates: [enrichCandidate({ catalogUid: 'cat-1' }), enrichCandidate({ catalogUid: 'cat-2' })],
+      apply: true,
+    });
+    expect(report.enriched).toBe(1);
+    expect(report.failed[0].reason).toMatch(/connection terminated/);
+  });
+
+  test('le rapport totalise par champ, pour lire d’un coup d’œil ce qui remonte', async () => {
+    const m = makeModels();
+    const report = await enrichCatalogEntries({ ...m, candidates: [enrichCandidate()], apply: false });
+    expect(report.byField.genre).toBe(1);
+    expect(report.byField.bpm).toBe(1);
+  });
+});
+
+describe('formatEnrichReport', () => {
+  const capture = report => {
+    const lines = [];
+    formatEnrichReport(report, { log: l => lines.push(l) });
+    return lines.join('\n');
+  };
+  const base = {
+    candidates: 0, enriched: 0, nothingToDo: 0, sourceEmpty: [], withoutSource: 0,
+    ambiguous: [], dropped: [], raced: [], failed: [], fills: [], byField: {}, applied: false,
+  };
+
+  test('chaque fiche enrichie est nommée avec les champs comblés', () => {
+    const out = capture({ ...base, candidates: 1, enriched: 1,
+      fills: [{ label: 'Muse / Hysteria', fields: ['bpm', 'genre'] }], byField: { bpm: 1, genre: 1 } });
+    expect(out).toMatch(/Muse \/ Hysteria/);
+    expect(out).toMatch(/bpm/);
+  });
+
+  test('une fiche ambiguë et une valeur écartée sont criées, pas noyées', () => {
+    const out = capture({ ...base, candidates: 2, applied: true,
+      ambiguous: [{ catalogUid: 'c1', label: 'X / Y', songs: 2 }],
+      dropped: [{ label: 'X / Y', field: 'bpm', reason: 'hors bornes' }] });
+    expect(out).toMatch(/AMBIGU/i);
+    expect(out).toMatch(/écartée|ÉCARTÉ/i);
+  });
+});
