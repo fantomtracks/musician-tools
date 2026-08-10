@@ -4,7 +4,7 @@ baseline_commit: a43b9a65811691c737a7f4e556b11a2ab84863fe
 
 # Story 23.3: Alias — rattacher les saisies divergentes et corriger l'orthographe
 
-Status: review
+Status: in-progress
 
 <!-- Note: Validation is optional. Run validate-create-story for quality check before dev-story. -->
 
@@ -109,6 +109,50 @@ C'est le **contrat FR4** (`models/sessionitem.js:41-42` : *« an entry keeps its
   - [x] **Exécuter réellement le dry-run** de la phase alias et lire sa sortie. ⚠️ `NODE_ENV=development` **ne se connecte pas** à la base locale (SSL en dur dans `config.js`, cf. deferred-work) : utiliser `DB_ENABLE_SSL= NODE_ENV=test`.
   - [x] Comparer le nombre de candidats à la mesure de cadrage : **8 en dev**, chez un seul utilisateur. Un chiffre différent doit être expliqué, pas accepté.
 
+### Review Findings
+
+_Code review du 2026-08-10. **Les 3 couches ont rendu** cette fois (2 min 40 à 4 min 40). Chaque constat a été vérifié plutôt que cru — deux tombent à la vérification, et l'une d'elles a révélé une erreur de ma part, corrigée ci-dessus dans le tableau de mutation._
+
+- [ ] [Review][Decision] **Le chemin « collision » estampille `syncedAt`, donc la copie mal orthographiée se lit comme à jour — pour toujours** — quand une renommée est abandonnée pour cause de collision, la Song reçoit quand même `sourceCatalogSyncedAt = catalog.updatedAt`. Or `getSong` calcule `drift = syncedAt == null || catalog.updatedAt > syncedAt` (`songcontroller.js:114`) : la drift est donc **fausse**, et l'UI présentera « AC DC / Back in black » comme synchronisée avec le Catalog. `refreshSongFromCatalog` ne touche jamais `title`/`artist`, donc rien ne la réparera jamais. Et au passage suivant, `WHERE s.source_catalog_uid IS NULL` l'exclut : elle devient **injoignable**. Laisser `syncedAt` à `NULL` sur ce chemin la ferait ressortir comme divergente — mais ça contredit la **décision B** de l'epic. À trancher : décision B s'applique-t-elle au chemin qui n'a pas renommé ?
+- [ ] [Review][Decision] **Écrire l'orthographe canonique depuis la fiche Catalog plutôt que depuis le CSV** — aujourd'hui l'`UPDATE` écrit `c.canonTitle`/`c.canonArtist`, c'est-à-dire les colonnes du CSV. La fiche Catalog est jointe **sans distinction de casse**, donc si le CSV et la fiche divergent un jour, on écrit chez l'utilisateur une orthographe qui n'est pas celle de la fiche à laquelle on le rattache. Prendre `c.title`/`c.artist` de la fiche rendrait l'invariant structurel. Contre-argument réel : une fiche mal orthographiée se propagerait alors chez les utilisateurs. Vérifié aujourd'hui : les 9 formes canoniques du CSV correspondent **octet pour octet** aux entrées du seed, donc le choix est sans effet immédiat — c'est un choix de modèle, pas un correctif.
+- [x] [Review][Patch] **Une colonne artiste vide est acceptée, des deux côtés, dans la seule phase autorisée à réécrire des données utilisateur** — le contrôle de complétude est `if (!aliasTitle || !title)` : les deux colonnes artiste ne sont jamais validées. Vérifié à l'exécution : `,Runaway,Jamiroquai,Runaway` est **accepté**. Conséquences, chacune grave : un `aliasArtist` vide joint sur `coalesce(lower(s.artist),'') = ''` et réclame donc **toutes** les chansons de ce titre sans artiste, **chez tous les utilisateurs**, puis les renomme ; un `artist` canonique vide fait écrire `artist: null` par-dessus l'artiste réel de l'utilisateur, et le rapport l'affiche `— / Back in Black`, ce qui se lit comme du formatage et non comme une perte. [`backend/scripts/seed-catalog.js:469`]
+- [x] [Review][Patch] **L'ordre des phases n'est garanti que par un commentaire** — si `--phase=alias --apply` est lancé avant l'attach, ou si le Catalog gagne un jour une fiche orthographiée **comme un alias**, une chanson correctement orthographiée se fait renommer vers autre chose, sur des données vivantes, sans annulation possible. Aujourd'hui c'est sûr par accident : aucune des 9 orthographes d'alias n'est elle-même une entrée du seed. Rendre le garde structurel : `AND NOT EXISTS (SELECT 1 FROM "CatalogSongs" x WHERE <x matche l'orthographe de l'alias>)`. [`backend/scripts/seed-catalog.js:19-20`, `:514-546`]
+- [x] [Review][Patch] **Un alias qui ne matche aucune chanson est invisible et le run sort en 0** — le rapport dit « Alias : 9 exploitables » puis un nombre de candidats, jamais **lesquels** n'ont rien trouvé. Or la jointure est exacte à la casse près : une espace finale, une apostrophe courbe (`she’s` vs `she's`), un accent NFD, et l'alias ne matche rien. Toute la story existe pour 9 chansons précises — un 0 silencieux est exactement l'issue que personne ne remarque, et il n'y aura pas de seconde chance parce que l'opérateur considérera la phase faite. [`backend/scripts/seed-catalog.js:713-760`]
+- [x] [Review][Patch] **Aucune sonde d'ambiguïté sur la jointure Catalog — la phase alias choisit là où la phase attach refuse** — `ATTACH_CANDIDATES_SQL` porte `count(*) OVER (PARTITION BY s.uid)` et 23.2 **refuse** un candidat ambigu. La requête alias n'a pas d'équivalent : si le LEFT JOIN renvoyait deux fiches pour un même fold, `if (seen.has(c.songUid)) continue` en jette une **sans compteur ni ligne de rapport**, et le lien est posé vers celle qui est revenue la première — sans départage, donc sans reproductibilité. Impossible aujourd'hui grâce à `catalog_songs_title_artist_ci`, mais les deux phases ne doivent pas diverger sur un rail de sécurité. [`backend/scripts/seed-catalog.js:543-545`, `:581`]
+- [x] [Review][Patch] **Le dry-run peut promettre plus de renommées que l'apply n'en fera** — le pré-contrôle compte les collisions **telles qu'elles sont au SELECT**. Deux alias dont les formes canoniques foldent pareil, chez le même utilisateur, rapportent tous deux `collision_count = 0`. Sous `--apply`, le premier `UPDATE` passe, le second lève une 23505 et retombe sur le rattachement seul. L'écart est **déterministe**, pas une course : northwood valide un chiffre que le run ne peut pas tenir. Hors d'atteinte avec les 9 lignes actuelles, mais le fichier est fait pour grossir. [`backend/scripts/seed-catalog.js:533-537`, `:619-627`]
+- [x] [Review][Patch] **Le refus de conflit compare des folds, donc deux orthographes canoniques différentes sont arbitrées premier-gagnant** — vérifié à l'exécution : deux lignes envoyant le même alias vers `AC/DC,Back in Black` et vers `ac/dc,back in black` ne lèvent **pas**, la seconde est rangée en « doublon interne » et **la première orthographe gagne**. Comme tout l'objet de la story est d'écrire une orthographe précise chez un utilisateur, le test de conflit doit comparer les **chaînes littérales**, pas leur fold. [`backend/scripts/seed-catalog.js:435-512`]
+- [x] [Review][Patch] **Le seau `raced` sort en 0, n'affiche aucun uid, et n'est couvert par aucun test** — ce sont les lignes où l'utilisateur a modifié sa chanson entre le SELECT et l'UPDATE : l'alias **n'a pas été posé**. Le rapport imprime un nombre nu et le run se lit comme propre. Tous les mocks renvoient `[1]`, donc la branche n'est jamais exercée — c'est d'ailleurs pourquoi le formateur a besoin du `report.raced &&` défensif. [`backend/scripts/seed-catalog.js:615`, `:643`, `:683-685`]
+- [x] [Review][Patch] **`attachedOnly` et `refused` n'affichent qu'un UUID nu** — l'AC4 demande un signalement **nommément** et l'AC7 un avant/après pour chaque Song concernée. Le bloc avant→après n'itère que `report.renames` : northwood lisant un dry-run de prod voit `• song 7f3a… — collision`, sans savoir de quelle chanson il s'agit, ni avec laquelle elle collisionne, ni chez quel utilisateur — alors que `userUid` et les orthographes sont disponibles au moment du push. [`backend/scripts/seed-catalog.js:668-697`]
+- [x] [Review][Patch] **Rien n'est imprimé avant la fin du lot** — script lancé à la main contre la prod : un Ctrl-C ou un terminal qui saute détruit tout le relevé avant→après, alors que les renommées déjà faites restent commitées. Logger chaque renommée au moment où elle est écrite sous `--apply`. [`backend/scripts/seed-catalog.js:573-666`]
+- [x] [Review][Patch] **Un échec du comptage post-écriture emporte la vérification sans le dire** — il est hors de tout `try` dans `runAlias` ; `main` l'attrape, mais le message générique ne dit pas que **les écritures, elles, ont eu lieu**. Message explicite : « écritures appliquées, contrôle des compteurs indisponible ». [`backend/scripts/seed-catalog.js:713-760`]
+- [x] [Review][Patch] **Cinq faiblesses de tests** — (a) le test d'idempotence passe une liste **vide** : il passerait contre n'importe quelle implémentation ; (b) l'ordre des binds n'est lié nulle part à l'ordre des colonnes de la CTE, or l'en-tête du CSV est dans l'ordre **inverse** de chaque paire — permuter les deux noms dans la CTE laisserait toute la suite verte ; (c) `raced` n'est couvert par rien ; (d) la généralisation de `--file` à toute phase non-`seed` et l'acceptation de `--phase=alias` ne sont testées nulle part ; (e) `toHaveLength(9)` sur le fichier versionné casse dès qu'un curateur ajoute un 10ᵉ alias, tout en ne validant rien de leur contenu. [`backend/__tests__/seedCatalog.test.js`]
+- [x] [Review][Defer] **Le CSV est normalisé NFC, la base ne l'est pas** [`backend/scripts/seed-catalog.js:440`] — deferred. Un titre tapé sur iOS peut arriver en NFD et ne jamais égaler l'alias NFC. Même classe que l'item NFC déjà reporté en 23.1 ; se traite en une passe sur la base, pas dans ce script.
+- [x] [Review][Defer] **Aucun numéro de ligne dans les erreurs et les sauts de parsing** [`backend/scripts/seed-catalog.js:435-512`] — deferred. `• — /   (ligne vide ou incomplète)` ne situe pas la ligne fautive. Confort d'opérateur, sans conséquence sur la donnée.
+- [x] [Review][Defer] **Le garde de compteurs est structurellement aveugle à cette phase** [`backend/scripts/seed-catalog.js:738-751`] — deferred. Une renommée ne change aucun compte : `diffCounts` ne peut pas détecter le seul dégât que la phase alias sait faire, tout en criant sur un utilisateur qui écrit pendant le run. C'est **la décision n°2 déjà ouverte de la review 23.2** — même sujet, vu par un autre bout, à trancher une seule fois.
+
+**Patches appliqués le 2026-08-10** — les 11 constats `patch` sont corrigés. Backend **464 → 483 tests**, lint propre, dry-run réel réexécuté.
+
+Les 7 gardes ajoutés sont **vérifiés par mutation** — et cette fois en visant la fonction par sa ligne, pas par la première occurrence du motif dans le fichier (c'est l'erreur qui avait faussé le tableau précédent). Une mutation neutre a servi de témoin : elle est bien restée verte, ce qui valide la méthode plutôt que le seul résultat.
+
+| mutation | tests qui meurent |
+|---|---|
+| colonnes artiste redevenues optionnelles | 2 |
+| sonde d'ambiguïté alias désactivée (ligne 629, pas 333) | 1 |
+| réservation du dry-run retirée | 1 |
+| conflit littéral non détecté | 2 |
+| détection des alias morts retirée | 1 |
+| journalisation au fil de l'eau retirée | 1 |
+| `raced` et alias morts exclus du code de sortie | 2 |
+| *(témoin : mutation neutre)* | *0, comme attendu* |
+
+**Ce que le dry-run réel dit maintenant** : les 8 refus nomment la chanson, la cible, l'utilisateur et l'uid — là où il n'affichait qu'un UUID nu. Et le nouveau bloc « alias morts » a trouvé **de lui-même** que `Jamiroquoi / Runaway` ne correspond à aucune chanson en base de dev : c'est précisément le fait que j'avais dû déterrer à la main au cadrage de la story, et que le script taisait. Code de sortie **1**.
+
+Les **2 constats `decision`** restent ouverts, avec ceux de la review 23.2.
+
+_Écartés comme bruit (2), avec la preuve :_
+- _« `identityKey` et `lower()` sont deux égalités différentes, `identityKey` plie les accents / l'article The / la ponctuation » — **faux**, vérifié à l'exécution : `identityKey` ne fait que minusculiser. Accents : NON plié. Article : NON plié. Ponctuation : NON pliée. Les deux folds coïncident._
+- _« Ajouter `--alias-file=` pour répéter la phase sur une table de test » — hors périmètre, et le garde sur l'hôte couvre déjà le risque que ça viserait._
+
 ## Dev Notes
 
 ### Le piège central de cette story
@@ -190,11 +234,13 @@ Les 8 fiches canoniques sont trouvées, **zéro collision**, et `Little Lord Fen
 | mutation | tests qui meurent |
 |---|---|
 | le garde de collision ne bloque plus le renommage | 2 |
-| la 23505 ne retombe plus sur le rattachement seul | 2 |
+| la 23505 ne retombe plus sur le rattachement seul | 1 |
 | une entrée canonique absente n'est plus refusée | 1 |
 | le `where` ne re-vérifie plus la saisie | 1 |
 | un alias contradictoire est résolu premier-gagnant | 1 |
 | le renommage devient silencieux | 1 |
+
+**Correction (review du 2026-08-10)** : la ligne « 23505 » annonçait 2 tests morts. C'était faux, et pour une raison qui vaut d'être écrite : ma mutation remplaçait la **première** occurrence de `if (error && error.name === 'SequelizeUniqueConstraintError')` dans le fichier — celle de `seedCatalog` (ligne 193, phase seed de 23.1), **pas** celle de `attachAliasSongs` (ligne 646). Je mesurais donc la robustesse d'un autre garde. Refait sur la bonne ligne : **1 test meurt**, celui qui exercice le repli. Le garde est bien couvert, mais mon chiffre ne le prouvait pas.
 
 ### Completion Notes List
 

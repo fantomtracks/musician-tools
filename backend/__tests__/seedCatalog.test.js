@@ -610,15 +610,17 @@ describe('runAttach — un écart de compteur fait échouer le lot, il ne se con
 const {
   parseAliasCsv, buildAliasCandidatesSql, selectAliasCandidates,
   attachAliasSongs, formatAliasReport, runAlias,
+  ALIAS_BIND_COLUMNS, ALIAS_BIND_FIELDS,
 } = require('../scripts/seed-catalog');
 
 const ALIAS_HEADER = 'aliasArtist,aliasTitle,artist,title\n';
 const aliasCandidate = over => ({
   songUid: 'song-1', userUid: 'user-a',
   songTitle: 'Back in black', songArtist: 'AC DC',
+  aliasTitle: 'Back in black', aliasArtist: 'AC DC',
   canonTitle: 'Back in Black', canonArtist: 'AC/DC',
   catalogUid: 'cat-1', catalogUpdatedAt: new Date('2026-08-01T10:00:00Z'),
-  collisionCount: 0, sessionItemCount: 0, ...over,
+  matchCount: 1, collisionCount: 0, sessionItemCount: 0, ...over,
 });
 
 describe('parseAliasCsv', () => {
@@ -665,8 +667,16 @@ describe('parseAliasCsv', () => {
     const path = require('node:path');
     const text = fs.readFileSync(path.join(__dirname, '..', 'scripts', 'seed', 'catalog-seed-aliases.csv'), 'utf8');
     const { rows, skipped } = parseAliasCsv(text);
-    expect(rows).toHaveLength(9);
+    // Pas de compte magique : un curateur qui ajoute un 10e alias ne doit pas casser la
+    // suite. Ce qui compte, ce sont les propriétés — aucune ligne sautée, quatre colonnes
+    // pleines partout, aucun alias répété.
     expect(skipped).toHaveLength(0);
+    expect(rows.length).toBeGreaterThan(0);
+    for (const r of rows) {
+      expect(r.aliasArtist && r.aliasTitle && r.artist && r.title).toBeTruthy();
+    }
+    const keys = rows.map(r => `${r.aliasArtist.toLowerCase()}|${r.aliasTitle.toLowerCase()}`);
+    expect(new Set(keys).size).toBe(rows.length);
   });
 });
 
@@ -849,5 +859,186 @@ describe('formatAliasReport — l’avant/après que northwood lit avant d’aut
     });
     expect(out).toMatch(/collision/i);
     expect(out).toMatch(/absente du Catalog/);
+  });
+});
+
+// --- Story 23.3 — correctifs de la code review ------------------------------
+
+describe('parseAliasCsv — les quatre colonnes sont obligatoires', () => {
+  test('un aliasArtist vide est refusé : il réclamerait toutes les chansons sans artiste, chez tous les users', () => {
+    const { rows, skipped } = parseAliasCsv(ALIAS_HEADER + ',Runaway,Jamiroquai,Runaway\n');
+    expect(rows).toHaveLength(0);
+    expect(skipped[0].reason).toMatch(/incomplète/);
+  });
+
+  test('un artiste canonique vide est refusé : il écrirait NULL par-dessus l’artiste réel', () => {
+    const { rows, skipped } = parseAliasCsv(ALIAS_HEADER + 'AC DC,Back in black,,Back in Black\n');
+    expect(rows).toHaveLength(0);
+    expect(skipped[0].reason).toMatch(/incomplète/);
+  });
+
+  test('une 5e colonne fait lever plutôt que d’être ignorée en silence', () => {
+    expect(() => parseAliasCsv('aliasArtist,aliasTitle,artist,title,note\n')).toThrow(/colonnes/);
+  });
+
+  test('deux orthographes canoniques qui ne diffèrent QUE par la casse sont un conflit, pas un doublon', () => {
+    const text = ALIAS_HEADER
+      + 'Beatles,Come together,AC/DC,Back in Black\n'
+      + 'Beatles,Come together,ac/dc,back in black\n';
+    expect(() => parseAliasCsv(text)).toThrow(/[Cc]onflit/);
+  });
+});
+
+describe('buildAliasCandidatesSql — les gardes ajoutés en review', () => {
+  test('le garde d’ordre des phases est STRUCTUREL : une orthographe déjà au Catalog n’est jamais candidate', () => {
+    expect(buildAliasCandidatesSql(1)).toMatch(/NOT EXISTS[\s\S]*lower\(x\.title\)\s*=\s*lower\(a\.alias_title\)/);
+  });
+
+  test('la sonde d’ambiguïté existe, comme dans la phase attach', () => {
+    expect(buildAliasCandidatesSql(1)).toMatch(/count\(\*\) OVER \(PARTITION BY s\.uid\)/i);
+  });
+
+  test('l’ordre des binds est lié à celui de la CTE par une constante partagée, pas par convention', () => {
+    // Permuter deux noms dans la CTE laissait toute la suite verte : l’en-tête du CSV est
+    // dans l’ordre INVERSE de chaque paire, donc l’invitation à transposer était réelle.
+    expect(ALIAS_BIND_COLUMNS).toEqual(['alias_title', 'alias_artist', 'canon_title', 'canon_artist']);
+    expect(ALIAS_BIND_FIELDS).toEqual(['aliasTitle', 'aliasArtist', 'title', 'artist']);
+    expect(buildAliasCandidatesSql(1)).toContain(`WITH alias(${ALIAS_BIND_COLUMNS.join(', ')})`);
+  });
+});
+
+describe('attachAliasSongs — refus, réservation et traçabilité', () => {
+  const makeSong = () => ({ update: jest.fn().mockResolvedValue([1]) });
+
+  test('deux entrées Catalog pour un même fold ⇒ REFUS, comme en 23.2, jamais un choix au hasard', async () => {
+    const Song = makeSong();
+    const report = await attachAliasSongs({ Song, candidates: [aliasCandidate({ matchCount: 2 })], apply: true });
+    expect(Song.update).not.toHaveBeenCalled();
+    expect(report.refused[0].reason).toMatch(/ambigu/);
+  });
+
+  test('le dry-run ne promet pas deux renommées quand la seconde collisionnerait avec la première', async () => {
+    // Les deux visent la même identité canonique pour le même user : collisionCount vaut 0
+    // pour les deux (aucune n’existe ENCORE), donc sans réservation le dry-run annonçait 2.
+    const Song = makeSong();
+    const candidates = [
+      aliasCandidate({ songUid: 's1', songTitle: 'Back in black', aliasTitle: 'Back in black' }),
+      aliasCandidate({ songUid: 's2', songTitle: 'back in BLACK', aliasTitle: 'back in BLACK' }),
+    ];
+    const dry = await attachAliasSongs({ Song, candidates, apply: false });
+    const wet = await attachAliasSongs({ Song, candidates, apply: true });
+    expect(dry.renamed).toBe(1);
+    expect(dry.attachedOnly).toHaveLength(1);
+    expect(wet.renamed).toBe(dry.renamed);                 // le dry-run ne ment pas
+    expect(wet.attachedOnly).toHaveLength(dry.attachedOnly.length);
+  });
+
+  test('chaque seau d’exception nomme la chanson, l’utilisateur et la cible', async () => {
+    const Song = makeSong();
+    const report = await attachAliasSongs({
+      Song, candidates: [aliasCandidate({ collisionCount: 1 })], apply: true,
+    });
+    expect(report.attachedOnly[0]).toMatchObject({
+      songUid: 'song-1', userUid: 'user-a', song: 'AC DC / Back in black', canon: 'AC/DC / Back in Black',
+    });
+  });
+
+  test('une ligne non écrite atterrit dans « raced » avec de quoi la retrouver', async () => {
+    const Song = { update: jest.fn().mockResolvedValue([0]) };
+    const report = await attachAliasSongs({ Song, candidates: [aliasCandidate()], apply: true });
+    expect(report.renamed).toBe(0);
+    expect(report.raced[0]).toMatchObject({ songUid: 'song-1', userUid: 'user-a', song: 'AC DC / Back in black' });
+  });
+
+  test('chaque renommée est journalisée au moment où elle est écrite, pas seulement à la fin', async () => {
+    const Song = makeSong();
+    const lines = [];
+    await attachAliasSongs({ Song, candidates: [aliasCandidate()], apply: true, log: l => lines.push(l) });
+    expect(lines.join('\n')).toMatch(/AC DC \/ Back in black.*→.*AC\/DC \/ Back in Black/);
+  });
+
+  test('idempotence RÉELLE : au second passage la chanson porte déjà la forme canonique, le where ne matche plus', async () => {
+    // Ce que fait vraiment un second run : le SELECT ne la renvoie plus (source posée), et si
+    // elle revenait, le where sur la saisie d’origine ne matcherait plus rien.
+    const Song = { update: jest.fn().mockResolvedValue([0]) };
+    const report = await attachAliasSongs({
+      Song,
+      candidates: [aliasCandidate({ songTitle: 'Back in Black', songArtist: 'AC/DC' })],
+      apply: true,
+    });
+    expect(Song.update.mock.calls[0][1].where).toMatchObject({ title: 'Back in Black', artist: 'AC/DC' });
+    expect(report.renamed).toBe(0);
+    expect(report.raced).toHaveLength(1);
+  });
+
+  test('les alias effectivement rencontrés sont tracés, pour pouvoir nommer ceux qui n’ont rien trouvé', async () => {
+    const Song = makeSong();
+    const report = await attachAliasSongs({ Song, candidates: [aliasCandidate()], apply: false });
+    expect(report.matchedAliases.has(identityKey('Back in black', 'AC DC'))).toBe(true);
+  });
+});
+
+describe('parseArgs — la phase alias', () => {
+  test('--phase=alias est accepté', () => {
+    expect(parseArgs(['--phase=alias']).phase).toBe('alias');
+    expect(parseArgs(['--phase=alias', '--apply']).apply).toBe(true);
+  });
+
+  test('--file est refusé en phase alias, avec un message propre à la phase', () => {
+    expect(() => parseArgs(['--phase=alias', '--file=x.csv'])).toThrow(/--phase=alias/);
+  });
+});
+
+describe('runAlias — un alias qui ne trouve rien ne doit pas passer pour un succès', () => {
+  const stable = { Songs: 120, SongPlays: 900, SessionItems: 40, PlaylistSongs: 12 };
+  const makeDb = rows => ({
+    Song: { count: jest.fn().mockResolvedValue(stable.Songs), update: jest.fn().mockResolvedValue([1]) },
+    SongPlay: { count: jest.fn().mockResolvedValue(stable.SongPlays) },
+    SessionItem: { count: jest.fn().mockResolvedValue(stable.SessionItems) },
+    PlaylistSong: { count: jest.fn().mockResolvedValue(stable.PlaylistSongs) },
+    sequelize: { query: jest.fn().mockResolvedValue(rows) },
+  });
+  // Une ligne SQL correspondant au 1er alias du fichier versionné (AC DC / Back in black).
+  const row = over => ({
+    song_uid: 's1', user_uid: 'u1', song_title: 'Back in black', song_artist: 'AC DC',
+    alias_title: 'Back in black', alias_artist: 'AC DC',
+    canon_title: 'Back in Black', canon_artist: 'AC/DC',
+    catalog_uid: 'c1', catalog_updated_at: '2026-08-01T10:00:00.000Z',
+    match_count: '1', collision_count: '0', session_item_count: '0', ...over,
+  });
+
+  let logs;
+  beforeEach(() => {
+    logs = [];
+    process.exitCode = undefined;
+    jest.spyOn(console, 'log').mockImplementation(l => logs.push(String(l)));
+    jest.spyOn(console, 'error').mockImplementation(l => logs.push(String(l)));
+  });
+  afterEach(() => { jest.restoreAllMocks(); process.exitCode = undefined; });
+
+  test('les alias sans correspondance sont NOMMÉS et le run sort en 1', async () => {
+    // Un seul des 9 alias du fichier remonte une chanson : les 8 autres sont morts.
+    await runAlias(makeDb([row()]), { apply: false, phase: 'alias' });
+    const out = logs.join('\n');
+    expect(out).toMatch(/n'ont trouvé AUCUNE chanson/);
+    expect(out).toMatch(/Jamiroquoi \/ Runaway/);   // un des alias non servis
+    expect(process.exitCode).toBe(1);
+  });
+
+  test('une ligne non écrite met aussi le code de sortie à 1', async () => {
+    const db = makeDb([row()]);
+    db.Song.update.mockResolvedValue([0]);
+    await runAlias(db, { apply: true, phase: 'alias' });
+    expect(logs.join('\n')).toMatch(/NON ÉCRITES/);
+    expect(process.exitCode).toBe(1);
+  });
+
+  test('un comptage post-écriture en échec dit que les ÉCRITURES ONT EU LIEU', async () => {
+    const db = makeDb([row()]);
+    let calls = 0;
+    db.SongPlay.count = jest.fn(async () => { calls += 1; if (calls > 1) throw new Error('connection terminated'); return stable.SongPlays; });
+    await runAlias(db, { apply: true, phase: 'alias' });
+    expect(logs.join('\n')).toMatch(/ÉCRITURES APPLIQUÉES/);
+    expect(process.exitCode).toBe(1);
   });
 });

@@ -431,11 +431,16 @@ function formatAttachReport(report, { log = console.log } = {}) {
 // must not be renamed by an alias it did not need.
 
 const ALIAS_FILE = path.join(__dirname, 'seed', 'catalog-seed-aliases.csv');
+// One ordered source of truth for the CTE columns and the bind order. Declaring them twice
+// invited a transposition no test could have caught: the CSV header order is the REVERSE of
+// each pair (aliasArtist,aliasTitle vs alias_title,alias_artist).
+const ALIAS_BIND_COLUMNS = ['alias_title', 'alias_artist', 'canon_title', 'canon_artist'];
+const ALIAS_BIND_FIELDS = ['aliasTitle', 'aliasArtist', 'title', 'artist'];
 
 function parseAliasCsv(text) {
   const rows = [];
   const skipped = [];
-  const seen = new Map(); // alias fold -> canonical fold, to catch a file that contradicts itself
+  const seen = new Map(); // alias fold -> canonical LITERAL, to catch a file that contradicts itself
 
   const clean = String(text).replace(/^﻿/, '').normalize('NFC');
   const lines = clean.split(/\r?\n/);
@@ -453,9 +458,11 @@ function parseAliasCsv(text) {
       headerSeen = true;
       const [c1 = '', c2 = '', c3 = '', c4 = ''] = fields.map(f => f.toLowerCase());
       if (c1 !== 'aliasartist' || c2 !== 'aliastitle' || c3 !== 'artist' || c4 !== 'title') {
-        // Same refusal as parseSeedCsv: guessing the column order here would rename users'
-        // songs towards the wrong string.
+        // Never guess the column order: here it would rename users' songs towards the wrong string.
         throw new SeedFileError(`En-tête attendu « aliasArtist,aliasTitle,artist,title », lu « ${fields.join(',')} »`);
+      }
+      if (fields.length > 4) {
+        throw new SeedFileError(`En-tête à ${fields.length} colonnes : les colonnes surnuméraires seraient ignorées en silence`);
       }
       continue;
     }
@@ -466,13 +473,23 @@ function parseAliasCsv(text) {
     const title = titleRaw.trim();
     const artist = artistRaw.trim();
 
-    if (!aliasTitle || !title) {
-      skipped.push({ aliasArtist, aliasTitle, reason: 'ligne vide ou incomplète' });
+    // ALL FOUR columns are required, artists included. An empty aliasArtist would join on
+    // `coalesce(lower(s.artist),'') = ''` and claim EVERY artist-less song with that title,
+    // for every user, then rename it. An empty canonical artist would write NULL over the
+    // user's real artist, and the report would render it « — / Back in Black », which reads
+    // like formatting rather than data loss. An artist-less song is deliberately NOT
+    // expressible here: this table exists to fix a handful of named rows.
+    if (!aliasTitle || !title || !aliasArtist || !artist) {
+      skipped.push({ aliasArtist, aliasTitle, reason: 'ligne incomplète (les 4 colonnes sont obligatoires)' });
       continue;
     }
 
     const aliasKey = identityKey(aliasTitle, aliasArtist);
     const canonKey = identityKey(title, artist);
+    // The conflict test compares the LITERAL canonical pair, not its fold: the whole point of
+    // this phase is to write one precise spelling into a user's row, so « AC/DC » and « ac/dc »
+    // are a contradiction to raise, not a duplicate to collapse.
+    const canonLiteral = `${title} ${artist}`;
 
     if (aliasKey === canonKey) {
       // The exact-fold phase already matched this one; treating it as an alias would mean
@@ -482,16 +499,13 @@ function parseAliasCsv(text) {
     }
 
     if (seen.has(aliasKey)) {
-      if (seen.get(aliasKey) !== canonKey) {
-        // Two rows sending the SAME typed spelling to two different Catalog entries. There
-        // is no defensible way to pick one, and picking silently would rename a user's song
-        // towards a fiche nobody chose.
+      if (seen.get(aliasKey) !== canonLiteral) {
         throw new SeedFileError(`Conflit dans la table d'alias : « ${aliasArtist} / ${aliasTitle} » pointe vers deux fiches différentes`);
       }
       skipped.push({ aliasArtist, aliasTitle, reason: 'doublon interne au fichier' });
       continue;
     }
-    seen.set(aliasKey, canonKey);
+    seen.set(aliasKey, canonLiteral);
 
     rows.push({ aliasArtist, aliasTitle, artist, title });
   }
@@ -503,14 +517,20 @@ function parseAliasCsv(text) {
 // The alias table travels as bind parameters rather than being interpolated: these strings
 // come from a file, and one of them legitimately contains a quote (Guns N' Roses).
 //
-// The collision probe is the load-bearing part. `songs_user_uid_title_artist_ci` makes
-// identity unique PER USER, so renaming « AC DC / Back in black » can collide with a
-// « AC/DC / Back in Black » the same user already owns. Counting it in SQL — same user,
-// excluding the row itself, on the index expression — is the only honest way to know
-// before writing. It is still not sufficient: see the 23505 fallback below.
+// Three probes live in this statement, each because doing it in JS would be weaker:
+//   * collision_count — `songs_user_uid_title_artist_ci` makes identity unique PER USER, so
+//     renaming « AC DC / Back in black » can collide with an « AC/DC / Back in Black » the
+//     same user already owns. Counted on the index expression, same user, excluding self.
+//   * match_count — the same ambiguity probe the attach phase carries. If the Catalog ever
+//     held two fiches for one fold, taking whichever row came back first would be arbitrary
+//     AND irreproducible; the attach phase refuses, so this one refuses too.
+//   * NOT EXISTS — the phase-order guard, made STRUCTURAL instead of merely documented. A
+//     song whose own spelling is itself a Catalog entry is never an alias candidate,
+//     whatever order the phases run in. Without it, a fiche one day spelled like an alias
+//     would turn this pass into a renamer of correctly-spelled songs.
 //
-// LEFT JOIN on CatalogSongs, not JOIN: a missing canonical entry must come back so it can
-// be REFUSED and reported, not silently vanish from the candidate list.
+// LEFT JOIN on CatalogSongs, not JOIN: a missing canonical entry must come back so it can be
+// REFUSED and reported, not silently vanish from the candidate list.
 function buildAliasCandidatesSql(count) {
   const tuples = Array.from({ length: count }, (_, i) => {
     const b = i * 4;
@@ -521,15 +541,18 @@ function buildAliasCandidatesSql(count) {
   }).join(', ');
 
   return `
-  WITH alias(alias_title, alias_artist, canon_title, canon_artist) AS (VALUES ${tuples})
+  WITH alias(${ALIAS_BIND_COLUMNS.join(', ')}) AS (VALUES ${tuples})
   SELECT s.uid          AS song_uid,
          s.user_uid     AS user_uid,
          s.title        AS song_title,
          s.artist       AS song_artist,
+         a.alias_title  AS alias_title,
+         a.alias_artist AS alias_artist,
          a.canon_title  AS canon_title,
          a.canon_artist AS canon_artist,
          c.uid          AS catalog_uid,
          c."updatedAt"  AS catalog_updated_at,
+         count(*) OVER (PARTITION BY s.uid)                                            AS match_count,
          (SELECT count(*) FROM "Songs" o
            WHERE o.user_uid = s.user_uid
              AND o.uid <> s.uid
@@ -544,6 +567,9 @@ function buildAliasCandidatesSql(count) {
       ON lower(c.title) = lower(a.canon_title)
      AND coalesce(lower(c.artist), '') = coalesce(lower(a.canon_artist), '')
    WHERE s.source_catalog_uid IS NULL
+     AND NOT EXISTS (SELECT 1 FROM "CatalogSongs" x
+                      WHERE lower(x.title) = lower(a.alias_title)
+                        AND coalesce(lower(x.artist), '') = coalesce(lower(a.alias_artist), ''))
    ORDER BY s.user_uid, s.title
 `;
 }
@@ -551,7 +577,10 @@ function buildAliasCandidatesSql(count) {
 async function selectAliasCandidates(sequelize, aliasRows) {
   if (!aliasRows.length) return []; // an empty VALUES list is a syntax error, not an empty result
   const bind = [];
-  for (const r of aliasRows) bind.push(r.aliasTitle, r.aliasArtist, r.title, r.artist);
+  // Built from the SAME ordered constant the CTE declares, so a transposition is impossible
+  // rather than merely untested. The CSV header order is the reverse of each pair, which is
+  // exactly the invitation to swap that this removes.
+  for (const r of aliasRows) bind.push(...ALIAS_BIND_FIELDS.map(f => r[f]));
 
   const rows = await sequelize.query(buildAliasCandidatesSql(aliasRows.length), { type: QueryTypes.SELECT, bind });
   return rows.map(r => ({
@@ -559,39 +588,62 @@ async function selectAliasCandidates(sequelize, aliasRows) {
     userUid: r.user_uid,
     songTitle: r.song_title,
     songArtist: r.song_artist,
+    aliasTitle: r.alias_title,
+    aliasArtist: r.alias_artist,
     canonTitle: r.canon_title,
     canonArtist: r.canon_artist,
     catalogUid: r.catalog_uid,
     catalogUpdatedAt: r.catalog_updated_at,
-    collisionCount: Number(r.collision_count),   // bigint arrives as a string
+    matchCount: Number(r.match_count),           // bigint arrives as a string
+    collisionCount: Number(r.collision_count),
     sessionItemCount: Number(r.session_item_count),
   }));
 }
 
 const describeSong = (artist, title) => `${artist || '—'} / ${title}`;
 
-async function attachAliasSongs({ Song, candidates, apply = false }) {
+async function attachAliasSongs({ Song, candidates, apply = false, log = () => {} }) {
   const report = {
     candidates: 0, renamed: 0, attachedOnly: [], refused: [], failed: [], raced: [],
-    renames: [], sessionItemsAffected: 0, applied: !!apply,
+    renames: [], sessionItemsAffected: 0, matchedAliases: new Set(), applied: !!apply,
   };
   const seen = new Set();
+  // Canonical identities this run has already claimed, per user. Two aliases whose canonical
+  // forms fold alike would each report collision_count = 0 (neither exists YET), so without
+  // this the dry-run would promise two renames while --apply delivers one plus a 23505
+  // fallback — a deterministic lie in the very number northwood signs off on.
+  const claimed = new Set();
 
   for (const c of candidates) {
     if (seen.has(c.songUid)) continue;
     seen.add(c.songUid);
     report.candidates += 1;
+    report.matchedAliases.add(identityKey(c.aliasTitle, c.aliasArtist));
 
-    // The alias points at an entry that is not in the Catalog: the seed phase has not run,
-    // or the curator deleted the fiche. Creating it here would be the seed phase's job done
-    // badly, in the wrong place, from a file that only carries a spelling.
-    if (!c.catalogUid) {
-      report.refused.push({
-        songUid: c.songUid, userUid: c.userUid,
-        reason: `entrée canonique absente du Catalog (${describeSong(c.canonArtist, c.canonTitle)})`,
-      });
+    const typed = describeSong(c.songArtist, c.songTitle);
+    const canonical = describeSong(c.canonArtist, c.canonTitle);
+    const identify = extra => ({ songUid: c.songUid, userUid: c.userUid, song: typed, canon: canonical, ...extra });
+
+    // Same refusal as the attach phase: two Catalog fiches for one fold is a broken canonical
+    // index, and choosing between them at random is not a fix.
+    if (c.matchCount > 1) {
+      report.refused.push(identify({ reason: `ambigu — ${c.matchCount} entrées Catalog pour « ${canonical} »` }));
       continue;
     }
+
+    // The alias points at an entry that is not in the Catalog: the seed phase has not run, or
+    // the curator deleted the fiche. Creating it here would be the seed phase's job done
+    // badly, in the wrong place, from a file that only carries a spelling.
+    if (!c.catalogUid) {
+      report.refused.push(identify({ reason: `entrée canonique absente du Catalog (${canonical})` }));
+      continue;
+    }
+
+    const claimKey = `${c.userUid} ${identityKey(c.canonTitle, c.canonArtist)}`;
+    const wouldCollide = c.collisionCount > 0 || claimed.has(claimKey);
+    const collisionReason = claimed.has(claimKey)
+      ? 'collision avec une autre renommée du même lot, pour le même utilisateur'
+      : 'collision avec une autre chanson du même utilisateur';
 
     const provenance = { sourceCatalogUid: c.catalogUid, sourceCatalogSyncedAt: c.catalogUpdatedAt };
     // The where re-checks the TYPED spelling, not the canonical one: if the user edited the
@@ -599,12 +651,9 @@ async function attachAliasSongs({ Song, candidates, apply = false }) {
     const where = { uid: c.songUid, sourceCatalogUid: null, title: c.songTitle, artist: c.songArtist };
 
     const tallyRename = () => {
+      claimed.add(claimKey);
       report.renamed += 1;
-      report.renames.push({
-        userUid: c.userUid,
-        before: describeSong(c.songArtist, c.songTitle),
-        after: describeSong(c.canonArtist, c.canonTitle),
-      });
+      report.renames.push({ userUid: c.userUid, before: typed, after: canonical });
       report.sessionItemsAffected += c.sessionItemCount || 0;
     };
 
@@ -612,60 +661,65 @@ async function attachAliasSongs({ Song, candidates, apply = false }) {
     // path writes provenance only, which is metadata about the row, not an edit of it.
     const attachWithoutRenaming = async reason => {
       const [affected = 0] = (await Song.update(provenance, { where, silent: true })) || [];
-      if (!affected) { report.raced.push({ songUid: c.songUid, userUid: c.userUid }); return; }
-      report.attachedOnly.push({ songUid: c.songUid, userUid: c.userUid, reason });
+      if (!affected) { report.raced.push(identify({})); return; }
+      report.attachedOnly.push(identify({ reason }));
+      log(`      • rattachée sans renommage : ${typed}  (${reason})`);
     };
 
     if (!apply) {
-      if (c.collisionCount > 0) {
-        report.attachedOnly.push({
-          songUid: c.songUid, userUid: c.userUid,
-          reason: 'collision avec une autre chanson du même utilisateur',
-        });
-      } else tallyRename();
+      if (wouldCollide) report.attachedOnly.push(identify({ reason: collisionReason }));
+      else tallyRename();
       continue;
     }
 
     try {
-      if (c.collisionCount > 0) {
-        await attachWithoutRenaming('collision avec une autre chanson du même utilisateur');
+      if (wouldCollide) {
+        await attachWithoutRenaming(collisionReason);
         continue;
       }
 
       const [affected = 0] = (await Song.update(
-        { ...provenance, title: c.canonTitle, artist: c.canonArtist || null },
-        // Deliberately NOT silent, unlike 23.2 and unlike the branch above: there we posted
-        // a provenance marker, here the user's song genuinely changes. Freezing updatedAt
-        // would make the row claim it had not been modified when it had.
+        { ...provenance, title: c.canonTitle, artist: c.canonArtist },
+        // Deliberately NOT silent, unlike 23.2 and unlike the branch above: there we posted a
+        // provenance marker, here the user's song genuinely changes. Freezing updatedAt would
+        // make the row claim it had not been modified when it had.
         { where }
       )) || [];
 
-      if (!affected) { report.raced.push({ songUid: c.songUid, userUid: c.userUid }); continue; }
+      if (!affected) { report.raced.push(identify({})); continue; }
       tallyRename();
+      // Printed as it lands, not only in the final report: this script is run by hand against
+      // production, and a Ctrl-C would otherwise destroy the whole record of what was
+      // rewritten while the writes stay committed.
+      log(`      ✎ ${typed}  →  ${canonical}`);
     } catch (error) {
       if (error && error.name === 'SequelizeUniqueConstraintError') {
         // The pre-check said no collision, but the index disagreed: a concurrent run, or a
-        // song the user created in between. The index is the authority. Fall back to the
-        // link alone rather than failing the row — and NAME the constraint instead of
-        // assuming which one fired.
+        // song the user created in between. The index is the authority. Fall back to the link
+        // alone rather than failing the row — and NAME the constraint instead of assuming
+        // which one fired.
         const constraint = (error.parent && error.parent.constraint) || error.constraint || 'contrainte inconnue';
         try {
           await attachWithoutRenaming(`collision détectée à l'écriture (${constraint})`);
         } catch (fallbackError) {
-          report.failed.push({
-            songUid: c.songUid, userUid: c.userUid,
-            reason: `repli après conflit impossible : ${(fallbackError && fallbackError.message) || fallbackError}`,
-          });
+          report.failed.push(identify({ reason: `repli après conflit impossible : ${(fallbackError && fallbackError.message) || fallbackError}` }));
         }
         continue;
       }
-      report.failed.push({ songUid: c.songUid, userUid: c.userUid, reason: (error && error.message) || String(error) });
+      report.failed.push(identify({ reason: (error && error.message) || String(error) }));
     }
   }
   return report;
 }
 
 function formatAliasReport(report, { log = console.log } = {}) {
+  // Every exception bucket names the song, the user and the canonical target. These are the
+  // rows a human has to decide about; a bare UUID makes that impossible.
+  const detail = (mark, e) => {
+    log(`      ${mark} ${e.song || 'song'} → ${e.canon || '?'}  [user ${e.userUid}, song ${e.songUid}]`);
+    if (e.reason) log(`          ${e.reason}`);
+  };
+
   log('');
   log(report.applied ? '=== ALIAS APPLIQUÉ ===' : '=== DRY-RUN — aucune écriture ===');
   log(`  ${label('candidats')}: ${report.candidates}`);
@@ -673,18 +727,19 @@ function formatAliasReport(report, { log = console.log } = {}) {
 
   if (report.attachedOnly.length) {
     log(`  ${label('rattachées SANS renommage')}: ${report.attachedOnly.length}`);
-    for (const a of report.attachedOnly) log(`      • song ${a.songUid} — ${a.reason}`);
+    for (const a of report.attachedOnly) detail('•', a);
   }
   if (report.refused.length) {
     log(`  ${label('REFUSÉES')}: ${report.refused.length}`);
-    for (const r of report.refused) log(`      ✗ song ${r.songUid} : ${r.reason}`);
+    for (const r of report.refused) detail('✗', r);
   }
   if (report.raced && report.raced.length) {
-    log(`  ${label('non écrites')}: ${report.raced.length}   (modifiées depuis la sélection)`);
+    log(`  ${label('NON ÉCRITES')}: ${report.raced.length}   ⚠️  modifiées depuis la sélection — l'alias n'a PAS été posé`);
+    for (const r of report.raced) detail('✗', r);
   }
   if (report.failed.length) {
     log(`  ${label('ÉCHECS')}: ${report.failed.length}   ⚠️  le lot n'est PAS complet`);
-    for (const f of report.failed) log(`      ✗ song ${f.songUid} : ${f.reason}`);
+    for (const f of report.failed) detail('✗', f);
   }
 
   if (report.renames.length) {
@@ -703,13 +758,13 @@ function formatAliasReport(report, { log = console.log } = {}) {
   // makes real warnings invisible.
   if (report.sessionItemsAffected > 0) {
     log(`  ℹ️  ${report.sessionItemsAffected} entrée(s) d'historique des sessions gardent l'ANCIENNE orthographe.`);
-    log('      SessionItems.label est un instantané volontaire (FR4) : ce n\'est pas un bug, rien à corriger.');
+    log("      SessionItems.label est un instantané volontaire (FR4) : ce n'est pas un bug, rien à corriger.");
   }
   log('');
 }
 
-// The alias run. Same skeleton as runAttach — counters, report, exit codes — because the
-// two phases must not drift apart on the safety rails.
+// The alias run. Same skeleton as runAttach — counters, report, exit codes — because the two
+// phases must not drift apart on the safety rails.
 async function runAlias(db, opts) {
   const before = await countGuardedTables(db);
   console.log(`${label('Compteurs')}: ${formatCounts(before)}`);
@@ -723,12 +778,12 @@ async function runAlias(db, opts) {
     return;
   }
   console.log(`${label('Alias')}: ${parsed.rows.length} exploitables, ${parsed.skipped.length} sautés`);
-  for (const s of parsed.skipped) console.log(`      • ${s.aliasArtist || '—'} / ${s.aliasTitle}  (${s.reason})`);
+  for (const sk of parsed.skipped) console.log(`      • ${sk.aliasArtist || '—'} / ${sk.aliasTitle}  (${sk.reason})`);
 
   let report;
   try {
     const candidates = await selectAliasCandidates(db.sequelize, parsed.rows);
-    report = await attachAliasSongs({ Song: db.Song, candidates, apply: opts.apply });
+    report = await attachAliasSongs({ Song: db.Song, candidates, apply: opts.apply, log: console.log });
   } catch (error) {
     console.error(`Échec : ${error.message}`);
     process.exitCode = 1;
@@ -737,8 +792,28 @@ async function runAlias(db, opts) {
 
   formatAliasReport(report);
 
+  // An alias that matched nothing is the failure nobody notices: this table exists to fix a
+  // handful of NAMED songs, so "0 matched" is not "nothing to do", it is a miss — a trailing
+  // space, a curly apostrophe, an NFD accent. Without this block the run looks identical
+  // whether 9 aliases worked or 4 did.
+  const dead = parsed.rows.filter(r => !report.matchedAliases.has(identityKey(r.aliasTitle, r.aliasArtist)));
+  if (dead.length) {
+    console.error(`\n⚠️  ${dead.length} alias sur ${parsed.rows.length} n'ont trouvé AUCUNE chanson :`);
+    for (const d of dead) console.error(`      • ${d.aliasArtist} / ${d.aliasTitle}   (visait « ${d.artist} / ${d.title} »)`);
+    console.error("Vérifiez l'orthographe exacte telle qu'elle est stockée : espace finale, apostrophe courbe, accent NFD.");
+  }
+
   if (opts.apply) {
-    const after = await countGuardedTables(db);
+    let after;
+    try {
+      after = await countGuardedTables(db);
+    } catch (error) {
+      // The writes ALREADY landed. Saying only "Échec" here would read as "nothing happened".
+      console.error(`\n⚠️  ÉCRITURES APPLIQUÉES, mais le contrôle des compteurs est indisponible : ${(error && error.message) || error}`);
+      console.error('Relisez le rapport ci-dessus : il liste ce qui a été écrit.');
+      process.exitCode = 1;
+      return;
+    }
     console.log(`${label('Compteurs après')}: ${formatCounts(after)}`);
     const drift = diffCounts(before, after);
     if (drift.length) {
@@ -750,11 +825,12 @@ async function runAlias(db, opts) {
     }
   }
 
-  // A refusal is not a skip: it means an alias points at a fiche that is not there, and the
-  // operator has to decide. Failing loudly keeps it out of the "all good" pile.
-  if (report.failed.length || report.refused.length) process.exitCode = 1;
+  // A refusal, a raced row and a dead alias all mean « something did not land ». None of them
+  // may exit 0 on a script that rewrites user data by hand.
+  if (report.failed.length || report.refused.length || report.raced.length || dead.length) process.exitCode = 1;
   else if (!opts.apply) console.log('Relancez avec --apply pour écrire.');
 }
+
 
 // --- Entry point -----------------------------------------------------------
 
@@ -955,7 +1031,7 @@ module.exports = {
   ATTACH_CANDIDATES_SQL, selectAttachCandidates, attachSongs, countGuardedTables, diffCounts,
   formatAttachReport, runAttach,
   // Story 23.3 — alias phase
-  ALIAS_FILE, parseAliasCsv, buildAliasCandidatesSql, selectAliasCandidates, attachAliasSongs,
+  ALIAS_FILE, ALIAS_BIND_COLUMNS, ALIAS_BIND_FIELDS, parseAliasCsv, buildAliasCandidatesSql, selectAliasCandidates, attachAliasSongs,
   formatAliasReport, runAlias,
 };
 
