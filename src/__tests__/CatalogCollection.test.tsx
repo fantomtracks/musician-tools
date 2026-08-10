@@ -1,5 +1,5 @@
 import { StrictMode } from 'react';
-import { render, screen, fireEvent, waitFor } from '@testing-library/react';
+import { render, screen, fireEvent, waitFor, act } from '@testing-library/react';
 import { MemoryRouter, Routes, Route } from 'react-router-dom';
 import CatalogCollection from '../pages/CatalogCollection';
 import { catalogService, CollectionNotFoundError } from '../services/catalogService';
@@ -7,10 +7,8 @@ import { catalogService, CollectionNotFoundError } from '../services/catalogServ
 // Story 20.4 — user-facing Collection detail + whole-collection import.
 jest.mock('../services/catalogService', () => {
   const actual = jest.requireActual('../services/catalogService');
-  return {
-    ...actual,
-    catalogService: { getCollection: jest.fn(), importCollection: jest.fn() },
-  };
+  const { makeCatalogServiceMock } = jest.requireActual('../test/catalogServiceMock');
+  return { ...actual, catalogService: makeCatalogServiceMock() };
 });
 const cat = catalogService as jest.Mocked<typeof catalogService>;
 
@@ -86,4 +84,49 @@ test('import failure surfaces an assertive error toast (role=alert)', async () =
   fireEvent.click(screen.getByRole('button', { name: 'Add to my songlist' }));
   const alert = await screen.findByRole('alert');
   expect(alert).toHaveTextContent('Could not import the collection.');
+});
+
+// ---------------------------------------------------------------------------
+// Story 22.4 — selectable table + "Add selected to my songlist"
+// ---------------------------------------------------------------------------
+
+test('22.4: members are a table with checkboxes, and the whole-collection shortcut stays', async () => {
+  renderDetail();
+  await screen.findByText('Rock 90s');
+
+  expect(screen.getByRole('table')).toBeInTheDocument();
+  expect(screen.getByLabelText('Select all')).toBeInTheDocument();
+  // The 20.3 import shortcut is untouched.
+  expect(screen.getByRole('button', { name: 'Add collection to my songlist' })).toBeInTheDocument();
+});
+
+test('22.4: the subset dialog says no playlist is created, unlike the whole-collection one', async () => {
+  renderDetail();
+  await screen.findByText('Rock 90s');
+
+  fireEvent.click(screen.getByLabelText('Select all'));
+  fireEvent.click(screen.getByRole('button', { name: 'Add selected to my songlist' }));
+
+  const dialog = await screen.findByRole('dialog');
+  expect(dialog).toHaveTextContent(/No playlist is created/i);
+});
+
+test('22.4: the whole-collection import stays frozen while a selection batch runs', async () => {
+  const releases: Array<() => void> = [];
+  cat.addToSonglist.mockImplementation(() => new Promise(res => { releases.push(() => res({ uid: 'x' } as never)); }));
+  renderDetail();
+  await screen.findByText('Rock 90s');
+
+  fireEvent.click(screen.getByLabelText('Select all'));
+  fireEvent.click(screen.getByRole('button', { name: 'Add selected to my songlist' }));
+  fireEvent.click(await screen.findByRole('button', { name: 'Add to my songlist' }));
+
+  // The dialog closes only AFTER the batch settles, so asserting on the button alone
+  // would pass on `confirmAddOpen` and never test `bulkAdd.running`. Go through the
+  // handler instead: the two write paths must not interleave.
+  await waitFor(() => expect(cat.addToSonglist).toHaveBeenCalled());
+  fireEvent.click(screen.getByRole('button', { name: 'Add collection to my songlist' }));
+  expect(cat.importCollection).not.toHaveBeenCalled();
+
+  await act(async () => { releases.forEach(r => r()); });
 });

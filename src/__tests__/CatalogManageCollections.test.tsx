@@ -9,15 +9,8 @@ import { catalogService } from '../services/catalogService';
 jest.mock('../contexts/AuthContext', () => ({ useAuth: jest.fn() }));
 jest.mock('../services/catalogService', () => {
   const actual = jest.requireActual('../services/catalogService');
-  return {
-    ...actual,
-    catalogService: {
-      listCatalog: jest.fn(),
-      deleteCatalogEntry: jest.fn(),
-      listCollections: jest.fn(),
-      createCollection: jest.fn(),
-    },
-  };
+  const { makeCatalogServiceMock } = jest.requireActual('../test/catalogServiceMock');
+  return { ...actual, catalogService: makeCatalogServiceMock() };
 });
 
 const mockedUseAuth = useAuth as jest.Mock;

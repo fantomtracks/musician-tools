@@ -9,19 +9,8 @@ jest.mock('../contexts/AuthContext', () => ({ useAuth: jest.fn() }));
 // Keep the real error classes (needed for `instanceof`), mock the methods.
 jest.mock('../services/catalogService', () => {
   const actual = jest.requireActual('../services/catalogService');
-  return {
-    ...actual,
-    catalogService: {
-      createCatalogEntry: jest.fn(),
-      updateCatalogEntry: jest.fn(),
-      getCatalogEntry: jest.fn(),
-      deleteCatalogEntry: jest.fn(),
-      publishCatalogEntry: jest.fn(),
-      listCatalog: jest.fn(),
-      checkCatalogExists: jest.fn(),
-      getFacets: jest.fn(),
-    },
-  };
+  const { makeCatalogServiceMock } = jest.requireActual('../test/catalogServiceMock');
+  return { ...actual, catalogService: makeCatalogServiceMock() };
 });
 jest.mock('../services/songService', () => ({
   songService: { lookupMetadata: jest.fn() },

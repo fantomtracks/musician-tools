@@ -1,10 +1,17 @@
 import { useEffect, useRef, useState } from 'react';
 import { Link, Navigate, useNavigate, useSearchParams } from 'react-router-dom';
 import { useAuth } from '../contexts/AuthContext';
-import { catalogService, CatalogNotFoundError } from '../services/catalogService';
+import { catalogService, CatalogNotFoundError, CollectionNotFoundError } from '../services/catalogService';
 import type { CatalogListResponse, CatalogCollection } from '../services/catalogService';
 import { ConfirmDialog } from '../components/ConfirmDialog';
+import { BulkActionBar } from '../components/BulkActionBar';
+import { ListSkeleton } from '../components/ListSkeleton';
+import { Pagination } from '../components/Pagination';
+import { Toast } from '../components/Toast';
+import { RowSelectionCheckbox, SelectAllCheckbox } from '../components/SelectionCheckbox';
+import { selectionCell } from '../utils/selectionCell';
 import { useRowSelection } from '../hooks/useRowSelection';
+import { runBounded } from '../utils/runBounded';
 
 // Curator hub to MANAGE the shared Catalog (story 19.5). Songlist-style table:
 // per-row checkboxes + a "Delete selected" bar on top (bulk delete), and a row click
@@ -12,6 +19,22 @@ import { useRowSelection } from '../hooks/useRowSelection';
 // redirected (privilege gate, not a 404 oracle). Backend CRUD + requireCurator: 19.1.
 
 const DEBOUNCE_MS = 280;
+// Bulk actions fire N unitary requests (epic 22, decision A: no bulk endpoint). The
+// selection is "within-page" but SURVIVES pagination (19.9), so a batch can hold more
+// than one page worth of entries — hence a pool rather than firing them all at once.
+const ADD_CONCURRENCY = 4;
+
+// Outcome of a bulk "Add to collection", kept OUTSIDE <BulkActionBar>: the bar unmounts
+// itself at zero selection and a fully successful batch empties the selection, so a
+// recap living in its children would vanish exactly when it must be read.
+interface AddRecap {
+  collectionName: string;
+  added: number;
+  alreadyIn: number;
+  failed: number;
+  unknown: number; // fulfilled with something that is neither 'added' nor 'already-in'
+  collectionGone: boolean; // every failure was a 404 on the collection itself
+}
 
 export default function CatalogManage() {
   const { user } = useAuth();
@@ -41,6 +64,53 @@ export default function CatalogManage() {
     setToastMessage(message);
     setTimeout(() => setToastMessage(null), 2500);
   };
+
+  // Story 22.2: bulk "Add to collection". The list is fetched lazily — never with the
+  // page, the Entries tab has no other use for it — but on EVERY open, not once:
+  // caching it is unsound, because the Collections tab of this very page can create,
+  // rename and delete collections behind the menu's back (a cached entry then 404s on
+  // every unitary POST and the recap blames the entries).
+  const [addMenuOpen, setAddMenuOpen] = useState(false);
+  const [menuCollections, setMenuCollections] = useState<CatalogCollection[] | null>(null);
+  const [menuError, setMenuError] = useState(false);
+  const [pickedCollection, setPickedCollection] = useState<string>('');
+  const [adding, setAdding] = useState(false);
+  const addingRef = useRef(false); // in-flight guard: two fast clicks read the same render
+  const [addRecap, setAddRecap] = useState<AddRecap | null>(null);
+  const menuAbortRef = useRef<AbortController | null>(null);
+  const mountedRef = useRef(true);
+  // Selection fingerprint captured when the recap was written: the recap closes as soon
+  // as the user touches the selection again (AC4), and only then — a batch's own
+  // removeMany must not wipe the recap it just produced.
+  const recapSelectionRef = useRef<string>('');
+
+  // A batch is fired from a click handler, so no effect cleanup covers it: abort the
+  // menu fetch and stop writing state once the page is gone.
+  useEffect(() => {
+    mountedRef.current = true;
+    return () => { mountedRef.current = false; menuAbortRef.current?.abort(); };
+  }, []);
+
+  // AC4 — the recap closes on the ✕ OR at the next selection the user makes. The
+  // fingerprint is what tells a USER change apart from the batch's own removeMany.
+  useEffect(() => {
+    if (!addRecap) return;
+    if (Array.from(selected).sort().join(',') !== recapSelectionRef.current) setAddRecap(null);
+  }, [selected, addRecap]);
+
+  // A recap describes one batch on one result set: keep it from hanging over an
+  // unrelated search, page or tab (where it would even be re-announced by role=alert).
+  useEffect(() => { setAddRecap(null); }, [search, page, tab]);
+
+  // A SEARCH changes the working set, so the selection goes with it — northwood, QA
+  // 2026-08-10: a "5 entries selected" bar hanging over an empty table is confusing.
+  // Note this is deliberately NOT keyed on `page`: paging through the same result set
+  // keeps the selection (19.9 semantics), only a new query drops it. Clearing here also
+  // removes the stranded-selection problem the review of 22.2 had to paper over.
+  useEffect(() => {
+    if (selection.size > 0) selection.clear();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [search]);
 
   // Story 20.2: Collections tab state.
   const [collections, setCollections] = useState<CatalogCollection[] | null>(null);
@@ -137,8 +207,84 @@ export default function CatalogManage() {
     else selection.addMany(displayedUids);
   };
 
+  const loadMenuCollections = () => {
+    // The fetch is triggered by a click, not by an effect, so its abort has to be
+    // carried by a ref and fired from the unmount cleanup above.
+    menuAbortRef.current?.abort();
+    const ctrl = new AbortController();
+    menuAbortRef.current = ctrl;
+    setMenuError(false);
+    setMenuCollections(null);
+    catalogService.listCollections(ctrl.signal)
+      .then(res => {
+        if (!mountedRef.current) return;
+        setMenuCollections(res);
+        // Drop a pick that the refreshed list no longer offers, otherwise Add stays
+        // enabled on a ghost and clicking it does strictly nothing.
+        setPickedCollection(prev => (res.some(c => c.uid === prev) ? prev : ''));
+      })
+      .catch(err => {
+        if (err?.name === 'AbortError' || !mountedRef.current) return;
+        setMenuError(true);
+      });
+  };
+
+  const toggleAddMenu = () => {
+    const opening = !addMenuOpen;
+    setAddMenuOpen(opening);
+    if (opening) loadMenuCollections();
+  };
+
+  const handleAddSelectedToCollection = async () => {
+    const collection = (menuCollections ?? []).find(c => c.uid === pickedCollection);
+    if (!collection || selected.size === 0 || addingRef.current) return;
+    addingRef.current = true;
+    setAdding(true);
+    setAddRecap(null); // the previous batch's numbers must not linger over this one
+    const uids = Array.from(selected);
+
+    // Best-effort, non-atomic (same regime as the 20.3 import): one failing entry must
+    // not abort the batch, and we need to know WHICH failed to keep them selected.
+    const results = await runBounded(uids, ADD_CONCURRENCY, uid =>
+      catalogService.addSongToCollection(collection.uid, uid));
+
+    if (!mountedRef.current) return;
+
+    const settled = uids.filter((_, i) => results[i].status === 'fulfilled');
+    // Counted explicitly, NOT by subtracting from `settled`: an unexpected fulfilled
+    // value (a backend that starts answering 204, a test stub returning undefined)
+    // must not be silently reported as "already in".
+    const added = results.filter(r => r.status === 'fulfilled' && r.value === 'added').length;
+    const alreadyIn = results.filter(r => r.status === 'fulfilled' && r.value === 'already-in').length;
+    const rejected = results.filter(r => r.status === 'rejected');
+    // A collection deleted by another curator fails EVERY item for the same reason, and
+    // retrying can never work — say that instead of blaming the entries.
+    const collectionGone = rejected.length > 0
+      && rejected.every(r => r.status === 'rejected' && r.reason instanceof CollectionNotFoundError);
+
+    setAddRecap({
+      collectionName: collection.name,
+      added,
+      alreadyIn,
+      failed: uids.length - settled.length,
+      unknown: settled.length - added - alreadyIn,
+      collectionGone,
+    });
+    // Successful entries (added AND already-in) leave the selection; the failed ones
+    // stay ticked so the batch can be replayed as-is.
+    selection.removeMany(settled);
+    const remaining = Array.from(selected).filter(u => !settled.includes(u));
+    recapSelectionRef.current = remaining.slice().sort().join(',');
+    setAddMenuOpen(false);
+    setPickedCollection('');
+    setAdding(false);
+    addingRef.current = false;
+  };
+
   const handleDeleteSelected = async () => {
-    if (selected.size === 0 || deleting) return;
+    // `adding` too: the two bulk paths write the same selection, and interleaving them
+    // deletes entries a running batch is still adding to a collection.
+    if (selected.size === 0 || deleting || adding) return;
     const uids = Array.from(selected);
     setDeleting(true);
     const results = await Promise.allSettled(uids.map(u => catalogService.deleteCatalogEntry(u)));
@@ -222,9 +368,7 @@ export default function CatalogManage() {
               <button type="button" className="btn-secondary mt-3" onClick={() => setCollectionsToken(t => t + 1)}>Retry</button>
             </div>
           ) : collections === null ? (
-            <div className="space-y-2" aria-hidden="true">
-              {Array.from({ length: 4 }).map((_, i) => (<div key={i} className="h-10 rounded bg-gray-100 dark:bg-gray-700 animate-pulse" />))}
-            </div>
+            <ListSkeleton rows={4} />
           ) : collections.length === 0 ? (
             <p className="text-gray-500 dark:text-gray-400 py-10 text-center">No collections yet — create the first one.</p>
           ) : (
@@ -256,17 +400,158 @@ export default function CatalogManage() {
         onChange={e => setSearchInput(e.target.value)}
       />
 
-      {/* Bulk-action bar (Songlist-style): shows once entries are selected. */}
-      {selected.size > 0 && (
-        <div className="mt-4 flex items-center justify-between gap-3 rounded-lg border border-gray-200 dark:border-gray-700 bg-gray-50 dark:bg-gray-800 px-4 py-3">
-          <span className="text-sm font-semibold text-gray-800 dark:text-gray-100">{selected.size} selected</span>
+      {/* Bulk-action bar: the shared Songlist-style shell (22.1). It hides itself when
+          nothing is selected, so there is no guard here. */}
+      <BulkActionBar count={selected.size} noun="entry" nounPlural="entries" className="mt-4">
+        {/* Story 22.2 — push the selection into an existing Collection. The menu is
+            `absolute` inside this `relative` wrapper (mirror of the Songlist playlist
+            picker): the bar is a .glass-effect card, whose backdrop-filter makes it a
+            containing block — a `fixed` menu would anchor to the bar, not the viewport. */}
+        <div className="relative">
           <button
             type="button"
-            className="inline-flex items-center rounded-md bg-red-600 text-white px-3 py-1.5 text-sm hover:bg-red-700 disabled:opacity-50"
-            onClick={() => setConfirmOpen(true)}
-            disabled={deleting}
+            className="btn-primary text-sm px-3 py-1.5"
+            onClick={toggleAddMenu}
+            disabled={adding || deleting}
+            aria-haspopup="menu"
+            aria-expanded={addMenuOpen}
           >
-            Delete selected
+            Add to collection
+          </button>
+          {addMenuOpen && (
+            <div
+              role="menu"
+              className="absolute right-0 mt-2 w-72 rounded-md border border-gray-200 bg-white dark:border-gray-700 dark:bg-gray-800 shadow-lg z-20 p-3"
+              onKeyDown={e => { if (e.key === 'Escape') { e.stopPropagation(); setAddMenuOpen(false); } }}
+            >
+              <div className="flex items-center justify-between mb-2">
+                <p className="text-sm text-gray-700 dark:text-gray-200">Select a collection</p>
+                <button
+                  type="button"
+                  className="text-xs text-gray-500 dark:text-gray-400 hover:text-gray-700 dark:hover:text-gray-300"
+                  onClick={() => setAddMenuOpen(false)}
+                  aria-label="Close"
+                >
+                  ✕
+                </button>
+              </div>
+
+              {menuError ? (
+                <div className="text-sm text-gray-600 dark:text-gray-300">
+                  Could not load the collections.{' '}
+                  <button type="button" className="text-brand-600 dark:text-brand-400 hover:underline" onClick={loadMenuCollections}>Retry</button>
+                </div>
+              ) : menuCollections === null ? (
+                <p className="text-sm text-gray-500 dark:text-gray-400">Loading…</p>
+              ) : menuCollections.length === 0 ? (
+                <p className="text-sm text-gray-500 dark:text-gray-400">
+                  No collections yet.{' '}
+                  <button type="button" className="text-brand-600 dark:text-brand-400 hover:underline" onClick={() => patchParams({ tab: 'collections' })}>
+                    Create one
+                  </button>
+                </p>
+              ) : (
+                <>
+                  <div className="max-h-48 overflow-y-auto space-y-1 mb-3">
+                    {menuCollections.map(c => (
+                      <button
+                        key={c.uid}
+                        type="button"
+                        aria-pressed={pickedCollection === c.uid}
+                        className={`w-full flex items-center justify-between gap-2 text-left p-2 rounded min-h-[44px] ${pickedCollection === c.uid ? 'bg-brand-100 dark:bg-brand-900/40' : 'hover:bg-gray-50 dark:hover:bg-gray-700'}`}
+                        onClick={() => setPickedCollection(c.uid)}
+                      >
+                        <span className="text-sm text-gray-900 dark:text-gray-100 truncate">{c.name}</span>
+                        <span className="shrink-0 text-xs text-gray-500 dark:text-gray-400">{c.songCount}</span>
+                      </button>
+                    ))}
+                  </div>
+                  <div className="flex justify-end gap-2">
+                    <button
+                      type="button"
+                      className="text-sm px-3 py-1 rounded-md border border-gray-200 dark:border-gray-700 text-gray-700 dark:text-gray-200 hover:bg-gray-100 dark:hover:bg-gray-700"
+                      onClick={() => setAddMenuOpen(false)}
+                    >
+                      Cancel
+                    </button>
+                    <button
+                      type="button"
+                      className="text-sm px-3 py-1 rounded-md bg-brand-500 text-white hover:bg-brand-600 disabled:opacity-50"
+                      onClick={handleAddSelectedToCollection}
+                      disabled={!pickedCollection || adding}
+                    >
+                      {adding ? 'Adding…' : 'Add'}
+                    </button>
+                  </div>
+                </>
+              )}
+            </div>
+          )}
+        </div>
+        <button
+          type="button"
+          className="inline-flex items-center rounded-md bg-red-600 text-white px-3 py-1.5 text-sm hover:bg-red-700 disabled:opacity-50"
+          onClick={() => setConfirmOpen(true)}
+          disabled={deleting || adding}
+        >
+          Delete selected
+        </button>
+        {/* The selection survives pagination and a search change, so an entry left
+            ticked by a failed batch can scroll out of reach — its row checkbox is the
+            only other way to untick it. This is the escape hatch. */}
+        <button
+          type="button"
+          className="inline-flex items-center rounded-md border border-gray-300 dark:border-gray-600 px-3 py-1.5 text-sm text-gray-700 dark:text-gray-200 hover:bg-gray-50 dark:hover:bg-gray-700 disabled:opacity-50"
+          onClick={() => selection.clear()}
+          disabled={deleting || adding}
+        >
+          Clear selection
+        </button>
+      </BulkActionBar>
+
+      {/* Recap of the last bulk add. Deliberately a SIBLING of the bar, not a child:
+          the bar unmounts at zero selection and a fully successful batch empties the
+          selection, so a recap inside it would disappear as it is written. Persistent
+          (not a toast — lesson 20.4) and segmented: an already-member entry is an
+          outcome, never a failure. */}
+      {addRecap && (
+        <div
+          // Keyed on the severity: a live region whose role mutates in place is not
+          // reliably re-announced — remounting it is.
+          key={addRecap.failed > 0 ? 'recap-alert' : 'recap-status'}
+          role={addRecap.failed > 0 ? 'alert' : 'status'}
+          // Named: the shared <Toast> keeps a permanent role="status" region mounted
+          // (22.5), so an unnamed one here would be ambiguous for users and tests alike.
+          aria-label="Bulk action result"
+          className={`mt-4 flex items-start justify-between gap-3 rounded-lg border px-4 py-3 text-sm ${
+            addRecap.failed > 0
+              ? 'border-amber-300 bg-amber-50 text-amber-900 dark:border-amber-800 dark:bg-amber-900/30 dark:text-amber-200'
+              : 'border-gray-200 bg-gray-50 text-gray-700 dark:border-gray-700 dark:bg-gray-800 dark:text-gray-200'
+          }`}
+        >
+          <p>
+            {addRecap.collectionGone
+              // Every single call 404'd on the collection: another curator deleted it.
+              // Retrying cannot work, so don't offer it.
+              ? `"${addRecap.collectionName}" no longer exists — nothing was added. Pick another collection.`
+              : addRecap.added === 0 && addRecap.failed === 0 && addRecap.unknown === 0
+                // A no-op batch says so plainly instead of a degraded "0 added".
+                ? `All ${addRecap.alreadyIn} ${addRecap.alreadyIn === 1 ? 'entry was' : 'entries were'} already in "${addRecap.collectionName}".`
+                : [
+                    `${addRecap.added} added`,
+                    addRecap.alreadyIn > 0 ? `${addRecap.alreadyIn} already in` : null,
+                    addRecap.failed > 0 ? `${addRecap.failed} failed` : null,
+                    addRecap.unknown > 0 ? `${addRecap.unknown} unclear` : null,
+                  ].filter(Boolean).join(' · ') + ` — "${addRecap.collectionName}".`}
+            {addRecap.failed > 0 && !addRecap.collectionGone && ' The failed entries are still selected, so you can retry.'}
+          </p>
+          <button
+            type="button"
+            className="shrink-0 text-xs text-gray-500 dark:text-gray-400 hover:text-gray-700 dark:hover:text-gray-200"
+            onClick={() => setAddRecap(null)}
+            aria-label="Dismiss"
+          >
+            ✕
           </button>
         </div>
       )}
@@ -276,11 +561,7 @@ export default function CatalogManage() {
       </h2>
 
       {loading && !data && (
-        <div className="space-y-2" aria-hidden="true">
-          {Array.from({ length: 6 }).map((_, i) => (
-            <div key={i} className="h-10 rounded bg-gray-100 dark:bg-gray-700 animate-pulse" />
-          ))}
-        </div>
+        <ListSkeleton rows={6} />
       )}
 
       {error && (
@@ -315,13 +596,11 @@ export default function CatalogManage() {
                 <table className="min-w-full text-sm">
                   <thead className="sticky top-0 z-10 bg-gray-50 dark:bg-gray-800">
                     <tr className="text-left text-gray-500 dark:text-gray-400">
-                      <th className="px-3 py-2 w-12 text-center">
-                        <input
-                          type="checkbox"
-                          className="h-4 w-4 cursor-pointer accent-brand-500 dark:accent-brand-400"
-                          checked={allDisplayedSelected}
-                          onChange={toggleSelectAll}
-                          aria-label={allDisplayedSelected ? 'Deselect all' : 'Select all'}
+                      <th className={selectionCell('px-3 py-2 w-12 text-center')}>
+                        <SelectAllCheckbox
+                          allSelected={allDisplayedSelected}
+                          onToggle={toggleSelectAll}
+                          disabled={adding || deleting}
                         />
                       </th>
                       <th className="px-3 py-2 font-medium">Artist</th>
@@ -340,14 +619,14 @@ export default function CatalogManage() {
                           onClick={() => navigate(`/catalog/admin/${entry.uid}`)}
                           className={`border-t border-gray-100 dark:border-gray-700 cursor-pointer ${isSel ? 'bg-blue-50 hover:bg-blue-100 dark:bg-blue-900/40 dark:hover:bg-blue-900/60' : 'hover:bg-gray-50 dark:hover:bg-gray-700/50'}`}
                         >
-                          {/* Checkbox cell: selection only; stop propagation so ticking it doesn't open the entry. */}
-                          <td className="px-3 py-2 w-12 text-center" onClick={e => e.stopPropagation()}>
-                            <input
-                              type="checkbox"
-                              className="h-4 w-4 cursor-pointer accent-brand-500 dark:accent-brand-400"
+                          {/* Checkbox cell: selection only — the primitive stops propagation
+                              so ticking it doesn't open the entry. */}
+                          <td className={selectionCell('px-3 py-2 w-12 text-center')}>
+                            <RowSelectionCheckbox
                               checked={isSel}
                               onChange={() => selection.toggle(entry.uid)}
-                              aria-label={`Select ${entry.title}`}
+                              label={entry.artist ? `${entry.title} by ${entry.artist}` : entry.title}
+                              disabled={adding || deleting}
                             />
                           </td>
                           <td className="px-3 py-2 text-gray-900 dark:text-gray-100 whitespace-nowrap">{entry.artist || '—'}</td>
@@ -366,13 +645,7 @@ export default function CatalogManage() {
                   </tbody>
                 </table>
               </div>
-              {totalPages > 1 && (
-                <div className="flex items-center justify-center gap-4 mt-4">
-                  <button type="button" className="btn-secondary" disabled={page <= 1} onClick={() => patchParams({ page: String(page - 1) })}>Previous</button>
-                  <span className="text-sm text-gray-500 dark:text-gray-400">Page {page} of {totalPages}</span>
-                  <button type="button" className="btn-secondary" disabled={page >= totalPages} onClick={() => patchParams({ page: String(page + 1) })}>Next</button>
-                </div>
-              )}
+              <Pagination page={page} totalPages={totalPages} onPageChange={p => patchParams({ page: String(p) })} />
             </>
           )}
         </div>
@@ -390,11 +663,7 @@ export default function CatalogManage() {
         onCancel={() => { if (!deleting) setConfirmOpen(false); }}
       />
 
-      {toastMessage && (
-        <div role="status" aria-live="polite" className="fixed bottom-6 left-1/2 -translate-x-1/2 bg-gray-900 text-white text-sm px-4 py-2 rounded-lg shadow-lg">
-          {toastMessage}
-        </div>
-      )}
+      <Toast message={toastMessage} />
     </div>
   );
 }

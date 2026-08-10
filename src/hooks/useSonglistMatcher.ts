@@ -11,6 +11,7 @@ import { findDuplicateSong } from '../utils/songDuplicate';
 // "Add"; the server 409 still protects against a real duplicate).
 export function useSonglistMatcher() {
   const [songs, setSongs] = useState<Song[]>([]);
+  const [reloadToken, setReloadToken] = useState(0);
 
   useEffect(() => {
     let active = true;
@@ -18,7 +19,13 @@ export function useSonglistMatcher() {
       .then(list => { if (active) setSongs(list); })
       .catch(() => { /* degrade: no client-side flags */ });
     return () => { active = false; };
-  }, []);
+  }, [reloadToken]);
+
+  // Story 22.4: a bulk add can learn that a song is already in the songlist WITHOUT
+  // being told which one (a 409 whose body carries no song). `addToCache` can't help
+  // there, so the caller asks for a reload rather than leaving the row advertising
+  // "Add" for something it can no longer add.
+  const refresh = useCallback(() => setReloadToken(t => t + 1), []);
 
   const findExisting = useCallback(
     (entry: { title: string; artist?: string | null }): Song | null =>
@@ -32,5 +39,5 @@ export function useSonglistMatcher() {
     [],
   );
 
-  return { findExisting, addToCache };
+  return { findExisting, addToCache, refresh };
 }

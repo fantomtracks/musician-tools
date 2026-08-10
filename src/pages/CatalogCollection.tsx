@@ -3,6 +3,13 @@ import { Link, useParams } from 'react-router-dom';
 import { catalogService, CollectionNotFoundError } from '../services/catalogService';
 import type { CatalogCollectionDetail } from '../services/catalogService';
 import { ConfirmDialog } from '../components/ConfirmDialog';
+import { DetailPageSkeleton } from '../components/ListSkeleton';
+import { BulkActionBar } from '../components/BulkActionBar';
+import { RowSelectionCheckbox, SelectAllCheckbox } from '../components/SelectionCheckbox';
+import { selectionCell } from '../utils/selectionCell';
+import { useRowSelection } from '../hooks/useRowSelection';
+import { useBulkAddToSonglist, describeAddRecap, isAddRecapNegative } from '../hooks/useBulkAddToSonglist';
+import { BulkRecap } from '../components/BulkRecap';
 
 // Story 20.4: user-facing detail of a curated Collection. Shows its members and lets
 // the user import the WHOLE collection into their Songlist in one action (a mirror
@@ -23,6 +30,34 @@ export default function CatalogCollection() {
   // visible until the user acts/navigates).
   const [result, setResult] = useState<{ message: string; isError: boolean } | null>(null);
 
+  // Story 22.4: pick a subset instead of taking the whole collection. Not paginated →
+  // select-all REPLACES. No duplicate-flag matcher on this page (epic 22, decision B):
+  // the 409 stays the server's answer, and this view has no per-row Add to reflect it.
+  const selection = useRowSelection();
+  const bulkAdd = useBulkAddToSonglist();
+  const [confirmAddOpen, setConfirmAddOpen] = useState(false);
+
+  // Only one feedback banner at a time: the whole-collection recap and the subset recap
+  // describe different actions and must not stack (three live regions already compete
+  // on these pages).
+  const userToggle = (u: string) => { bulkAdd.setRecap(null); selection.toggle(u); };
+  const userSelectAll = (uids: string[]) => {
+    bulkAdd.setRecap(null);
+    if (selection.allDisplayedSelected(uids)) selection.clear();
+    else selection.selectOnly(uids);
+  };
+
+  const handleAddSelected = async () => {
+    // `importing` too: the mutual exclusion must hold in BOTH handlers, not only in the
+    // buttons — a dialog opened before the other action started stays live (lesson 22.3).
+    if (importing) return;
+    setResult(null); // the whole-collection banner is about another action
+    const res = await bulkAdd.run(Array.from(selection.selected));
+    if (!res) return;
+    selection.removeMany(res.settledUids);
+    setConfirmAddOpen(false);
+  };
+
   useEffect(() => {
     if (!uid) return;
     const ctrl = new AbortController();
@@ -41,7 +76,8 @@ export default function CatalogCollection() {
   }, [uid]);
 
   const handleImport = async () => {
-    if (!collection || importing) return;
+    if (!collection || importing || bulkAdd.running) return;
+    bulkAdd.setRecap(null); // this banner replaces the subset recap
     setImporting(true);
     try {
       const recap = await catalogService.importCollection(collection.uid);
@@ -68,10 +104,7 @@ export default function CatalogCollection() {
 
   if (loading) {
     return (
-      <div className="max-w-2xl mx-auto px-4 py-6 space-y-3" aria-hidden="true">
-        <div className="h-8 w-2/3 rounded bg-gray-100 dark:bg-gray-700 animate-pulse" />
-        <div className="h-24 rounded bg-gray-100 dark:bg-gray-700 animate-pulse" />
-      </div>
+      <DetailPageSkeleton />
     );
   }
 
@@ -89,7 +122,9 @@ export default function CatalogCollection() {
   const count = collection.songs.length;
 
   return (
-    <div className="max-w-2xl mx-auto px-4 py-6">
+    // Same width as the other list screens (CatalogManage): a song table squeezed
+    // into a 2xl reading column does not read as "the Songlist display" (epic 22).
+    <div className="w-full max-w-5xl mx-auto px-4 py-6">
       <h1 className="text-2xl font-semibold text-gray-900 dark:text-gray-100">{collection.name}</h1>
       {collection.description && (
         <p className="mt-1 text-gray-600 dark:text-gray-300">{collection.description}</p>
@@ -101,7 +136,7 @@ export default function CatalogCollection() {
           type="button"
           className="btn-primary min-h-[44px]"
           onClick={() => setConfirmOpen(true)}
-          disabled={importing || count === 0}
+          disabled={importing || count === 0 || bulkAdd.running || confirmAddOpen}
         >
           {importing ? 'Adding…' : 'Add collection to my songlist'}
         </button>
@@ -121,24 +156,96 @@ export default function CatalogCollection() {
         </div>
       )}
 
+      <BulkActionBar count={selection.size} noun="song" nounPlural="songs" className="mb-4">
+        <button
+          type="button"
+          className="btn-primary text-sm px-3 py-1.5"
+          onClick={() => setConfirmAddOpen(true)}
+          disabled={bulkAdd.running || importing}
+        >
+          Add selected to my songlist
+        </button>
+        <button
+          type="button"
+          className="inline-flex items-center rounded-md border border-gray-300 dark:border-gray-600 px-3 py-1.5 text-sm text-gray-700 dark:text-gray-200 hover:bg-gray-50 dark:hover:bg-gray-700 disabled:opacity-50"
+          onClick={() => { bulkAdd.setRecap(null); selection.clear(); }}
+          disabled={bulkAdd.running}
+        >
+          Clear selection
+        </button>
+      </BulkActionBar>
+
+      {/* Sibling of the bar: a settled batch empties the selection and would take a
+          recap living inside it down too. */}
+      {bulkAdd.recap && (
+        <BulkRecap
+          key={isAddRecapNegative(bulkAdd.recap) ? 'recap-alert' : 'recap-status'}
+          message={describeAddRecap(bulkAdd.recap)}
+          negative={isAddRecapNegative(bulkAdd.recap)}
+          onDismiss={() => bulkAdd.setRecap(null)}
+          className="mb-4"
+        />
+      )}
+
       {count === 0 ? (
         <p className="text-gray-500 dark:text-gray-400 py-6 text-center">This collection is empty.</p>
       ) : (
-        <ul className="divide-y divide-gray-100 dark:divide-gray-700 rounded-lg border border-gray-200 dark:border-gray-700">
-          {collection.songs.map(entry => (
-            <li key={entry.uid} className="px-4 py-3">
-              <p className="font-medium text-gray-900 dark:text-gray-100">
-                {entry.artist ? `${entry.artist} · ` : ''}{entry.title}
-              </p>
-              <p className="text-sm text-gray-500 dark:text-gray-400">
-                {entry.key || '—'}{entry.bpm ? ` · ${entry.bpm} BPM` : ''}
-              </p>
-            </li>
-          ))}
-        </ul>
+        <div className="overflow-auto rounded-lg border border-gray-200 dark:border-gray-700">
+          <table className="min-w-full text-sm">
+            <thead className="bg-gray-50 dark:bg-gray-800">
+              <tr className="text-left text-gray-500 dark:text-gray-400">
+                <th scope="col" className={selectionCell('px-3 py-2 w-12 text-center')}>
+                  <SelectAllCheckbox
+                    allSelected={selection.allDisplayedSelected(collection.songs.map(s => s.uid))}
+                    onToggle={() => userSelectAll(collection.songs.map(s => s.uid))}
+                    disabled={bulkAdd.running}
+                  />
+                </th>
+                <th scope="col" className="px-3 py-2 font-medium">Artist</th>
+                <th scope="col" className="px-3 py-2 font-medium">Title</th>
+                <th scope="col" className="px-3 py-2 font-medium">Key</th>
+                <th scope="col" className="px-3 py-2 font-medium text-right">BPM</th>
+              </tr>
+            </thead>
+            <tbody>
+              {collection.songs.map(entry => (
+                // No row click: this view has no per-song destination.
+                <tr
+                  key={entry.uid}
+                  className={`border-t border-gray-100 dark:border-gray-700 ${selection.isSelected(entry.uid) ? 'bg-blue-50 dark:bg-blue-900/40' : ''}`}
+                >
+                  <td className={selectionCell('px-3 py-2 w-12 text-center')}>
+                    <RowSelectionCheckbox
+                      checked={selection.isSelected(entry.uid)}
+                      onChange={() => userToggle(entry.uid)}
+                      label={entry.artist ? `${entry.title} by ${entry.artist}` : entry.title}
+                      disabled={bulkAdd.running}
+                    />
+                  </td>
+                  <td className="px-3 py-2 text-gray-900 dark:text-gray-100 whitespace-nowrap">{entry.artist || '—'}</td>
+                  <td className="px-3 py-2 font-medium text-gray-900 dark:text-gray-100">{entry.title}</td>
+                  <td className="px-3 py-2 text-gray-600 dark:text-gray-300 whitespace-nowrap">{entry.key || '—'}</td>
+                  <td className="px-3 py-2 text-gray-600 dark:text-gray-300 whitespace-nowrap text-right">{entry.bpm ?? '—'}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
       )}
 
       <Link to="/catalog" className="inline-block mt-8 text-sm text-brand-600 dark:text-brand-400 hover:underline">← Browse the Catalog</Link>
+
+      <ConfirmDialog
+        isOpen={confirmAddOpen}
+        title={`Add ${selection.size} ${selection.size === 1 ? 'song' : 'songs'} to my songlist`}
+        // Said out loud: the button right above DOES create a mirror playlist. A subset
+        // does not (epic 22, decision B) — the two must not look interchangeable.
+        message={`Add ${selection.size} selected ${selection.size === 1 ? 'song' : 'songs'} to your Songlist? No playlist is created — only "Add collection to my songlist" does that.`}
+        confirmText={bulkAdd.running ? 'Adding…' : 'Add to my songlist'}
+        cancelText="Cancel"
+        onConfirm={handleAddSelected}
+        onCancel={() => { if (!bulkAdd.running) setConfirmAddOpen(false); }}
+      />
 
       <ConfirmDialog
         isOpen={confirmOpen}

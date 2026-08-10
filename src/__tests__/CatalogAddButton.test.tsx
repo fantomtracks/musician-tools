@@ -9,7 +9,8 @@ import type { Song } from '../services/songService';
 
 jest.mock('../services/catalogService', () => {
   const actual = jest.requireActual('../services/catalogService');
-  return { ...actual, catalogService: { addToSonglist: jest.fn() } };
+  const { makeCatalogServiceMock } = jest.requireActual('../test/catalogServiceMock');
+  return { ...actual, catalogService: makeCatalogServiceMock() };
 });
 const cat = catalogService as jest.Mocked<typeof catalogService>;
 

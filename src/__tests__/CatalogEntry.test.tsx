@@ -5,7 +5,8 @@ import { catalogService, CatalogNotFoundError } from '../services/catalogService
 
 jest.mock('../services/catalogService', () => {
   const actual = jest.requireActual('../services/catalogService');
-  return { ...actual, catalogService: { getCatalogEntry: jest.fn() } };
+  const { makeCatalogServiceMock } = jest.requireActual('../test/catalogServiceMock');
+  return { ...actual, catalogService: makeCatalogServiceMock() };
 });
 const svc = catalogService as jest.Mocked<typeof catalogService>;
 

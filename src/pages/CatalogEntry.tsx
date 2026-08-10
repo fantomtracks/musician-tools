@@ -3,6 +3,7 @@ import { Link, useParams } from 'react-router-dom';
 import { catalogService, CatalogNotFoundError } from '../services/catalogService';
 import type { CatalogSong } from '../services/catalogService';
 import CatalogAddButton from '../components/CatalogAddButton';
+import { DetailPageSkeleton } from '../components/ListSkeleton';
 import { useSonglistMatcher } from '../hooks/useSonglistMatcher';
 
 // Read-only detail of a Catalog entry (story 19.3). Intrinsic fields only (DL-17) +
@@ -49,10 +50,7 @@ export default function CatalogEntry() {
 
   if (loading) {
     return (
-      <div className="max-w-2xl mx-auto px-4 py-6 space-y-3" aria-hidden="true">
-        <div className="h-8 w-2/3 rounded bg-gray-100 dark:bg-gray-700 animate-pulse" />
-        <div className="h-24 rounded bg-gray-100 dark:bg-gray-700 animate-pulse" />
-      </div>
+      <DetailPageSkeleton />
     );
   }
 

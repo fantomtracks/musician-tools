@@ -12,6 +12,19 @@ project adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+### Added
+- **Pick several songs at once, everywhere in the Catalog.** Every song list now works the way the Songlist does — a checkbox on each row and a bar of actions once you've picked some.
+  - **Add a selection to your songlist** — from the Catalog browse or from inside a collection. Songs already in your songlist are reported as such, not as errors, and an entry the curator has since removed is called out instead of being offered for a pointless retry. Your selection survives paging through results; starting a new search clears it.
+  - **Curators: push a batch of entries into a collection** in one action, with a recap that separates what was added from what was already there.
+  - **Curators: the collection screen is a real table** — artist, title, key, BPM — with checkboxes and a single "Remove selected" action instead of a button per line.
+  - Adding a selection never creates a playlist; only the "Add collection to my songlist" shortcut does, and the confirmation now says so explicitly.
+
+### Changed
+- Confirmation messages on the Songlist now appear at the bottom centre, like everywhere else in the app, and are announced to screen readers.
+
+### Fixed
+- Dropdown menus opened from a selection bar no longer show the table underneath through them.
+
 ## [2.0.0] — 2026-07-24
 
 ### Added

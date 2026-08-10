@@ -5,7 +5,14 @@ import type { CatalogListResponse, CatalogFacets, CatalogCollection } from '../s
 import CatalogList from '../components/CatalogList';
 import CatalogFilters from '../components/CatalogFilters';
 import CollectionCard from '../components/CollectionCard';
+import { ListSkeleton } from '../components/ListSkeleton';
+import { Pagination } from '../components/Pagination';
 import { useSonglistMatcher } from '../hooks/useSonglistMatcher';
+import { useRowSelection } from '../hooks/useRowSelection';
+import { useBulkAddToSonglist, describeAddRecap, isAddRecapNegative } from '../hooks/useBulkAddToSonglist';
+import { BulkRecap } from '../components/BulkRecap';
+import { BulkActionBar } from '../components/BulkActionBar';
+import { ConfirmDialog } from '../components/ConfirmDialog';
 
 const EMPTY_FACETS: CatalogFacets = { genre: [], key: [], mode: [], timeSignature: [] };
 const asArr = (s: string): string[] => (s ? s.split(',').filter(Boolean) : []);
@@ -38,10 +45,46 @@ export default function Catalog() {
   const [error, setError] = useState(false);
   const [refetchToken, setRefetchToken] = useState(0); // bumped by Retry to force a refetch
   const abortRef = useRef<AbortController | null>(null);
-  const { findExisting, addToCache } = useSonglistMatcher(); // client-side "already in songlist" flag (19.4)
+  const { findExisting, addToCache, refresh: refreshSonglist } = useSonglistMatcher(); // client-side "already in songlist" flag (19.4)
   const [facets, setFacets] = useState<CatalogFacets>(EMPTY_FACETS);
   // Story 20.4: the Collections rail (shown above the list when there is no query).
   const [collections, setCollections] = useState<CatalogCollection[] | null>(null);
+
+  // Story 22.4: reader-side selection. Ephemeral (no persistKey) and "within-page" like
+  // the curator table — it SURVIVES pagination, which is why a Clear selection escape
+  // hatch is mandatory: a song left ticked can scroll out of reach.
+  const selection = useRowSelection();
+  const bulkAdd = useBulkAddToSonglist(addToCache);
+  const [confirmAddOpen, setConfirmAddOpen] = useState(false);
+
+  // The recap closes at the user's next selection gesture — driven by the handlers, not
+  // by comparing snapshots (an empty-selection fingerprint kills the recap on the very
+  // frame it appears; lesson from 22.3).
+  const userToggle = (uid: string) => { bulkAdd.setRecap(null); selection.toggle(uid); };
+  const clearSelection = () => { bulkAdd.setRecap(null); selection.clear(); };
+
+  // A recap describes one batch over one result set: a new search, filter or page makes
+  // it describe rows that are no longer there — and its "retry" advice unactionable.
+  useEffect(() => { bulkAdd.setRecap(null);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [search, key, mode, timeSignature, genre, page]);
+
+  // A new query or facet = a new working set: the selection goes with it. Paging is NOT
+  // in the deps — the selection survives pagination on purpose (19.9).
+  useEffect(() => {
+    if (selection.size > 0) selection.clear();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [search, key, mode, timeSignature, genre]);
+
+  const handleAddSelected = async () => {
+    const result = await bulkAdd.run(Array.from(selection.selected));
+    if (!result) return;
+    selection.removeMany(result.settledUids);
+    // A 409 without its song leaves the duplicate flag unknowable from the response —
+    // reload the songlist so those rows stop advertising "Add".
+    if (result.recap.needsSonglistRefresh) refreshSonglist();
+    setConfirmAddOpen(false);
+  };
 
   // Facet values (distinct across the whole Catalog) for the filter pills. Loaded once.
   useEffect(() => {
@@ -111,6 +154,15 @@ export default function Catalog() {
   const total = data?.total ?? 0;
   const limit = data?.limit ?? 24;
   const totalPages = Math.max(1, Math.ceil(total / limit));
+  const displayedUids = data?.items.map(i => i.uid) ?? [];
+  const allDisplayedSelected = selection.allDisplayedSelected(displayedUids);
+  // Select-all is "within page": it unions/subtracts only what is on screen, so a
+  // selection made on another page survives.
+  const userSelectAll = () => {
+    bulkAdd.setRecap(null);
+    if (allDisplayedSelected) selection.removeMany(displayedUids);
+    else selection.addMany(displayedUids);
+  };
 
   return (
     <div className="w-full max-w-5xl mx-auto px-4 py-6">
@@ -163,11 +215,7 @@ export default function Catalog() {
       {/* Skeleton ONLY on the first load (no data yet). On a re-fetch (filter/search
           change) we keep the current list visible and just dim it — no flash. */}
       {loading && !data && (
-        <div className="space-y-2" aria-hidden="true">
-          {Array.from({ length: 6 }).map((_, i) => (
-            <div key={i} className="h-10 rounded bg-gray-100 dark:bg-gray-700 animate-pulse" />
-          ))}
-        </div>
+        <ListSkeleton rows={6} />
       )}
 
       {error && (
@@ -183,6 +231,39 @@ export default function Catalog() {
         </div>
       )}
 
+      {/* Bulk bar + recap live OUTSIDE the results branch: a filter with no matches (or
+          a failed refetch) must not take away the recap of a batch that just wrote to
+          the songlist, nor the Clear selection escape hatch for a selection that
+          survives pagination. */}
+      <BulkActionBar count={selection.size} noun="song" nounPlural="songs" className="mb-4">
+        <button
+          type="button"
+          className="btn-primary text-sm px-3 py-1.5"
+          onClick={() => setConfirmAddOpen(true)}
+          disabled={bulkAdd.running}
+        >
+          Add selected to my songlist
+        </button>
+        <button
+          type="button"
+          className="inline-flex items-center rounded-md border border-gray-300 dark:border-gray-600 px-3 py-1.5 text-sm text-gray-700 dark:text-gray-200 hover:bg-gray-50 dark:hover:bg-gray-700 disabled:opacity-50"
+          onClick={clearSelection}
+          disabled={bulkAdd.running}
+        >
+          Clear selection
+        </button>
+      </BulkActionBar>
+
+      {bulkAdd.recap && (
+        <BulkRecap
+          key={isAddRecapNegative(bulkAdd.recap) ? 'recap-alert' : 'recap-status'}
+          message={describeAddRecap(bulkAdd.recap)}
+          negative={isAddRecapNegative(bulkAdd.recap)}
+          onDismiss={() => bulkAdd.setRecap(null)}
+          className="mb-4"
+        />
+      )}
+
       {!error && data && (
         <div className={loading ? 'opacity-50 transition-opacity duration-150' : 'transition-opacity duration-150'} aria-busy={loading}>
           {data.total === 0 ? (
@@ -192,19 +273,35 @@ export default function Catalog() {
           ) : (
             <>
               {data.items.length > 0
-                ? <CatalogList items={data.items} existingFor={findExisting} onAdded={addToCache} />
+                ? <CatalogList
+                    items={data.items}
+                    existingFor={findExisting}
+                    onAdded={addToCache}
+                    selectedUids={selection.selected}
+                    onToggle={userToggle}
+                    allSelected={allDisplayedSelected}
+                    onToggleAll={userSelectAll}
+                    selectionDisabled={bulkAdd.running || loading}
+                  />
                 : <p className="text-gray-500 dark:text-gray-400 py-6 text-center">This page is empty — go back to a previous page.</p>}
-              {totalPages > 1 && (
-                <div className="flex items-center justify-center gap-4 mt-4">
-                  <button type="button" className="btn-secondary" disabled={page <= 1} onClick={() => patchParams({ page: String(page - 1) })}>Previous</button>
-                  <span className="text-sm text-gray-500 dark:text-gray-400">Page {page} of {totalPages}</span>
-                  <button type="button" className="btn-secondary" disabled={page >= totalPages} onClick={() => patchParams({ page: String(page + 1) })}>Next</button>
-                </div>
-              )}
+              <Pagination page={page} totalPages={totalPages} onPageChange={p => patchParams({ page: String(p) })} />
             </>
           )}
         </div>
       )}
+
+      <ConfirmDialog
+        isOpen={confirmAddOpen}
+        title={`Add ${selection.size} ${selection.size === 1 ? 'song' : 'songs'} to my songlist`}
+        // Spelled out on purpose: the neighbouring "Add collection to my songlist"
+        // button DOES create a mirror playlist (20.3). A subset does not (epic 22,
+        // decision B), and the two must not look interchangeable.
+        message={`Add ${selection.size} selected ${selection.size === 1 ? 'song' : 'songs'} to your Songlist? No playlist is created — only the whole-collection shortcut does that.`}
+        confirmText={bulkAdd.running ? 'Adding…' : 'Add to my songlist'}
+        cancelText="Cancel"
+        onConfirm={handleAddSelected}
+        onCancel={() => { if (!bulkAdd.running) setConfirmAddOpen(false); }}
+      />
     </div>
   );
 }
