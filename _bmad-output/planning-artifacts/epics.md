@@ -33,6 +33,9 @@ epic19:
     - _bmad-output/planning-artifacts/ux-designs/ux-musician-tools-2026-07-12/DESIGN.md
     - _bmad-output/planning-artifacts/ux-designs/ux-musician-tools-2026-07-12/EXPERIENCE.md
     - _bmad-output/planning-artifacts/architecture-catalog-2026-07-12.md
+epic22:
+  source: 'issu deferred-work § "Found during: QA prod Catalog — curation & parcours lecteur" (2026-08-08) — fil rouge northwood « dès qu''on affiche une liste de chansons, c''est l''affichage Songlist ». Pas d''ADR : front-only, aucune migration, aucun endpoint nouveau (les briques 19.9/20.3 existent). Relevé corrigé contre le code au cadrage : useRowSelection déjà branché sur CatalogManage, StickyActionBar hors sujet (coquille de formulaire), MultiSelectTable jamais livré (descope 19.9 non tracé). 4 décisions verrouillées 2026-08-10 : A N appels front best-effort (pas d''endpoint bulk) · B un sous-ensemble n''alimente pas la playlist miroir · C pas de MultiSelectTable générique (colonnes légitimement différentes) · D l''affichage Songlist est la référence visuelle.'
+  added: 2026-08-10
 ---
 
 # musician-tools - Epic Breakdown
@@ -1895,3 +1898,134 @@ afin de rafraîchir ma copie d'un geste.
 
 **And** `songService.refreshSongFromCatalog` ; UI en anglais, dark mode, a11y ; tests (`StrictMode`) ; front vert
 `[src/services/songService.ts, src/pages/Songs.tsx (fiche), src/components/ConfirmDialog.tsx, éventuel composant badge/bannière]`
+
+## Epic 22: Unification des listes de chansons du Catalog
+
+Fil rouge unique tiré par northwood en curant le Catalog en prod (relevé `deferred-work` 2026-08-08) : **« dès qu'on affiche une liste de chansons, c'est l'affichage Songlist »** — tableau + case à cocher à gauche + barre d'actions groupées « N selected ». Les 4 surfaces Catalog divergent aujourd'hui chacune à leur façon, et deux d'entre elles rendent une action de lot littéralement impossible (ajouter un lot d'entrées à une collection, ajouter un sous-ensemble d'une collection à sa songlist).
+
+**État réel du code (vérifié, corrige le relevé initial)** :
+- `useRowSelection` (19.9) **est déjà branché** sur `/catalog/manage?tab=entries` — il manque un 2ᵉ bouton, pas la sélection. À brancher sur les 3 autres surfaces.
+- `StickyActionBar` (19.10) **n'est pas** la brique de cette épic : c'est la coquille du formulaire (Back/statut/Publish), avec le piège `backdrop-filter` documenté. Les barres « N selected » de `SongsList.tsx` et `CatalogManage.tsx` sont **deux `<div>` inline dupliqués**, et ils ne sont **pas** iso-visuels.
+- `<MultiSelectTable>` annoncé en 19.9 **n'a jamais été livré** (descope non tracé). L'épic tranche ce point plutôt que de le laisser pendre.
+
+**Front-only. Aucune migration, aucun nouvel endpoint** (décision A ci-dessous). Réutilise `useRowSelection` (19.9), le pattern de récap best-effort de 20.3/20.4, `ConfirmDialog`.
+
+**Décisions de cadrage (tranchées northwood 2026-08-10)** :
+- **A — Actions groupées = N appels front** sur les endpoints unitaires existants (`POST /catalog/collections/:uid/songs`, `DELETE /catalog/collections/:uid/songs/:catalogSongUid`, `POST /catalog/:uid/add-to-songlist`), avec **concurrence bornée** et **récap agrégé**. Reste dans le régime best-effort non-atomique déjà ancré en 20.3 ; volumes petits (24 lignes/page max). **Pas d'endpoint bulk, pas de backend.**
+- **B — Un sous-ensemble n'alimente PAS la playlist miroir.** La sélection est un geste à la carte ; seule l'action « toute la collection » (20.3, `resolveMirrorPlaylist`) crée/réutilise la playlist du nom de la collection. Éviter les playlists à moitié vides qui mentent sur leur contenu.
+- **C — Pas de `<MultiSelectTable>` générique.** Les colonnes diffèrent légitimement d'une surface à l'autre (Songlist porte instrument/tuning/lastPlayed, le Catalog porte key/mode/timeSignature). On partage la **barre** et les **primitives de case à cocher**, pas le tableau. Ferme le descope de 19.9 par une décision, pas par un oubli.
+- **D — L'affichage Songlist est la référence visuelle.** Là où les deux styles divergent, c'est celui de `SongsList` qui gagne ; le changement visuel côté Catalog est **assumé** (même régime que `datalist`→combobox en 19.11).
+
+**Ordre imposé : 22.1 → {22.2, 22.3, 22.4}.** 22.1 d'abord, sinon les trois suivantes redupliquent ce qu'elles sont censées unifier.
+
+### Story 22.1: Barre d'actions groupées + cases à cocher partagées
+
+En tant que **développeur du produit**,
+je veux une barre « N selected » et des cases à cocher de ligne partagées entre la Songlist et le Catalog,
+afin que les écrans de liste cessent de diverger à chaque nouvelle surface.
+
+**Acceptance Criteria:**
+
+**Given** un composant `<BulkActionBar>` partagé
+**When** il reçoit un compte de sélection et des actions en `children`
+**Then** il rend la coquille + le libellé « N {noun} selected » + les actions ; il rend **`null`** quand le compte est à 0 (la garde est centralisée, plus dans chaque page) ; le nom d'objet est un prop (`song(s)` côté Songlist, `entry`/`song` côté Catalog)
+
+**Given** les primitives de sélection partagées (case à cocher d'en-tête « tout sélectionner » + case de ligne)
+**When** une page les utilise
+**Then** l'`aria-label` explicite, la cible ≥44px et le `stopPropagation` (une case cochée ne déclenche jamais la navigation de ligne) sont **portés par la primitive**, plus recopiés par page
+
+**Given** `SongsList.tsx` — la référence visuelle (D)
+**When** il bascule sur `<BulkActionBar>`
+**Then** le rendu est **iso-visuel et iso-fonctionnel** (playlist picker, Mark as played, Delete selected inchangés) ; les tests Songlist existants passent **sans modification d'assertion**
+
+**Given** `CatalogManage.tsx` (onglet Entries), dont la barre inline diverge (`rounded-lg border bg-gray-50` vs `card-base glass-effect`)
+**When** il bascule sur `<BulkActionBar>`
+**Then** il **adopte le style Songlist** — changement visuel **assumé** (D) ; le comportement (Delete selected + `ConfirmDialog`) est inchangé
+
+**Given** la décision C
+**When** la story se termine
+**Then** **aucun** `<MultiSelectTable>` générique n'est créé ; la décision est inscrite en commentaire dans le composant partagé pour que la prochaine surface ne re-tente pas l'abstraction
+
+**And** refacto **iso-fonctionnelle**, zéro nouveau comportement ; tests des composants partagés (`StrictMode`) ; front vert, `tsc -b` + ESLint propres
+`[src/components/BulkActionBar.tsx (nouveau), src/components/SelectionCheckbox.tsx (nouveau), src/components/SongsList.tsx, src/pages/CatalogManage.tsx]`
+
+### Story 22.2: Ajouter une sélection d'entrées à une collection (curateur)
+
+En tant que **curateur**,
+je veux pousser plusieurs entrées sélectionnées dans une collection en une action,
+afin de ne plus avoir à ouvrir la collection et à retrouver chaque entrée une par une au typeahead.
+
+**Acceptance Criteria:**
+
+**Given** des entrées sélectionnées sur `/catalog/manage?tab=entries`
+**When** la barre « N selected » s'affiche
+**Then** un **2ᵉ bouton « Add to collection »** est présent à côté de *Delete selected*, ouvrant une **liste déroulante des collections existantes** (`catalogService.listCollections`) ; **aucune création de collection à la volée** (hors périmètre)
+
+**Given** une collection choisie et la confirmation
+**When** l'ajout se déclenche
+**Then** N appels `addSongToCollection` partent en **concurrence bornée** (best-effort, mirror 20.3) ; le bouton est désactivé pendant l'action et une double soumission est impossible
+
+**Given** la fin de l'action
+**When** le récap s'affiche
+**Then** il est **inline et persistant** (pas un toast fugace, leçon 20.4) avec `role="status"` / `role="alert"`, et **segmenté** : « X added · Y already in · Z failed » — une entrée déjà membre compte comme **already in**, jamais comme une erreur (la jointure est idempotente, composite unique 20.1) ; un résultat entièrement no-op a son **propre message clair**, pas un « Added 0 » dégradé (leçon rétro 20 #5)
+
+**Given** un ajout partiellement en échec
+**When** le récap s'affiche
+**Then** les entrées **en échec restent sélectionnées** (le lot peut être rejoué) ; les entrées réussies sortent de la sélection
+
+**And** aucun backend, aucune migration ; tests (`StrictMode`) couvrant succès / déjà-membre / échec partiel ; front vert
+`[src/pages/CatalogManage.tsx, src/services/catalogService.ts (addSongToCollection existant), src/components/BulkActionBar.tsx]`
+
+### Story 22.3: Fiche collection (admin) en tableau sélectionnable
+
+En tant que **curateur**,
+je veux voir les membres d'une collection dans le même tableau que partout ailleurs et en retirer plusieurs d'un coup,
+afin que l'écran de composition cesse d'être une liste à part.
+
+**Acceptance Criteria:**
+
+**Given** `/catalog/manage/collections/:uid`, dont les membres sont aujourd'hui une `<ul>/<li>` avec un *Remove* par ligne
+**When** la page s'affiche
+**Then** les membres sont rendus en **tableau** (Artist · Title · Key · BPM + badge `Draft` conservé) avec une **colonne de cases à cocher** en tête de ligne, via les primitives de 22.1
+
+**Given** des membres sélectionnés
+**When** la barre « N selected » s'affiche
+**Then** elle propose **« Remove selected »** ; le **Remove par ligne disparaît** (un seul chemin de retrait — décision de cadrage, revisitable au `create-story` si la QA le conteste)
+
+**Given** la confirmation du retrait groupé
+**When** l'action se déclenche
+**Then** N appels `removeSongFromCollection` en concurrence bornée (best-effort) + `ConfirmDialog` ; récap **segmenté et persistant** comme en 22.2 ; un membre déjà retiré (404) compte comme **retiré**, pas comme une erreur
+
+**Given** le retrait effectué
+**When** la liste se rafraîchit
+**Then** la sélection est nettoyée des membres réellement retirés (`removeMany`) et la recherche/ajout par typeahead au-dessus reste inchangée
+
+**And** front-only, aucun endpoint nouveau ; tests (`StrictMode`) ; front vert
+`[src/pages/CatalogCollectionCompose.tsx, src/components/BulkActionBar.tsx, src/components/SelectionCheckbox.tsx]`
+
+### Story 22.4: Ajouter une sélection à ma songlist (lecteur)
+
+En tant qu'**utilisateur**,
+je veux cocher plusieurs chansons dans le Catalog — au browse comme dans une collection — et les ajouter d'un coup à ma songlist,
+afin de ne plus les ajouter une par une ni d'avoir à tout prendre ou rien.
+
+**Acceptance Criteria:**
+
+**Given** `/catalog` (browse), dont `CatalogList` est **déjà** un tableau sticky sans case à cocher
+**When** la page s'affiche
+**Then** une **colonne de cases à cocher** est ajoutée (primitives 22.1) sans casser le clic-ligne-ouvre-la-fiche ni le bouton *Add* par ligne (qui reste) ; la sélection **survit à la pagination** (sémantique `addMany`/`removeMany`, comme `CatalogManage`) et n'est **pas persistée** (pas de `persistKey`)
+
+**Given** `/catalog/collections/:uid` (vue publique), aujourd'hui une `<ul>/<li>` sans autre option que l'import total
+**When** la page s'affiche
+**Then** les chansons sont en **tableau + cases à cocher** ; le bouton **« Add collection to my songlist »** reste en **raccourci** (import total 20.3, playlist miroir incluse)
+
+**Given** une sélection et le clic sur **« Add selected to my songlist »**
+**When** l'action se déclenche
+**Then** N appels `addToSonglist` en concurrence bornée (best-effort) après `ConfirmDialog` ; **aucune playlist miroir n'est créée** pour un sous-ensemble (décision B) et le `ConfirmDialog` le dit explicitement, pour que la différence avec le bouton « toute la collection » soit lisible
+
+**Given** une chanson déjà présente dans la songlist de l'utilisateur (409 `duplicate_song`)
+**When** le récap s'affiche
+**Then** elle compte comme **« already in your songlist »**, pas comme un échec ; récap **segmenté et persistant** (« X added · Y already in · Z failed ») ; le flag doublon existant (`useSonglistMatcher`) reste cohérent avec le résultat après l'action
+
+**And** front-only ; UI en anglais, dark mode, a11y (≥44px) ; tests (`StrictMode`) couvrant browse + collection publique, succès / doublon / échec partiel ; front vert
+`[src/components/CatalogList.tsx, src/pages/Catalog.tsx, src/pages/CatalogCollection.tsx, src/services/catalogService.ts (addToSonglist existant), src/components/BulkActionBar.tsx]`
