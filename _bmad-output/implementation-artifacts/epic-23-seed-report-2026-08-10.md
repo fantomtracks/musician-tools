@@ -87,11 +87,40 @@ Seconde exécution des trois phases : **0 création, 0 rattachement, 0 renommage
 
 Chaîne de traitement : le seed n'a créé aucune entrée `Beatles` (le CSV avait été nettoyé) et a sauté `Come Together`, déjà présente ; l'attach exact n'a rien matché (`beatles` ≠ `the beatles`, accents et articles conservés) ; c'est l'alias qui a renommé les deux chansons puis les a rattachées. Aucun doublon, ni au Catalog ni dans la songlist.
 
+## Vérification navigateur (AC6)
+
+Faite sur la copie locale restaurée, avec northwood connecté (je ne saisis pas de mot de passe).
+
+| Cas | Attendu | Constaté |
+|---|---|---|
+| `Vulfpeck / Dean Town` — fiche **brouillon** (75 cas) | aucune trace de provenance | **aucune mention du Catalog** sur la fiche |
+| `Muse / Hysteria` — fiche **publiée** (7 cas) | ligne de provenance, **pas** de bandeau ambre, **pas** de Refresh | « ↳ Added from the Catalog » + lien, **rien d'autre** |
+| Songlist | orthographes corrigées | `Jamiroquai Runaway` (ex-« Jamiroquoi ») et `Primus Little Lord Fentanyl (feat. Puscifer)` (ex-« Pucifer ») |
+| Historique de session | garde l'ancienne orthographe (FR4) | label figé `…(feat. Pucifer)` alors que la chanson dit `…(feat. Puscifer)` |
+
+**Pourquoi aucun bouton Refresh n'apparaît** : il est conditionné à `source?.drift` (`CatalogSourceBanner.tsx:109`), et la décision B a posé `syncedAt = catalog.updatedAt`. Vérifié en base : **0 chanson en drift sur les 82 rattachées**.
+
+### Le point d'attention que cette vérification a fait remonter
+
+La décision A supposait que tous les liens resteraient dormants, « puisque les fiches seedées sont des brouillons ». C'est vrai pour **75** chansons. Mais **7** se sont rattachées à des fiches **déjà publiées** en production (les 7 doublons du CSV), chez **2 utilisateurs** — pour celles-là, une ligne de provenance apparaît immédiatement.
+
+C'est inoffensif aujourd'hui (pas de drift ⇒ pas de Refresh proposé). Ça cesse de l'être **le jour où le curateur édite l'une de ces 7 fiches** : la drift passera à vrai, le bouton apparaîtra, et un clic écrirait les valeurs de la fiche par-dessus celles de l'utilisateur. Les écarts mesurés sont réels :
+
+| Chanson | utilisateur | fiche |
+|---|---|---|
+| `Muse / Hysteria` | **C / 186 bpm** | **A / 93 bpm** |
+| `RHCP / Give It Away` | G | A |
+| `RATM / Killing In The Name` | G / 89 | *(vide)* / *(vide)* |
+| `Cream / Sunshine Of Your Love` | D | *(vide)* |
+
+Ces 4 fiches publiées sont donc **moins riches ou divergentes** par rapport à ce que les utilisateurs ont saisi. À traiter avant d'éditer ces fiches — c'est le même sujet que la règle « ne publier qu'une fiche remplie », mais appliqué à des fiches **déjà** publiées.
+
 ## Reste à décider avant la production
 
 1. **Rattachements SANS renommage** (décision reportée de la review 23.3) : **0 cas** sur le dump prod. ⇒ **La décision est sans objet**, le comportement actuel est conservé.
 2. **La garde « alias morts » sur une seconde exécution** : faut-il la faire taire quand les chansons visées sont déjà rattachées à leur fiche canonique, ou accepter un code de sortie 1 sur tout re-run ?
 3. **`--schema=public` dans `db-backup-prod`** : correctif d'outillage à appliquer ou non.
+4. **Les 4 fiches publiées plus pauvres que la saisie des utilisateurs** (voir ci-dessus) : les enrichir avant toute édition, sinon un futur Refresh appauvrira la donnée de 2 utilisateurs.
 
 ## Rappel d'exploitation
 

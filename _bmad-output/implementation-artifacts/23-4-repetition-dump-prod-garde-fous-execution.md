@@ -84,10 +84,10 @@ Elle a donc dérivé dans les deux sens. **Tout chiffre mesuré jusqu'ici vaut p
   - [x] Les 3 phases avec `--apply`, dans l'ordre.
   - [x] Relever les compteurs avant/après et les compteurs métier.
   - [x] **Relancer les 3 phases** : tout doit être à zéro. C'est l'AC7, et c'est la seule preuve d'idempotence sur données réelles.
-- [ ] **Task 6 — Vérification navigateur** (AC: 6)
-  - [ ] Ouvrir une chanson rattachée : **bannière de provenance ABSENTE** (brouillon). Une bannière visible = bug bloquant.
-  - [ ] Ouvrir une chanson passée par la phase alias : le titre corrigé s'affiche dans la songlist.
-  - [ ] Ouvrir l'historique de session d'une chanson renommée qui en a un : il garde **l'ancienne** orthographe. C'est le contrat FR4, à constater pour ne pas le prendre pour un bug plus tard.
+- [x] **Task 6 — Vérification navigateur** (AC: 6)
+  - [x] Ouvrir une chanson rattachée : **bannière de provenance ABSENTE** (brouillon). Une bannière visible = bug bloquant.
+  - [x] Ouvrir une chanson passée par la phase alias : le titre corrigé s'affiche dans la songlist.
+  - [x] Ouvrir l'historique de session d'une chanson renommée qui en a un : il garde **l'ancienne** orthographe. C'est le contrat FR4, à constater pour ne pas le prendre pour un bug plus tard.
 - [x] **Task 7 — Trancher la décision reportée** (AC: 4)
   - [x] Compter les rattachements **sans** renommage. 0 ⇒ acter que la décision est sans objet. ≥ 1 ⇒ présenter la liste nominative à northwood et **attendre sa décision** avant la prod.
 - [ ] **Task 8 — Exécution prod** (AC: 8, 9)
@@ -146,7 +146,7 @@ Répétition faite le 2026-08-10 sur copie locale de la prod. Prod **non touché
 Résultats : 75 entrées créées / 7 déjà présentes ; **82 Songs rattachées sur 88** ; **9 alias sur 9 ont matché** ; `Songs`, `SongPlays`, `SessionItems`, `PlaylistSongs` **inchangés** ; **0 doublon** de fold au Catalog comme par utilisateur ; idempotence vérifiée (0/0/0 au second passage).
 **Décision reportée de la review 23.3 : TRANCHÉE — 0 rattachement sans renommage sur le dump prod, la décision est sans objet, comportement conservé.**
 Trois écarts découverts : `db-restore` incompatible avec un dump Supabase (contourné par `-n public`), séquence de la story fausse (les phases doivent être entrelacées), garde « alias morts » qui crie sur toute seconde exécution.
-Reste Task 6 (vérification navigateur) et Task 8 (exécution prod, sur feu vert explicite).
+Vérification navigateur **faite** : fiche brouillon ⇒ aucune trace ; fiche publiée ⇒ ligne de provenance seule, **sans** bandeau ni Refresh (0 chanson en drift sur 82) ; orthographes corrigées visibles en songlist ; historique de session figé sur l'ancienne (FR4). **Point remonté** : 7 chansons se sont rattachées à des fiches DÉJÀ PUBLIÉES, chez 2 utilisateurs — inoffensif tant que personne n'édite ces fiches, mais 4 d'entre elles sont plus pauvres que la saisie des utilisateurs. Reste Task 8 (exécution prod, sur feu vert explicite).
 
 ### Agent Model Used
 
