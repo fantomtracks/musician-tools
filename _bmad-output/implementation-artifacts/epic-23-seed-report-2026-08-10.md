@@ -172,3 +172,62 @@ Chaque dry-run a été lu avant son application, et chaque chiffre correspondait
 - **Enrichir 4 fiches déjà publiées avant cette opération**, plus pauvres que la saisie des utilisateurs (`Muse / Hysteria` en A·93 côté fiche contre C·186 côté utilisateur, `RHCP / Give It Away`, `RATM / Killing In The Name`, `Cream / Sunshine Of Your Love`).
 - ⚠️ **Le bouton « Publier » du curateur ne resynchronise pas** : publier une fiche à la main depuis l'écran allumera la bannière chez ses détenteurs. Voir deferred-work.
 - **3 entrées d'historique de session** gardent l'ancienne orthographe. C'est le contrat FR4, pas un bug.
+
+---
+
+# NETTOYAGE DE LA BASE DE PRODUCTION — 2026-08-11, 23h49–00h00
+
+Demandé par northwood après le seed. Opérations **de données uniquement** : aucun code modifié, aucun déploiement. Filet posé avant : `backups/musician_tools_prod_20260810_235245.dump` (392 Ko).
+
+## Suppression des chansons de test
+
+Cinq chansons parasites supprimées, **par uid** et jamais par motif, dans une transaction qui se serait annulée si le compte n'avait pas été exactement 5 :
+
+| uid | utilisateur | chanson |
+|---|---|---|
+| `13a181fe` | `9f11a0a5` | `GDFGFD / RETERET` |
+| `1ebc8949` | `9f11a0a5` | `hjbhj / b bjh` |
+| `27c0a0a1` | `9f11a0a5` | `/toto / test` |
+| `84a5d4da` | `9f11a0a5` | `toto / test` |
+| `a0a5a544` | `cf5f2b29` | `test / test` |
+
+Les cinq avaient **0 lecture, 0 session, 0 playlist** : aucun historique détruit. `Songs` 88 → 83, les trois autres compteurs inchangés (133 / 94 / 1).
+
+**Deux faux positifs écartés** : `Vulfpeck / 1612` (le titre n'a pas de voyelle, ce qui l'avait fait flagger par une regex) et `Vulfpeck / Sauna`. Et le mot « toto » a failli coûter cher — **Toto est un vrai groupe**. C'est pourquoi rien n'a été supprimé par motif : la liste a été résolue en uid complets, affichée, puis validée avant écriture.
+
+**Le Catalog, lui, était propre** : les 50 fiches antérieures au seed sont toutes de vraies chansons.
+
+## Corrections d'orthographe et de casse
+
+**10 vraies fautes** (toutes sur des fiches à `copies = 0`, donc sans effet pour personne) :
+
+`Thunderstuck`→`Thunderstruck` · `The Cramberries`→`The Cranberries` · `Fell Good Inc.`→`Feel Good Inc.` · `Roxane`→`Roxanne` · `Temptation`→`The Temptations` · `Guns and roses / Sweet Child O mine`→`Guns N' Roses / Sweet Child o' Mine` · `Ben E king`→`Ben E. King` · `i got you (i feel you)`→`I Got You (I Feel **Good**)` · `Don't stop believin`→`Don't Stop Believin'` · `Crazy little things called love`→`Crazy Little **Thing** Called Love`
+
+**23 recasages** de titres, artistes non touchés. Trois pièges évités :
+
+- La mise en casse automatique aurait transformé `Sweet Child o' Mine` en `Sweet Child O' Mine` — une régression sur la correction qu'on venait de faire. Exclu de la passe.
+- Les acronymes sont préservés par construction (`CAKE`, `LANDMVRKS`, `MAXIMUM THE HORMONE` restent intacts) — le plan a d'ailleurs été **affiché avant d'être appliqué**, précisément parce qu'une mise en casse automatique produit facilement du charabia.
+- Trois apostrophes qu'aucune règle de casse ne peut deviner, ajoutées à la main : `Livin' on a Prayer`, `Gimme Some Lovin'`, `Where Is My Mind?`
+
+## Un effet de bord favorable, mais accidentel — à retenir
+
+Les corrections ont été faites en **SQL brut**, ce qui **contourne la gestion des horodatages de Sequelize** : les `updatedAt` sont restés au 8 août. La drift est donc restée à **0** et personne n'a vu « nouvelle version disponible ».
+
+C'est le bon résultat — un « Refresh » ne propage jamais le titre ni l'artiste, donc la bannière aurait été un faux signal. Mais ce n'était pas voulu : les mêmes corrections passées par le modèle Sequelize auraient allumé la bannière chez **trois** utilisateurs pour rien.
+
+**Règle à en tirer** : corriger un `title`/`artist` au Catalog **en SQL brut** (ça ne réveille personne, et le refresh ne les propage pas de toute façon) ; corriger une **tonalité, un tempo ou un mode** **via le modèle**, pour que la bannière apparaisse — là, elle a du sens.
+
+## État final vérifié
+
+| | |
+|---|---|
+| Fiches Catalog | **125**, toutes publiées |
+| Chansons utilisateurs | **83** |
+| SongPlays / SessionItems / PlaylistSongs | **133 / 94 / 1** |
+| Chansons en drift | **0** |
+| Doublons (Catalog et par utilisateur) | **0** |
+
+## Reste à faire à la main, via l'interface
+
+- Remplir `Tool / Fear Inoculum` et `Wye Oak / Civilian`.
+- Enrichir les 4 fiches plus pauvres que la saisie des utilisateurs (`Muse / Hysteria`, `RHCP / Give It Away`, `RATM / Killing in the Name`, `Cream / Sunshine of Your Love`). ⚠️ Passer par l'écran : la bannière est **justifiée** quand la tonalité change.
