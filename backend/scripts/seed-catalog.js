@@ -17,8 +17,10 @@
 //   NODE_ENV=development node scripts/seed-catalog.js --phase=alias --apply
 //   NODE_ENV=development node scripts/seed-catalog.js --phase=enrich     # dry-run de l'enrichissement
 //   NODE_ENV=development node scripts/seed-catalog.js --phase=enrich --apply
+//   NODE_ENV=development node scripts/seed-catalog.js --phase=publish     # dry-run
+//   NODE_ENV=development node scripts/seed-catalog.js --phase=publish --apply
 //
-// Phase order matters: seed → attach → alias → enrich. The alias pass must run AFTER the
+// Phase order matters: seed → attach → alias → enrich → publish. The alias pass must run AFTER the
 // exact-fold attach, so a song the exact match would have taken is never renamed by an
 // alias; and enrich runs LAST because it travels along the link attach and alias create.
 //
@@ -51,7 +53,7 @@ const { normalizeInt, normalizeDurationSeconds, normalizeLanguage, normalizeMode
 
 const DEFAULT_FILE = path.join(__dirname, 'seed', 'catalog-seed.csv');
 const KNOWN_FLAGS = ['--apply', '--allow-remote'];
-const PHASES = ['seed', 'attach', 'alias', 'enrich'];
+const PHASES = ['seed', 'attach', 'alias', 'enrich', 'publish'];
 // Captured at MODULE LOAD, before anything can require config.js and let dotenv
 // rewrite it. Informational only — the guard below trusts the host, not this.
 const NODE_ENV_AT_STARTUP = process.env.NODE_ENV;
@@ -1206,6 +1208,191 @@ async function runEnrich(db, opts) {
 }
 
 
+// --- Publish (story 23.6) ----------------------------------------------------
+//
+// Publishes every draft fiche in one pass. northwood's call: « je ne veux pas m'amuser à
+// cliquer sur chaque truc pour les publier. »
+//
+// This AMENDS decision A of the epic, whose reasoning no longer holds. Drafts existed
+// because a published-but-EMPTY fiche would let a user refresh their song into nothing.
+// Story 23.5 filled the fiches from the songs themselves, so a refresh now writes a user
+// their own values back. The protection is no longer needed; the friction is.
+//
+// ⚠️ PUBLISHING IS A MODIFICATION, AND THIS TIME THE BANNER IS REAL. Setting publishedAt
+// moves `updatedAt`, which makes the drift true — and unlike the enrich phase, the fiche is
+// now PUBLISHED, so `getSong` does emit the provenance block and the amber "a newer version
+// is available" banner CAN show. Measured in a rolled-back transaction on the prod copy:
+// publishing the 75 fiches took the drift from 0 to 75. Re-syncing afterwards is the whole
+// point of this phase.
+//
+// Harder than 23.5 on one axis: a fiche can carry SEVERAL attached songs. 23.5 refused that
+// case (it could not tell which song to read values from); here there is nothing to arbitrate,
+// but every one of those songs must be re-synced. Re-syncing only the first would leave the
+// other owners staring at a banner nobody can explain.
+//
+// NOTE — the curator's own Publish button has the same gap: `publishCatalogEntry`
+// (catalogcontroller.js:200) does `entry.update({ publishedAt })` and re-syncs nothing.
+// Out of scope here (AC8 forbids touching controllers); reported in deferred-work.
+
+const PUBLISH_CANDIDATES_SQL = `
+  SELECT c.uid    AS catalog_uid,
+         c.title  AS catalog_title,
+         c.artist AS catalog_artist,
+         count(s.uid) OVER (PARTITION BY c.uid) AS song_count,
+         (${ENRICH_FIELDS.map(f => `c.${ENRICH_COLUMNS[f]} IS NOT NULL`).join(' OR ')}) AS has_data
+    FROM "CatalogSongs" c
+    LEFT JOIN "Songs" s ON s.source_catalog_uid = c.uid
+   WHERE c.published_at IS NULL
+   ORDER BY c.artist, c.title
+`;
+
+async function selectPublishCandidates(sequelize) {
+  const rows = await sequelize.query(PUBLISH_CANDIDATES_SQL, { type: QueryTypes.SELECT });
+  const seen = new Set();
+  const out = [];
+  for (const r of rows) {
+    if (seen.has(r.catalog_uid)) continue; // a fiche with N songs comes back N times
+    seen.add(r.catalog_uid);
+    out.push({
+      catalogUid: r.catalog_uid,
+      label: describeSong(r.catalog_artist, r.catalog_title),
+      songCount: Number(r.song_count),
+      hasData: !!r.has_data,
+    });
+  }
+  return out;
+}
+
+async function publishCatalogEntries({ CatalogSong, Song, candidates, apply = false, now = new Date(), log = () => {} }) {
+  const report = {
+    candidates: 0, published: 0, resynced: 0, publishedWithoutData: [],
+    raced: [], desynced: [], failed: [], applied: !!apply,
+  };
+
+  for (const c of candidates) {
+    report.candidates += 1;
+
+    const noteWithoutData = () => {
+      // northwood asked for these to go out anyway — « je m'occuperai de remplir aussi ».
+      // So this is a TODO list, not a warning.
+      if (!c.hasData) report.publishedWithoutData.push({ catalogUid: c.catalogUid, label: c.label });
+    };
+
+    if (!apply) { report.published += 1; noteWithoutData(); continue; }
+
+    try {
+      const [affected = 0, rows = []] = (await CatalogSong.update(
+        { publishedAt: now },
+        {
+          // Re-checks the draft state at write time: a fiche the curator published by hand
+          // since the SELECT keeps ITS date, which means something.
+          where: { uid: c.catalogUid, publishedAt: null },
+          // The timestamp OUR write produced, not whatever a concurrent writer left behind.
+          returning: true,
+        }
+      )) || [];
+
+      if (!affected) { report.raced.push({ catalogUid: c.catalogUid, label: c.label }); continue; }
+
+      report.published += 1;
+      noteWithoutData();
+      log(`      ✎ publiée : ${c.label}`);
+
+      if (!c.songCount) continue; // nobody has it: nothing to re-sync
+
+      const written = rows && rows[0];
+      if (!written || !written.updatedAt) {
+        report.desynced.push({ catalogUid: c.catalogUid, label: c.label, reason: 'fiche publiée mais horodatage illisible' });
+        continue;
+      }
+
+      // ALL the songs of this fiche, in one statement — `sourceCatalogUid`, not `uid`.
+      const [synced = 0] = (await Song.update(
+        { sourceCatalogSyncedAt: written.updatedAt },
+        { where: { sourceCatalogUid: c.catalogUid }, silent: true }
+      )) || [];
+
+      if (!synced) {
+        report.desynced.push({ catalogUid: c.catalogUid, label: c.label, reason: 'aucune chanson resynchronisée' });
+        continue;
+      }
+      report.resynced += synced;
+    } catch (error) {
+      report.failed.push({ catalogUid: c.catalogUid, label: c.label, reason: (error && error.message) || String(error) });
+    }
+  }
+  return report;
+}
+
+function formatPublishReport(report, { log = console.log } = {}) {
+  log('');
+  log(report.applied ? '=== PUBLICATION APPLIQUÉE ===' : '=== DRY-RUN — aucune écriture ===');
+  log(`  ${label('fiches brouillon')}: ${report.candidates}`);
+  log(`  ${label(report.applied ? 'publiées' : 'à publier')}: ${report.published}`);
+  if (report.resynced) log(`  ${label('marqueurs resynchro.')}: ${report.resynced}   (personne ne verra « nouvelle version disponible »)`);
+
+  if (report.publishedWithoutData.length) {
+    log(`  ${label('À REMPLIR')}: ${report.publishedWithoutData.length}   publiées sans aucune donnée — votre liste de travail :`);
+    for (const e of report.publishedWithoutData) log(`      • ${e.label}`);
+  }
+  if (report.desynced.length) {
+    log(`  ${label('DÉSYNCHRONISÉES')}: ${report.desynced.length}   ⚠️  fiche publiée, marqueur PAS reposé — ces gens verront la bannière`);
+    for (const d of report.desynced) log(`      ✗ ${d.label}  [${d.catalogUid}]${d.reason ? ` — ${d.reason}` : ''}`);
+  }
+  if (report.raced.length) {
+    log(`  ${label('non publiées')}: ${report.raced.length}   (déjà publiées ou disparues depuis la sélection)`);
+    for (const r of report.raced) log(`      • ${r.label}  [${r.catalogUid}]`);
+  }
+  if (report.failed.length) {
+    log(`  ${label('ÉCHECS')}: ${report.failed.length}   ⚠️  le lot n'est PAS complet`);
+    for (const f of report.failed) log(`      ✗ ${f.label} : ${f.reason}`);
+  }
+  log('');
+}
+
+async function runPublish(db, opts) {
+  const before = await countGuardedTables(db);
+  console.log(`${label('Compteurs')}: ${formatCounts(before)}`);
+
+  let report;
+  try {
+    const candidates = await selectPublishCandidates(db.sequelize);
+    report = await publishCatalogEntries({
+      CatalogSong: db.CatalogSong, Song: db.Song, candidates, apply: opts.apply, log: console.log,
+    });
+  } catch (error) {
+    console.error(`Échec : ${error.message}`);
+    process.exitCode = 1;
+    return;
+  }
+
+  formatPublishReport(report);
+
+  if (opts.apply) {
+    let after;
+    try {
+      after = await countGuardedTables(db);
+    } catch (error) {
+      console.error(`\n⚠️  ÉCRITURES APPLIQUÉES, mais le contrôle des compteurs est indisponible : ${(error && error.message) || error}`);
+      console.error('Relisez le rapport ci-dessus : il liste ce qui a été publié.');
+      process.exitCode = 1;
+      return;
+    }
+    console.log(`${label('Compteurs après')}: ${formatCounts(after)}`);
+    const drift = diffCounts(before, after);
+    if (drift.length) {
+      console.error('\n⚠️  COMPTEURS MODIFIÉS — cette phase publie, elle ne crée ni ne supprime :');
+      for (const d of drift) console.error(`      ${d.table} : ${d.before} → ${d.after}`);
+      console.error("Cause la plus probable : un utilisateur écrivait pendant l'exécution — vérifiez-le d'abord.");
+      process.exitCode = 1;
+      return;
+    }
+  }
+
+  if (report.failed.length || report.desynced.length || report.raced.length) process.exitCode = 1;
+  if (!opts.apply) console.log('Relancez avec --apply pour écrire.');
+}
+
 // --- Entry point -----------------------------------------------------------
 
 function parseArgs(argv) {
@@ -1320,7 +1507,7 @@ async function main(argv) {
   if (NODE_ENV_AT_STARTUP !== process.env.NODE_ENV) {
     console.log('                ⚠️ .env a modifié NODE_ENV APRÈS le choix de la connexion — ne vous fiez pas à cette valeur, fiez-vous à la base ci-dessus.');
   }
-  console.log(`${label('Phase')}: ${opts.phase}${{ attach: '  (rattachement des Songs existantes)', alias: '  (alias + correction orthographique)', enrich: '  (enrichissement des fiches brouillon)' }[opts.phase] || '  (création des entrées Catalog)'}`);
+  console.log(`${label('Phase')}: ${opts.phase}${{ attach: '  (rattachement des Songs existantes)', alias: '  (alias + correction orthographique)', enrich: '  (enrichissement des fiches brouillon)', publish: '  (publication en un passage)' }[opts.phase] || '  (création des entrées Catalog)'}`);
   if (opts.phase === 'seed') console.log(`${label('Fichier')}: ${opts.file}`);
   console.log(`${label('Mode')}: ${opts.apply ? '--apply (ÉCRITURE)' : 'dry-run (aucune écriture)'}`);
 
@@ -1336,6 +1523,18 @@ async function main(argv) {
     );
     process.exitCode = 1;
     await Promise.resolve(db.sequelize.close()).catch(() => {});
+    return;
+  }
+
+  if (opts.phase === 'publish') {
+    try {
+      await runPublish(db, opts);
+    } catch (error) {
+      console.error(`Échec : ${(error && error.message) || error}`);
+      process.exitCode = 1;
+    } finally {
+      await Promise.resolve(db.sequelize.close()).catch(() => {});
+    }
     return;
   }
 
@@ -1422,6 +1621,8 @@ module.exports = {
   // Story 23.5 — enrich phase
   ENRICH_FIELDS, ENRICH_TEXT_FIELDS, ENRICH_COLUMNS, buildFillGuard, needsResync, ENRICH_CANDIDATES_SQL, selectEnrichCandidates, computeFill,
   enrichCatalogEntries, formatEnrichReport, runEnrich,
+  // Story 23.6 — publish phase
+  PUBLISH_CANDIDATES_SQL, selectPublishCandidates, publishCatalogEntries, formatPublishReport, runPublish,
 };
 
 if (require.main === module) {

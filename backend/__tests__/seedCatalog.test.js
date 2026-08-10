@@ -1368,3 +1368,160 @@ describe('formatEnrichReport', () => {
     expect(out).toMatch(/écartée|ÉCARTÉ/i);
   });
 });
+
+// --- Story 23.6 — publish phase ----------------------------------------------
+//
+// Publie toutes les fiches brouillon d'un coup. Le sujet n'est pas de poser une date :
+// c'est de le faire sans réveiller personne. Publier modifie la fiche, donc bouge son
+// updatedAt, donc rend la drift vraie — et cette fois la bannière PEUT s'afficher,
+// puisque la fiche devient publiée.
+const {
+  PUBLISH_CANDIDATES_SQL, selectPublishCandidates, publishCatalogEntries,
+  formatPublishReport, runPublish,
+} = require('../scripts/seed-catalog');
+
+const PUBLISHED_AT = new Date('2026-08-11T09:00:00Z');
+const FRESH_UPDATED_AT = new Date('2026-08-11T09:00:01Z');
+const publishCandidate = over => ({
+  catalogUid: 'cat-1', label: 'Muse / Hysteria', songCount: 1, hasData: true, ...over,
+});
+const makePublishModels = (updatedAt = FRESH_UPDATED_AT, syncedRows = 1) => ({
+  CatalogSong: { update: jest.fn().mockResolvedValue([1, [{ updatedAt }]]) },
+  Song: { update: jest.fn().mockResolvedValue([syncedRows]) },
+});
+
+describe('PUBLISH_CANDIDATES_SQL', () => {
+  test('ne vise que les brouillons', () => {
+    expect(PUBLISH_CANDIDATES_SQL).toMatch(/published_at IS NULL/);
+  });
+  test('compte les chansons rattachées : il faudra TOUTES les resynchroniser', () => {
+    expect(PUBLISH_CANDIDATES_SQL).toMatch(/count\(s\.uid\)/i);
+  });
+});
+
+describe('publishCatalogEntries', () => {
+  test('le dry-run n’écrit rien mais compte', async () => {
+    const m = makePublishModels();
+    const report = await publishCatalogEntries({ ...m, candidates: [publishCandidate()], apply: false, now: PUBLISHED_AT });
+    expect(m.CatalogSong.update).not.toHaveBeenCalled();
+    expect(m.Song.update).not.toHaveBeenCalled();
+    expect(report.published).toBe(1);
+  });
+
+  test('le where re-vérifie le brouillon : une fiche publiée à la main garde SA date', async () => {
+    const m = makePublishModels();
+    await publishCatalogEntries({ ...m, candidates: [publishCandidate()], apply: true, now: PUBLISHED_AT });
+    const [values, options] = m.CatalogSong.update.mock.calls[0];
+    expect(values).toEqual({ publishedAt: PUBLISHED_AT });
+    expect(options.where).toEqual({ uid: 'cat-1', publishedAt: null });
+    expect(options.returning).toBe(true);
+  });
+
+  test('LE CŒUR : la resynchronisation vise TOUTES les chansons de la fiche, pas une seule', async () => {
+    // 23.5 refusait les fiches à plusieurs chansons ; ici il n'y a rien à arbitrer, mais
+    // ne resynchroniser que la première laisserait les autres propriétaires avec la
+    // bannière « nouvelle version disponible ».
+    const m = makePublishModels(FRESH_UPDATED_AT, 3);
+    const report = await publishCatalogEntries({
+      ...m, candidates: [publishCandidate({ songCount: 3 })], apply: true, now: PUBLISHED_AT,
+    });
+    const [values, options] = m.Song.update.mock.calls[0];
+    expect(values).toEqual({ sourceCatalogSyncedAt: FRESH_UPDATED_AT });
+    expect(options).toEqual({ where: { sourceCatalogUid: 'cat-1' }, silent: true });
+    expect(report.resynced).toBe(3);
+  });
+
+  test('l’horodatage reposé vient du returning de NOTRE écriture', async () => {
+    const updatedAt = new Date('2026-08-11T10:11:12Z');
+    const m = makePublishModels(updatedAt);
+    await publishCatalogEntries({ ...m, candidates: [publishCandidate()], apply: true, now: PUBLISHED_AT });
+    expect(m.Song.update.mock.calls[0][0].sourceCatalogSyncedAt).toBe(updatedAt);
+  });
+
+  test('une fiche sans aucune donnée est publiée QUAND MÊME, et nommée', async () => {
+    // Décision explicite de northwood : « mets-les dans le catalogue, je m'occuperai
+    // de remplir aussi. » C'est une liste de travail, pas un avertissement.
+    const m = makePublishModels();
+    const report = await publishCatalogEntries({
+      ...m, candidates: [publishCandidate({ hasData: false, label: 'Tool / Fear Inoculum' })],
+      apply: true, now: PUBLISHED_AT,
+    });
+    expect(m.CatalogSong.update).toHaveBeenCalledTimes(1);
+    expect(report.publishedWithoutData).toEqual([{ catalogUid: 'cat-1', label: 'Tool / Fear Inoculum' }]);
+  });
+
+  test('une fiche sans chanson rattachée est publiée mais ne déclenche aucune resynchronisation', async () => {
+    const m = makePublishModels();
+    const report = await publishCatalogEntries({
+      ...m, candidates: [publishCandidate({ songCount: 0 })], apply: true, now: PUBLISHED_AT,
+    });
+    expect(m.CatalogSong.update).toHaveBeenCalledTimes(1);
+    expect(m.Song.update).not.toHaveBeenCalled();
+    expect(report.published).toBe(1);
+  });
+
+  test('0 ligne touchée (publiée entre-temps) ⇒ ni resynchronisation, ni comptée', async () => {
+    const m = makePublishModels();
+    m.CatalogSong.update.mockResolvedValue([0, []]);
+    const report = await publishCatalogEntries({ ...m, candidates: [publishCandidate()], apply: true, now: PUBLISHED_AT });
+    expect(m.Song.update).not.toHaveBeenCalled();
+    expect(report.published).toBe(0);
+    expect(report.raced).toHaveLength(1);
+  });
+
+  test('fiche publiée mais resynchronisation à 0 ligne ⇒ seau « désynchronisées », pas « échec »', async () => {
+    const m = makePublishModels(FRESH_UPDATED_AT, 0);
+    const report = await publishCatalogEntries({
+      ...m, candidates: [publishCandidate()], apply: true, now: PUBLISHED_AT,
+    });
+    expect(report.failed).toHaveLength(0);
+    expect(report.published).toBe(1);          // la fiche EST publiée
+    expect(report.desynced).toHaveLength(1);
+  });
+
+  test('idempotence : plus aucun brouillon au second passage', async () => {
+    const m = makePublishModels();
+    const report = await publishCatalogEntries({ ...m, candidates: [], apply: true, now: PUBLISHED_AT });
+    expect(m.CatalogSong.update).not.toHaveBeenCalled();
+    expect(report.published).toBe(0);
+  });
+
+  test('une erreur en cours de lot ne jette pas le rapport des fiches déjà publiées', async () => {
+    const m = makePublishModels();
+    m.CatalogSong.update.mockResolvedValueOnce([1, [{ updatedAt: FRESH_UPDATED_AT }]])
+      .mockRejectedValueOnce(new Error('connection terminated'));
+    const report = await publishCatalogEntries({
+      ...m,
+      candidates: [publishCandidate({ catalogUid: 'cat-1' }), publishCandidate({ catalogUid: 'cat-2' })],
+      apply: true, now: PUBLISHED_AT,
+    });
+    expect(report.published).toBe(1);
+    expect(report.failed[0].reason).toMatch(/connection terminated/);
+  });
+});
+
+describe('formatPublishReport', () => {
+  const capture = report => {
+    const lines = [];
+    formatPublishReport(report, { log: l => lines.push(l) });
+    return lines.join('\n');
+  };
+  const base = {
+    candidates: 0, published: 0, resynced: 0, publishedWithoutData: [],
+    raced: [], desynced: [], failed: [], applied: false,
+  };
+
+  test('les fiches publiées sans donnée sont présentées comme une liste à remplir', () => {
+    const out = capture({ ...base, candidates: 1, published: 1,
+      publishedWithoutData: [{ catalogUid: 'c1', label: 'Tool / Fear Inoculum' }] });
+    expect(out).toMatch(/Tool \/ Fear Inoculum/);
+    expect(out).toMatch(/remplir/i);
+  });
+
+  test('une désynchronisation est criée, avec de quoi la réparer', () => {
+    const out = capture({ ...base, candidates: 1, published: 1, applied: true,
+      desynced: [{ catalogUid: 'c1', label: 'X / Y' }] });
+    expect(out).toMatch(/DÉSYNCHRONIS/i);
+    expect(out).toMatch(/c1/);
+  });
+});
