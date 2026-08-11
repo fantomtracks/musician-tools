@@ -1,6 +1,6 @@
 import { StrictMode, useState } from 'react';
 import { render, screen, act, waitFor } from '@testing-library/react';
-import { useBulkAddToSonglist, describeAbandonedBatch } from '../hooks/useBulkAddToSonglist';
+import { useBulkAddToSonglist, describeAbandonedBatch, describeAbandonedWork, worthReporting } from '../hooks/useBulkAddToSonglist';
 import type { AddToSonglistRecap } from '../hooks/useBulkAddToSonglist';
 import { GlobalToastProvider } from '../contexts/GlobalToastProvider';
 import { catalogService } from '../services/catalogService';
@@ -97,5 +97,35 @@ describe('describeAbandonedBatch — ce que l\'utilisateur lit', () => {
 
   test('ne parle pas des non-démarrées quand il n\'y en a pas', () => {
     expect(describeAbandonedBatch({ ...base, added: 3 })).not.toMatch(/not started/);
+  });
+});
+
+// Constats 4 et 5 de la code review : le formateur est partagé par les 4 surfaces, donc le
+// verrouiller ICI couvre les quatre d'un coup — là où quatre phrases écrites à la main
+// divergeaient déjà (dont trois disaient « 1 were not started »).
+describe('describeAbandonedWork — le contrat partagé', () => {
+  test('singulier correct — c\'était « 1 were not started » sur 3 surfaces', () => {
+    const t = describeAbandonedWork({ what: 'entries were being deleted', landed: 2, skipped: 1, failed: 0 });
+    expect(t).toMatch(/1 was not started/);
+    expect(t).not.toMatch(/1 were/);
+  });
+
+  test('pluriel correct', () => {
+    expect(describeAbandonedWork({ what: 'x', landed: 1, skipped: 3, failed: 0 })).toMatch(/3 were not started/);
+  });
+
+  test('un lot dont TOUT a échoué parle quand même', () => {
+    // Les 3 pages gardaient sur le succès : un abandon tout-en-échec ne disait RIEN, alors que
+    // ces items ont peut-être touché le serveur.
+    expect(worthReporting(0, 4)).toBe(true);
+    expect(describeAbandonedWork({ what: 'x', landed: 0, skipped: 0, failed: 4 })).toMatch(/4 failed/);
+  });
+
+  test('un lot sans rien d\'abouti ni d\'échoué ne mérite pas d\'être annoncé', () => {
+    expect(worthReporting(0, 0)).toBe(false);
+  });
+
+  test('ne parle jamais des non-démarrées quand il n\'y en a pas', () => {
+    expect(describeAbandonedWork({ what: 'x', landed: 3, skipped: 0, failed: 0 })).not.toMatch(/not started/);
   });
 });

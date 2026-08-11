@@ -90,7 +90,7 @@ export function useBulkAddToSonglist(onSongKnown?: (song: Song) => void) {
         if (result.status === 'fulfilled') {
           counts.added += 1;
           settledUids.push(uids[i]);
-          onSongKnown?.(result.value);
+          if (mountedRef.current) onSongKnown?.(result.value); // jamais sur un composant démonté
           return;
         }
         if (result.reason instanceof SongConflictError) {
@@ -98,7 +98,7 @@ export function useBulkAddToSonglist(onSongKnown?: (song: Song) => void) {
           settledUids.push(uids[i]);
           // The 409 body carries the song already in the songlist: feeding it to the
           // matcher makes the "already in" flags correct with no refetch.
-          if (result.reason.existingSong) onSongKnown?.(result.reason.existingSong);
+          if (result.reason.existingSong) { if (mountedRef.current) onSongKnown?.(result.reason.existingSong); }
           else counts.needsSonglistRefresh = true;
           return;
         }
@@ -139,9 +139,37 @@ export function useBulkAddToSonglist(onSongKnown?: (song: Song) => void) {
 // of a degraded "0 added" (lesson from retro 20 #5).
 // A batch is "bad news" as soon as nothing was added — everything delisted is not a
 // neutral outcome, and must not be styled and announced like a success.
-// What the user reads AFTER leaving the page. It must state what actually landed — not what was
-// selected — and name the part that never started, so "12 selected, 5 added" does not read as a
-// silent loss of 7.
+// What the user reads AFTER leaving the page. Shared by the four bulk surfaces (story 24.2,
+// review finding 5): they each had their own hand-written sentence, they disagreed on content,
+// and three of them said "1 were not started".
+//
+// `failed` is part of the message ON PURPOSE: a failed item may have touched the server, so
+// staying silent about it leaves exactly the "unknown subset" this story exists to remove.
+export interface AbandonedWork {
+  /** e.g. "songs were being added", "entries were being deleted". */
+  what: string;
+  landed: number;
+  skipped: number;
+  failed: number;
+}
+
+export function describeAbandonedWork({ what, landed, skipped, failed }: AbandonedWork): string {
+  const parts = [
+    landed > 0 ? `${landed} went through` : null,
+    failed > 0 ? `${failed} failed` : null,
+  ].filter(Boolean).join(' · ');
+  const notStarted = skipped > 0
+    ? ` ${skipped} ${skipped === 1 ? 'was' : 'were'} not started, so nothing changed for ${skipped === 1 ? 'it' : 'them'}.`
+    : '';
+  // Nothing landed and nothing failed => the batch is a non-event; the caller should not speak.
+  return `You left while ${what}: ${parts || 'nothing had gone through'}.${notStarted}`;
+}
+
+/** True when there is something worth telling the user about an abandoned batch. */
+export function worthReporting(landed: number, failed: number): boolean {
+  return landed > 0 || failed > 0;
+}
+
 export function describeAbandonedBatch(r: AddToSonglistRecap): string {
   const landed = [
     r.added > 0 ? `${r.added} added to your songlist` : null,

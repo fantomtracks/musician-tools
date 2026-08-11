@@ -116,7 +116,19 @@ _Code review du 2026-08-11, **les 4 couches ont rendu**. Verdict : **NE PAS MERG
 
 Front **575 → 578**. Mutations : `name` remis à `RequestAbortedError` ⇒ 1 test meurt ; attente du jeton dé-bornée ⇒ 1 test meurt. Deux de mes tests antérieurs assertaient `name: 'RequestAbortedError'` — réalignés sur le contrat corrigé, ce qui est le sens même du correctif.
 
-**⚠️ RESTENT OUVERTS, non traités ici** : les constats 3, 4, 5 (vérification de montage après la boucle, couverture nulle des 3 surfaces, lot tout-en-échec silencieux), les points jaunes, et **la QA navigateur**.
+**✅ CONSTATS 3, 4 et 5 TRAITÉS (2026-08-11).**
+
+- **3** — `onSongKnown?.()` n'est plus invoqué sur un composant démonté : le comptage reste avant la vérification, les callbacks après.
+- **4 + 5, d'un seul geste** — les quatre surfaces partagent désormais **un** formateur, `describeAbandonedWork()`. Elles avaient quatre phrases écrites à la main qui divergeaient déjà (dont trois disaient « **1 were** not started »). Le contrat est verrouillé **en un seul endroit**, donc les quatre surfaces le sont : singulier/pluriel, mention des échecs, silence quand il n'y a rien à dire.
+- **5** — `worthReporting(landed, failed)` remplace les gardes sur le seul succès : un lot abandonné **tout en échec** parle maintenant, parce que ces items ont peut-être touché le serveur.
+
+Front **578 → 583**. Mutations : singulier retiré ⇒ 1 test meurt ; `worthReporting` réduit au succès ⇒ ne compile pas, mais l'assertion directe `worthReporting(0, 4) === true` le couvre.
+
+**⚠️ RESTENT OUVERTS, honnêtement** :
+- le **garde des callbacks au démontage (constat 3) n'est verrouillé par aucun test** — mutation : 0 test ne meurt. Le correctif est en place, sa non-régression ne l'est pas ;
+- les **tests de bout en bout des 3 surfaces** (rendre la page dans le provider, quitter en cours de lot, constater le récap) — le formateur est couvert, son **câblage** ne l'est pas ;
+- les points jaunes de la review (deux régions live superposées, `Toast.tsx:15` qui affirme toujours l'inverse, `batchAbortRef` partagé) ;
+- **la QA navigateur**, qui reste ton gate.
 
 ## Dev Notes
 

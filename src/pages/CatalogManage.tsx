@@ -13,6 +13,7 @@ import { selectionCell } from '../utils/selectionCell';
 import { useRowSelection } from '../hooks/useRowSelection';
 import { runBounded, BatchSkippedError } from '../utils/runBounded';
 import { useGlobalToast } from '../contexts/GlobalToastContext';
+import { describeAbandonedWork, worthReporting } from '../hooks/useBulkAddToSonglist';
 
 // Curator hub to MANAGE the shared Catalog (story 19.5). Songlist-style table:
 // per-row checkboxes + a "Delete selected" bar on top (bulk delete), and a row click
@@ -263,9 +264,11 @@ export default function CatalogManage() {
 
     if (!mountedRef.current) {
       const landed = results.filter(r => r.status === 'fulfilled').length;
-      if (landed) {
-        showGlobalToast(`You left while adding to the collection: ${landed} added.`
-          + (skippedAdds ? ` ${skippedAdds} were not started.` : ''));
+      const failed = results.length - landed - skippedAdds;
+      if (worthReporting(landed, failed)) {
+        showGlobalToast(describeAbandonedWork({
+          what: 'entries were being added to the collection', landed, skipped: skippedAdds, failed,
+        }));
       }
       return;
     }
@@ -324,9 +327,12 @@ export default function CatalogManage() {
     const failedCount = uids.length - removed.length - skippedDeletes;
 
     if (!mountedRef.current) {
-      if (removed.length) {
-        showGlobalToast(`You left while deleting entries: ${removed.length} deleted.`
-          + (skippedDeletes ? ` ${skippedDeletes} were not started.` : ''));
+      const failedDeletes = uids.length - removed.length - skippedDeletes;
+      if (worthReporting(removed.length, failedDeletes)) {
+        showGlobalToast(describeAbandonedWork({
+          what: 'entries were being deleted', landed: removed.length,
+          skipped: skippedDeletes, failed: failedDeletes,
+        }));
       }
       return;
     }

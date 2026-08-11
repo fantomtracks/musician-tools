@@ -12,6 +12,7 @@ import { selectionCell } from '../utils/selectionCell';
 import { useRowSelection } from '../hooks/useRowSelection';
 import { runBounded, BatchSkippedError } from '../utils/runBounded';
 import { useGlobalToast } from '../contexts/GlobalToastContext';
+import { describeAbandonedWork, worthReporting } from '../hooks/useBulkAddToSonglist';
 import {
   comboboxInputAria,
   comboboxOptionAria,
@@ -219,9 +220,13 @@ export default function CatalogCollectionCompose() {
       const skipped = results.filter(r => r.status === 'rejected' && r.reason instanceof BatchSkippedError).length;
 
       if (!mountedRef.current) {
-        if (removed.length) {
-          showGlobalToast(`You left while removing songs: ${removed.length} removed from the collection.`
-            + (skipped ? ` ${skipped} were not started.` : ''));
+        const failed = uids.length - removed.length - skipped;
+        // Speaks on failures too: a failed removal may have reached the server.
+        if (worthReporting(removed.length, failed)) {
+          showGlobalToast(describeAbandonedWork({
+            what: 'songs were being removed from the collection',
+            landed: removed.length, skipped, failed,
+          }));
         }
         return;
       }
