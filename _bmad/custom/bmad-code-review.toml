@@ -1,0 +1,50 @@
+# Team override for bmad-code-review. Never touched by the installer.
+#
+# Merge rules (cf. the header of the skill's own customize.toml):
+#   scalars: override wins • plain arrays: append
+#   arrays-of-tables keyed by `id`: the matching item is REPLACED, new ones appended.
+#
+# So the block below replaces the stock `acceptance-auditor` layer and leaves
+# blind-hunter, edge-case-hunter and verification-gap untouched.
+
+[workflow]
+
+# --------------------------------------------------------------------------
+# Acceptance Auditor — replaced 2026-08-11 (action item n°1, rétro Epic 23)
+#
+# The stock layer inlines {diff_output} into a one-paragraph prompt. Measured
+# across Epics 22 and 23: 8 failures in 9 runs, always the same mode — no
+# output at all for 8 to 21 minutes, then killed. On Epic 23 story 23.6 it was
+# no longer launched.
+#
+# Retested 2026-08-11 against the same input (story 23.6, 1574-line diff) with
+# the stock instructions but WITHOUT the inlined diff — the layer fetched it
+# itself. It returned in 5m15 with 11 findings, 5 of 5 spot-checked true,
+# including a cross-artefact contradiction no other layer can see.
+#
+# Hence the two changes here, and nothing else:
+#   1. {diff_output} is NOT passed. The reviewer reconstructs the diff from the
+#      spec's baseline_commit and reads hunks on demand.
+#   2. The instructions live in a file it reads, with AC-by-AC incremental
+#      emission — same convention as edge-case-hunter and verification-gap.
+# --------------------------------------------------------------------------
+
+[[workflow.review_layers]]
+id = "acceptance-auditor"
+name = "Acceptance Auditor"
+when = 'Only when {review_mode} = "full".'
+instruction = """
+Launch a subagent with this prompt:
+
+Read `_bmad/custom/review-prompts/acceptance-auditor.md` completely and follow it as your
+review instructions. The path is relative to the git repository root — run
+`git rev-parse --show-toplevel` if your working directory is elsewhere.
+
+Spec file to audit against: `{spec_file}`
+
+Do NOT expect the diff in this prompt. Reconstruct it yourself from the `baseline_commit`
+in the spec's frontmatter, as the instruction file directs.
+
+Do not invoke any skill. If the instruction file is unreadable, report that exact failure
+and stop. Return only the review result.
+"""
