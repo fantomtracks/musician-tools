@@ -2,7 +2,8 @@ import { useEffect, useRef, useState } from 'react';
 import { catalogService, CatalogNotFoundError } from '../services/catalogService';
 import { SongConflictError } from '../services/songService';
 import type { Song } from '../services/songService';
-import { runBounded } from '../utils/runBounded';
+import { runBounded, BatchSkippedError } from '../utils/runBounded';
+import { useGlobalToast } from '../contexts/GlobalToastContext';
 
 // Shared engine of the reader-side bulk "Add selected to my songlist" (story 22.4).
 // Both surfaces — the Catalog browse table and the public Collection page — run the
@@ -24,6 +25,10 @@ export interface AddToSonglistRecap {
   alreadyIn: number;
   gone: number;
   failed: number;
+  // Items the batch never STARTED because the user left the page (story 24.2). They wrote
+  // NOTHING — which is the whole gain — so they are kept apart from `failed`, whose items may
+  // have touched the server.
+  skipped: number;
   // True when at least one 409 came back WITHOUT the existing song (the controller
   // tolerates a failed lookup and answers `song: null`). The duplicate flag then cannot
   // be updated from the response, and the caller must refresh its own view of the
@@ -43,10 +48,17 @@ export function useBulkAddToSonglist(onSongKnown?: (song: Song) => void) {
   const [running, setRunning] = useState(false);
   const runningRef = useRef(false); // the render-time flag lags a click
   const mountedRef = useRef(true);
+  const abortRef = useRef<AbortController | null>(null);
+  const { showGlobalToast } = useGlobalToast();
 
   useEffect(() => {
     mountedRef.current = true;
-    return () => { mountedRef.current = false; };
+    return () => {
+      mountedRef.current = false;
+      // Drain the queue on the way out. Items not yet started write NOTHING — that is the real
+      // gain, and it is the only part of the batch we can still influence.
+      abortRef.current?.abort();
+    };
   }, []);
 
   const run = async (uids: string[]): Promise<BulkAddResult | null> => {
@@ -55,18 +67,30 @@ export function useBulkAddToSonglist(onSongKnown?: (song: Song) => void) {
     setRunning(true);
     setRecap(null); // the previous batch's numbers must not hang over this one
 
-    try {
-      const results = await runBounded(uids, CONCURRENCY, uid => catalogService.addToSonglist(uid));
-      if (!mountedRef.current) return null;
+    const controller = new AbortController();
+    abortRef.current = controller;
 
-      const counts: AddToSonglistRecap = { added: 0, alreadyIn: 0, gone: 0, failed: 0, needsSonglistRefresh: false };
+    try {
+      // ⚠️ The signal drives THE QUEUE, not the requests. Passing it down to apiFetch would
+      // abort in-flight calls client-side while the server may already have written them —
+      // leaving the user with writes nobody can account for, which is the very bug this story
+      // exists to remove. So: in-flight requests are allowed to finish and are reported
+      // truthfully; only the ones never started are dropped (decision A).
+      const results = await runBounded(
+        uids,
+        CONCURRENCY,
+        uid => catalogService.addToSonglist(uid),
+        controller.signal
+      );
+
+      const counts: AddToSonglistRecap = { added: 0, alreadyIn: 0, gone: 0, failed: 0, skipped: 0, needsSonglistRefresh: false };
       const settledUids: string[] = [];
 
       results.forEach((result, i) => {
         if (result.status === 'fulfilled') {
           counts.added += 1;
           settledUids.push(uids[i]);
-          onSongKnown?.(result.value);
+          if (mountedRef.current) onSongKnown?.(result.value); // jamais sur un composant démonté
           return;
         }
         if (result.reason instanceof SongConflictError) {
@@ -74,7 +98,7 @@ export function useBulkAddToSonglist(onSongKnown?: (song: Song) => void) {
           settledUids.push(uids[i]);
           // The 409 body carries the song already in the songlist: feeding it to the
           // matcher makes the "already in" flags correct with no refetch.
-          if (result.reason.existingSong) onSongKnown?.(result.reason.existingSong);
+          if (result.reason.existingSong) { if (mountedRef.current) onSongKnown?.(result.reason.existingSong); }
           else counts.needsSonglistRefresh = true;
           return;
         }
@@ -83,8 +107,22 @@ export function useBulkAddToSonglist(onSongKnown?: (song: Song) => void) {
           settledUids.push(uids[i]); // permanent: retrying cannot help
           return;
         }
+        if (result.reason instanceof BatchSkippedError) {
+          counts.skipped += 1; // never started, nothing written — NOT a failure
+          return;
+        }
         counts.failed += 1; // retryable — stays selected
       });
+
+      if (!mountedRef.current) {
+        // The page that would have shown the recap is gone. Say it anyway, through the channel
+        // that outlives it — otherwise the user is left with a songlist containing an unknown
+        // subset of what they ticked, which is exactly the reported bug.
+        if (counts.added || counts.alreadyIn || counts.gone || counts.failed) {
+          showGlobalToast(describeAbandonedBatch(counts));
+        }
+        return null;
+      }
 
       setRecap(counts);
       return { recap: counts, settledUids };
@@ -101,6 +139,50 @@ export function useBulkAddToSonglist(onSongKnown?: (song: Song) => void) {
 // of a degraded "0 added" (lesson from retro 20 #5).
 // A batch is "bad news" as soon as nothing was added — everything delisted is not a
 // neutral outcome, and must not be styled and announced like a success.
+// What the user reads AFTER leaving the page. Shared by the four bulk surfaces (story 24.2,
+// review finding 5): they each had their own hand-written sentence, they disagreed on content,
+// and three of them said "1 were not started".
+//
+// `failed` is part of the message ON PURPOSE: a failed item may have touched the server, so
+// staying silent about it leaves exactly the "unknown subset" this story exists to remove.
+export interface AbandonedWork {
+  /** e.g. "songs were being added", "entries were being deleted". */
+  what: string;
+  landed: number;
+  skipped: number;
+  failed: number;
+}
+
+export function describeAbandonedWork({ what, landed, skipped, failed }: AbandonedWork): string {
+  const parts = [
+    landed > 0 ? `${landed} went through` : null,
+    failed > 0 ? `${failed} failed` : null,
+  ].filter(Boolean).join(' · ');
+  const notStarted = skipped > 0
+    ? ` ${skipped} ${skipped === 1 ? 'was' : 'were'} not started, so nothing changed for ${skipped === 1 ? 'it' : 'them'}.`
+    : '';
+  // Nothing landed and nothing failed => the batch is a non-event; the caller should not speak.
+  return `You left while ${what}: ${parts || 'nothing had gone through'}.${notStarted}`;
+}
+
+/** True when there is something worth telling the user about an abandoned batch. */
+export function worthReporting(landed: number, failed: number): boolean {
+  return landed > 0 || failed > 0;
+}
+
+export function describeAbandonedBatch(r: AddToSonglistRecap): string {
+  const landed = [
+    r.added > 0 ? `${r.added} added to your songlist` : null,
+    r.alreadyIn > 0 ? `${r.alreadyIn} already there` : null,
+    r.gone > 0 ? `${r.gone} no longer in the catalog` : null,
+    r.failed > 0 ? `${r.failed} failed` : null,
+  ].filter(Boolean).join(' · ');
+  const notStarted = r.skipped > 0
+    ? ` ${r.skipped} ${r.skipped === 1 ? 'was' : 'were'} not started, so nothing was added for ${r.skipped === 1 ? 'it' : 'them'}.`
+    : '';
+  return `You left while songs were being added: ${landed}.${notStarted}`;
+}
+
 export function isAddRecapNegative(r: AddToSonglistRecap): boolean {
   return r.failed > 0 || (r.added === 0 && r.gone > 0);
 }

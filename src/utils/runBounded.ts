@@ -11,10 +11,23 @@
 //
 // Shared on purpose: stories 22.3 ("Remove selected") and 22.4 ("Add selected to my
 // songlist") use it as-is.
+// An item the batch never STARTED (story 24.2). It is a rejection so the result array keeps its
+// `PromiseSettledResult` shape — no type churn for the three existing callers — but it is a
+// distinct TYPE, because the difference matters: a skipped item wrote NOTHING, and counting it
+// as "failed" sends the user looking for a server problem that does not exist.
+// Same discriminator pattern as SongConflictError / CatalogNotFoundError elsewhere in the app.
+export class BatchSkippedError extends Error {
+  constructor() {
+    super('Not started: the batch was cancelled before reaching this item.');
+    this.name = 'BatchSkippedError';
+  }
+}
+
 export async function runBounded<T, R>(
   items: T[],
   limit: number,
-  fn: (item: T) => Promise<R>
+  fn: (item: T) => Promise<R>,
+  signal?: AbortSignal
 ): Promise<PromiseSettledResult<R>[]> {
   const results = new Array<PromiseSettledResult<R>>(items.length);
   let next = 0;
@@ -24,6 +37,12 @@ export async function runBounded<T, R>(
       const index = next;
       next += 1;
       if (index >= items.length) return;
+      // Checked HERE, before taking the item — cancelling the requests is not enough, the loop
+      // would otherwise walk the whole list and start every one of them.
+      if (signal?.aborted) {
+        results[index] = { status: 'rejected', reason: new BatchSkippedError() };
+        continue;
+      }
       try {
         // `await fn(...)` inside the try so a SYNCHRONOUS throw in the worker is
         // captured like a rejection instead of escaping the whole batch.

@@ -1,7 +1,8 @@
-import { StrictMode } from 'react';
-import { render, screen, fireEvent, waitFor, within } from '@testing-library/react';
+import { StrictMode, useState } from 'react';
+import { render, screen, fireEvent, waitFor, within, act } from '@testing-library/react';
 import { MemoryRouter, Routes, Route } from 'react-router-dom';
 import CatalogManage from '../pages/CatalogManage';
+import { GlobalToastProvider } from '../contexts/GlobalToastProvider';
 import { useAuth } from '../contexts/AuthContext';
 import { catalogService, CatalogNotFoundError, CollectionNotFoundError } from '../services/catalogService';
 
@@ -386,4 +387,77 @@ test('Clear selection empties a selection whose rows are no longer displayed', a
   expect(screen.getByText('2 entries selected')).toBeInTheDocument();
   fireEvent.click(screen.getByRole('button', { name: 'Clear selection' }));
   expect(screen.queryByText(/entries selected/)).toBeNull();
+});
+
+// ---------------------------------------------------------------------------
+// Story 24.2 — constat 4 de la code review : le CÂBLAGE des surfaces de page
+// ---------------------------------------------------------------------------
+// Le formateur partagé est couvert ; le fait que cette page l'appelle vraiment ne l'était pas.
+// Supprimer le bloc `if (!mountedRef.current) { … showGlobalToast(…) }` laissait la suite verte.
+// La QA navigateur ne peut pas combler ce trou : sans throttle le backend local répond trop vite
+// pour qu'on ait le temps de quitter la page, et avec throttle Vite en dev ne charge plus.
+
+function ManagePage() {
+  const [onPage, setOnPage] = useState(true);
+  return (
+    <>
+      {onPage ? <CatalogManage /> : <div>page quittée</div>}
+      <button onClick={() => setOnPage(false)}>quitter</button>
+    </>
+  );
+}
+
+const renderAbandonable = () => render(
+  <StrictMode>
+    <GlobalToastProvider>
+      <MemoryRouter initialEntries={['/catalog/manage']}>
+        <Routes>
+          <Route path="/catalog/manage" element={<ManagePage />} />
+        </Routes>
+      </MemoryRouter>
+    </GlobalToastProvider>
+  </StrictMode>
+);
+
+test('un lot de suppression abandonné annonce quand même ce qui a été supprimé', async () => {
+  // Rien ne se résout tant qu'on ne le décide pas : sinon le lot se termine avant le départ.
+  const resolvers: Array<() => void> = [];
+  cat.deleteCatalogEntry.mockImplementation(() => new Promise<void>(res => { resolvers.push(() => res()); }));
+  cat.listCatalog.mockResolvedValue({ ...twoEntries, total: 2 });
+
+  renderAbandonable();
+  await screen.findByText('Zombie');
+
+  fireEvent.click(screen.getByLabelText('Select all'));
+  fireEvent.click(screen.getByRole('button', { name: 'Delete selected' }));
+  const dialog = await screen.findByRole('dialog');
+  fireEvent.click(within(dialog).getByRole('button', { name: 'Delete' }));
+  await waitFor(() => expect(cat.deleteCatalogEntry).toHaveBeenCalled());
+
+  fireEvent.click(screen.getByRole('button', { name: 'quitter' })); // l'utilisateur s'en va
+  await act(async () => { resolvers.forEach(r => r()); await Promise.resolve(); });
+
+  // La page est partie, et l'utilisateur apprend malgré tout ce qui a été écrit.
+  expect(screen.getByText('page quittée')).toBeInTheDocument();
+  await waitFor(() => expect(screen.getByText(/You left while entries were being deleted/)).toBeInTheDocument());
+});
+
+test('un ajout groupé à une collection, abandonné, annonce quand même ce qui a été ajouté', async () => {
+  // Troisième et dernière surface (constat 4 de la review).
+  const resolvers: Array<() => void> = [];
+  cat.listCollections.mockResolvedValue(twoCollections);
+  cat.addSongToCollection.mockImplementation(() => new Promise(res => { resolvers.push(() => res('added')); }));
+
+  renderAbandonable();
+  await screen.findByText('Zombie');
+  await addBothTo('Beginner classics');
+  await waitFor(() => expect(cat.addSongToCollection).toHaveBeenCalled());
+
+  fireEvent.click(screen.getByRole('button', { name: 'quitter' }));
+  await act(async () => { resolvers.forEach(r => r()); await Promise.resolve(); });
+
+  expect(screen.getByText('page quittée')).toBeInTheDocument();
+  await waitFor(() => expect(
+    screen.getByText(/You left while entries were being added to the collection/)
+  ).toBeInTheDocument());
 });

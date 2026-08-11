@@ -11,7 +11,9 @@ import { Toast } from '../components/Toast';
 import { RowSelectionCheckbox, SelectAllCheckbox } from '../components/SelectionCheckbox';
 import { selectionCell } from '../utils/selectionCell';
 import { useRowSelection } from '../hooks/useRowSelection';
-import { runBounded } from '../utils/runBounded';
+import { runBounded, BatchSkippedError } from '../utils/runBounded';
+import { useGlobalToast } from '../contexts/GlobalToastContext';
+import { describeAbandonedWork, worthReporting } from '../hooks/useBulkAddToSonglist';
 
 // Curator hub to MANAGE the shared Catalog (story 19.5). Songlist-style table:
 // per-row checkboxes + a "Delete selected" bar on top (bulk delete), and a row click
@@ -79,6 +81,8 @@ export default function CatalogManage() {
   const [addRecap, setAddRecap] = useState<AddRecap | null>(null);
   const menuAbortRef = useRef<AbortController | null>(null);
   const mountedRef = useRef(true);
+  const batchAbortRef = useRef<AbortController | null>(null);
+  const { showGlobalToast } = useGlobalToast();
   // Selection fingerprint captured when the recap was written: the recap closes as soon
   // as the user touches the selection again (AC4), and only then — a batch's own
   // removeMany must not wipe the recap it just produced.
@@ -88,7 +92,12 @@ export default function CatalogManage() {
   // menu fetch and stop writing state once the page is gone.
   useEffect(() => {
     mountedRef.current = true;
-    return () => { mountedRef.current = false; menuAbortRef.current?.abort(); };
+    return () => {
+      mountedRef.current = false;
+      menuAbortRef.current?.abort();
+      // Story 24.2 — drain the batch queue too: unstarted items write nothing.
+      batchAbortRef.current?.abort();
+    };
   }, []);
 
   // AC4 — the recap closes on the ✕ OR at the next selection the user makes. The
@@ -245,10 +254,24 @@ export default function CatalogManage() {
 
     // Best-effort, non-atomic (same regime as the 20.3 import): one failing entry must
     // not abort the batch, and we need to know WHICH failed to keep them selected.
+    const addController = new AbortController();
+    batchAbortRef.current = addController;
+    // Signal on the QUEUE, not the requests: in-flight adds finish so the recap is truthful.
     const results = await runBounded(uids, ADD_CONCURRENCY, uid =>
-      catalogService.addSongToCollection(collection.uid, uid));
+      catalogService.addSongToCollection(collection.uid, uid), addController.signal);
 
-    if (!mountedRef.current) return;
+    const skippedAdds = results.filter(r => r.status === 'rejected' && r.reason instanceof BatchSkippedError).length;
+
+    if (!mountedRef.current) {
+      const landed = results.filter(r => r.status === 'fulfilled').length;
+      const failed = results.length - landed - skippedAdds;
+      if (worthReporting(landed, failed)) {
+        showGlobalToast(describeAbandonedWork({
+          what: 'entries were being added to the collection', landed, skipped: skippedAdds, failed,
+        }));
+      }
+      return;
+    }
 
     const settled = uids.filter((_, i) => results[i].status === 'fulfilled');
     // Counted explicitly, NOT by subtracting from `settled`: an unexpected fulfilled
@@ -287,13 +310,32 @@ export default function CatalogManage() {
     if (selected.size === 0 || deleting || adding) return;
     const uids = Array.from(selected);
     setDeleting(true);
-    const results = await Promise.allSettled(uids.map(u => catalogService.deleteCatalogEntry(u)));
+    const deleteController = new AbortController();
+    batchAbortRef.current = deleteController;
+    // Was Promise.allSettled: unbounded AND uncancellable. runBounded gives it the same queue
+    // control as the two sibling batches — leaving one surface out would recreate exactly the
+    // divergence Epic 22 spent itself removing (story 24.2, AC6).
+    const results = await runBounded(uids, ADD_CONCURRENCY, u =>
+      catalogService.deleteCatalogEntry(u), deleteController.signal);
     // A 404 (already gone) counts as deleted; only a real error is a failure.
     const removed = uids.filter((_, i) => {
       const r = results[i];
       return r.status === 'fulfilled' || (r.status === 'rejected' && r.reason instanceof CatalogNotFoundError);
     });
-    const failedCount = uids.length - removed.length;
+    // Never started => nothing deleted, and NOT an error to report.
+    const skippedDeletes = results.filter(r => r.status === 'rejected' && r.reason instanceof BatchSkippedError).length;
+    const failedCount = uids.length - removed.length - skippedDeletes;
+
+    if (!mountedRef.current) {
+      const failedDeletes = uids.length - removed.length - skippedDeletes;
+      if (worthReporting(removed.length, failedDeletes)) {
+        showGlobalToast(describeAbandonedWork({
+          what: 'entries were being deleted', landed: removed.length,
+          skipped: skippedDeletes, failed: failedDeletes,
+        }));
+      }
+      return;
+    }
     showToast(failedCount
       ? `${failedCount} entr${failedCount > 1 ? 'ies' : 'y'} could not be deleted.`
       : `${removed.length} entr${removed.length > 1 ? 'ies' : 'y'} deleted`);
