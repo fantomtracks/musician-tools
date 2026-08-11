@@ -1,4 +1,4 @@
-import { runBounded } from './runBounded';
+import { runBounded, BatchSkippedError } from './runBounded';
 
 const deferred = <T,>() => {
   let resolve!: (v: T) => void;
@@ -76,4 +76,58 @@ test('an empty list resolves to an empty array without calling the worker', asyn
 test('a limit larger than the list is harmless', async () => {
   const results = await runBounded([1, 2], 10, async n => n * 2);
   expect(results.map(r => r.status === 'fulfilled' && r.value)).toEqual([2, 4]);
+});
+
+// ---------------------------------------------------------------------------
+// Story 24.2 — arrêter de tirer des items quand le lot est abandonné
+// ---------------------------------------------------------------------------
+
+describe('runBounded — annulation (story 24.2)', () => {
+  test('cesse de démarrer de nouveaux items dès que le signal est déclenché', async () => {
+    const controller = new AbortController();
+    const started: number[] = [];
+    const items = [1, 2, 3, 4, 5, 6, 7, 8];
+
+    const results = await runBounded(items, 2, async (item) => {
+      started.push(item);
+      if (started.length === 2) controller.abort(); // on abandonne après les 2 premiers
+      return item;
+    }, controller.signal);
+
+    // Le vrai gain : ce qui n'est jamais parti n'a RIEN écrit.
+    expect(started.length).toBeLessThan(items.length);
+    expect(results).toHaveLength(items.length); // l'ordre et la taille restent contractuels
+  });
+
+  test('un item jamais démarré est distinct d\'un échec', async () => {
+    const controller = new AbortController();
+    controller.abort(); // rien ne doit partir du tout
+
+    const results = await runBounded([1, 2, 3], 2, async () => 'écrit', controller.signal);
+
+    for (const result of results) {
+      expect(result.status).toBe('rejected');
+      // Le compter en « failed » ferait chercher une panne serveur qui n'existe pas.
+      expect((result as PromiseRejectedResult).reason).toBeInstanceOf(BatchSkippedError);
+    }
+  });
+
+  test('sans signal, le comportement est strictement celui d\'avant', async () => {
+    const results = await runBounded([1, 2, 3], 2, async (n) => n * 10);
+    expect(results.map(r => (r as PromiseFulfilledResult<number>).value)).toEqual([10, 20, 30]);
+  });
+
+  test('l\'ordre des résultats reste celui des items, même interrompu', async () => {
+    const controller = new AbortController();
+    const results = await runBounded([1, 2, 3, 4], 1, async (n) => {
+      if (n === 2) controller.abort();
+      return n;
+    }, controller.signal);
+
+    // Les récaps segmentés lisent results[i] en face de items[i] : l'ordre est contractuel.
+    expect(results[0]).toEqual({ status: 'fulfilled', value: 1 });
+    expect(results[1]).toEqual({ status: 'fulfilled', value: 2 });
+    expect((results[2] as PromiseRejectedResult).reason).toBeInstanceOf(BatchSkippedError);
+    expect((results[3] as PromiseRejectedResult).reason).toBeInstanceOf(BatchSkippedError);
+  });
 });

@@ -15,6 +15,52 @@ import { RateLimitError } from './rateLimit';
 
 const MUTATING_METHODS = new Set(['POST', 'PUT', 'PATCH', 'DELETE']);
 
+// A last-resort bound, NOT a control mechanism (story 24.2, decision C). It exists for the
+// request that never answers — a mobile network dropping mid-flight — after which a bulk action
+// stayed disabled with no recap until a reload. 30s is deliberately generous: it must never fire
+// on a slow-but-alive request, because a false abort here looks to the user exactly like a
+// failure. Batches are bounded by their own signal, not by this.
+export const REQUEST_TIMEOUT_MS = 30_000;
+
+// Typed so callers can tell "you (or the clock) cancelled this" apart from "the network failed".
+// Same shape as RateLimitError: pages branch on `instanceof`, never on a message.
+export class RequestAbortedError extends Error {
+  readonly timedOut: boolean;
+  constructor(timedOut: boolean) {
+    super(timedOut
+      ? 'The request took too long and was cancelled.'
+      : 'The request was cancelled.');
+    this.name = 'RequestAbortedError';
+    this.timedOut = timedOut;
+  }
+}
+
+// Merge the caller's signal with our timeout into ONE signal handed to fetch. Written by hand
+// rather than with AbortSignal.any(): jsdom does not implement it, so the tests would exercise a
+// different code path than the browser — the exact kind of gap this project keeps getting bitten by.
+function withDeadline(init: RequestInit | undefined) {
+  const controller = new AbortController();
+  const callerSignal = init?.signal;
+
+  if (callerSignal?.aborted) controller.abort();
+  const onCallerAbort = () => controller.abort();
+  callerSignal?.addEventListener('abort', onCallerAbort);
+
+  let timedOut = false;
+  const timer = setTimeout(() => { timedOut = true; controller.abort(); }, REQUEST_TIMEOUT_MS);
+
+  return {
+    signal: controller.signal,
+    // MUST be called on every exit path, including the ones that never resolve — a leaked timer
+    // keeps a jsdom test alive and, in the browser, fires an abort on a request already done.
+    release: () => {
+      clearTimeout(timer);
+      callerSignal?.removeEventListener('abort', onCallerAbort);
+    },
+    wasTimeout: () => timedOut,
+  };
+}
+
 // Inject the CSRF token (story 7.3) on a mutating request, preserving existing headers.
 function withCsrfHeader(init: RequestInit | undefined, token: string): RequestInit {
   return { ...init, headers: { ...(init?.headers as Record<string, string>), 'X-CSRF-Token': token } };
@@ -22,21 +68,36 @@ function withCsrfHeader(init: RequestInit | undefined, token: string): RequestIn
 
 export async function apiFetch(input: RequestInfo | URL, init?: RequestInit): Promise<Response> {
   const method = (init?.method || 'GET').toUpperCase();
+  const deadline = withDeadline(init);
+  // Every fetch below carries the merged signal, the CSRF replay INCLUDED — it is a second
+  // fetch, and leaving it unsignalled would keep one non-cancellable request precisely on the
+  // write path.
+  const bounded: RequestInit = { ...init, signal: deadline.signal };
 
   let res: Response;
-  if (MUTATING_METHODS.has(method)) {
-    const token = await getCsrfToken();
-    res = await fetch(input, withCsrfHeader(init, token));
-    // Retry ONLY on a CSRF rejection (token rotated, e.g. session changed), which
-    // the server flags with X-CSRF-Token-Invalid. A bare 403 is a legitimate
-    // authorization failure (non-owner, system topic) and must not be replayed.
-    if (res.status === 403 && res.headers.get('X-CSRF-Token-Invalid')) {
-      const fresh = await getCsrfToken(true);
-      res = await fetch(input, withCsrfHeader(init, fresh));
+  try {
+    if (MUTATING_METHODS.has(method)) {
+      const token = await getCsrfToken();
+      res = await fetch(input, withCsrfHeader(bounded, token));
+      // Retry ONLY on a CSRF rejection (token rotated, e.g. session changed), which
+      // the server flags with X-CSRF-Token-Invalid. A bare 403 is a legitimate
+      // authorization failure (non-owner, system topic) and must not be replayed.
+      if (res.status === 403 && res.headers.get('X-CSRF-Token-Invalid')) {
+        const fresh = await getCsrfToken(true);
+        res = await fetch(input, withCsrfHeader(bounded, fresh));
+      }
+    } else {
+      res = await fetch(input, bounded);
     }
-  } else {
-    res = await fetch(input, init);
+  } catch (error) {
+    deadline.release();
+    // Translate the DOMException. A raw AbortError is indistinguishable from a network failure
+    // at the call site — which is what made an abandoned batch impossible to report honestly.
+    if (deadline.signal.aborted) throw new RequestAbortedError(deadline.wasTimeout());
+    throw error;
   }
+  // Released on every path from here on, including the 401 that never settles.
+  deadline.release();
 
   if (res.status === 401 && window.location.pathname !== '/login') {
     localStorage.removeItem('user');

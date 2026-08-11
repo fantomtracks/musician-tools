@@ -66,7 +66,7 @@ _Versions = état actuel du projet (aucune contrainte de montée de version docu
 - Persistance UI : localStorage, clés préfixées par page (~30 clés `songs*` ex. `songsSortColumn`) — initialiser le state DEPUIS localStorage (lazy initializer), pas dans un useEffect
 - Dark mode : classes Tailwind `dark:` sur chaque élément stylé ; le toggle vit dans `Header.tsx` (classe `dark` sur `<html>`, clé localStorage `darkMode`)
 - Confirmations destructives : réutiliser `ConfirmDialog.tsx` (props isOpen/title/message/onConfirm/isDangerous)
-- Toasts : pattern manuel `setToastMessage` + `setTimeout(2500)` — pas de système global (à réutiliser tel quel, pas de lib)
+- Toasts : pattern manuel `setToastMessage` + `setTimeout(2500)` **par page** — à réutiliser tel quel, pas de lib. ⚠️ **AMENDÉ story 24.2** : il existe désormais **un** canal global (`GlobalToastProvider`, monté au-dessus du router dans `main.tsx`, via `useGlobalToast()`), **réservé aux lots** (`useBulkAddToSonglist`, `CatalogManage`, `CatalogCollectionCompose`). Raison du renversement de la décision écrite en 22.5 : le récap d'un lot abandonné doit **survivre au démontage de la page** qui l'a lancé — un toast local meurt avec son composant, il ne peut structurellement pas porter ce message. **Ne PAS migrer les toasts de page** vers ce canal : la convention par page reste la règle pour tout le reste
 
 **Services frontend**
 - Un objet `xxxService` par domaine dans `src/services/`, `fetch` brut, `const API_BASE = '/api'`

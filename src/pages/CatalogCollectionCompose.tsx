@@ -10,7 +10,8 @@ import { BulkActionBar } from '../components/BulkActionBar';
 import { RowSelectionCheckbox, SelectAllCheckbox } from '../components/SelectionCheckbox';
 import { selectionCell } from '../utils/selectionCell';
 import { useRowSelection } from '../hooks/useRowSelection';
-import { runBounded } from '../utils/runBounded';
+import { runBounded, BatchSkippedError } from '../utils/runBounded';
+import { useGlobalToast } from '../contexts/GlobalToastContext';
 import {
   comboboxInputAria,
   comboboxOptionAria,
@@ -96,10 +97,16 @@ export default function CatalogCollectionCompose() {
   const removingRef = useRef(false); // in-flight guard: the render-time flag lags a click
   const [removeRecap, setRemoveRecap] = useState<RemoveRecap | null>(null);
   const mountedRef = useRef(true);
+  const batchAbortRef = useRef<AbortController | null>(null);
+  const { showGlobalToast } = useGlobalToast();
 
   useEffect(() => {
     mountedRef.current = true;
-    return () => { mountedRef.current = false; };
+    return () => {
+      mountedRef.current = false;
+      // Story 24.2 — drain the queue: what has not started writes nothing.
+      batchAbortRef.current?.abort();
+    };
   }, []);
 
   // The recap closes at the user's next selection gesture. Driven by the HANDLERS, not
@@ -198,17 +205,31 @@ export default function CatalogCollectionCompose() {
     setRemoveRecap(null); // the previous batch's numbers must not hang over this one
     const uids = Array.from(selection.selected);
 
-    try {
-      const results = await runBounded(uids, REMOVE_CONCURRENCY, u =>
-        catalogService.removeSongFromCollection(collection.uid, u));
+    const controller = new AbortController();
+    batchAbortRef.current = controller;
 
-      if (!mountedRef.current) return;
+    try {
+      // The signal drives the QUEUE, not the requests: an in-flight removal is allowed to
+      // finish so the recap can state it truthfully (story 24.2, decision A).
+      const results = await runBounded(uids, REMOVE_CONCURRENCY, u =>
+        catalogService.removeSongFromCollection(collection.uid, u), controller.signal);
 
       const removed = uids.filter((_, i) => results[i].status === 'fulfilled');
+      // Never-started items are NOT failures — they touched nothing.
+      const skipped = results.filter(r => r.status === 'rejected' && r.reason instanceof BatchSkippedError).length;
+
+      if (!mountedRef.current) {
+        if (removed.length) {
+          showGlobalToast(`You left while removing songs: ${removed.length} removed from the collection.`
+            + (skipped ? ` ${skipped} were not started.` : ''));
+        }
+        return;
+      }
+
       const removedSet = new Set(removed);
       // Only what actually left the collection leaves the table.
       setCollection(prev => prev ? { ...prev, songs: prev.songs.filter(s => !removedSet.has(s.uid)) } : prev);
-      setRemoveRecap({ removed: removed.length, failed: uids.length - removed.length });
+      setRemoveRecap({ removed: removed.length, failed: uids.length - removed.length - skipped });
       selection.removeMany(removed);
       setConfirmRemoveOpen(false);
     } finally {

@@ -4,7 +4,7 @@ baseline_commit: 614b23c0130f4a84e8bec838f5927cc17f65bb25
 
 # Story 24.2: Un lot abandonné ne doit plus écrire en silence — `AbortSignal`, timeout, et un récap qui survit à la page
 
-Status: ready-for-dev
+Status: review
 
 <!-- Note: Validation is optional. Run validate-create-story for quality check before dev-story. -->
 
@@ -61,30 +61,30 @@ C'est un finding **perte de données**, et l'**action item n°1 de la rétro Epi
 
 ## Tasks / Subtasks
 
-- [ ] **Task 1 — `apiFetch`** (AC: 1, 2)
-  - [ ] `signal` accepté et propagé aux **deux** `fetch` (initial + rejeu CSRF).
-  - [ ] Borne de durée, avec la valeur **justifiée** dans les Completion Notes.
-  - [ ] Erreur d'annulation **typée** (à la manière de `RateLimitError`, déjà dans ce fichier), distinguable d'un échec réseau.
-  - [ ] Trancher le sort du chemin 401 (découverte 4) et l'écrire.
-- [ ] **Task 2 — `runBounded`** (AC: 3, 4)
-  - [ ] Le worker consulte le signal **avant de prendre l'item suivant**.
-  - [ ] Troisième issue par item : `fulfilled` / `rejected` / **jamais démarré**. Ne pas la maquiller en rejet.
-  - [ ] L'ordre des résultats reste celui des items — un test le verrouille.
-- [ ] **Task 3 — Canal de récap global** (AC: 5, 9)
-  - [ ] Provider monté **au-dessus** du router dans `main.tsx`, à côté d'`AuthProvider`.
-  - [ ] Réutiliser le composant `Toast` existant (`role="status"`, région montée en permanence) — **ne pas** en écrire un second.
-  - [ ] Amender `project-context.md` (portée du renversement).
-- [ ] **Task 4 — Les trois surfaces** (AC: 6, 7)
-  - [ ] `useBulkAddToSonglist` : signal déclenché au démontage, récap poussé dans le canal global.
-  - [ ] `CatalogManage` (*Delete selected*, *Add to collection*) et `CatalogCollectionCompose` (*Remove selected*) : même traitement.
-  - [ ] ⚠️ Vérifier `mountedRef` : le garde actuel (`useBulkAddToSonglist.ts:60`) devient partiellement redondant. **Le retirer ou le garder est une décision**, pas un oubli.
-- [ ] **Task 5 — Tests** (AC: 3, 4, 7, 8)
-  - [ ] Requête pendante bornée ; lot interrompu → récap correct ; items non démarrés comptés à part ; ordre préservé.
-  - [ ] **Les suites 22.2/22.3/22.4 doivent passer sans modification** (AC8). Un test qui casse est un signal.
-  - [ ] Baseline front à **mesurer** avant de commencer (557 au dernier relevé — le vérifier).
-  - [ ] **Vérifier les gardes par mutation**, avec **témoin neutre**. Trois fois cette semaine la mutation a attrapé un test qui passait pour une mauvaise raison, dont un que la relecture avait laissé filer.
+- [x] **Task 1 — `apiFetch`** (AC: 1, 2)
+  - [x] `signal` accepté et propagé aux **deux** `fetch` (initial + rejeu CSRF).
+  - [x] Borne de durée, avec la valeur **justifiée** dans les Completion Notes.
+  - [x] Erreur d'annulation **typée** (à la manière de `RateLimitError`, déjà dans ce fichier), distinguable d'un échec réseau.
+  - [x] Trancher le sort du chemin 401 (découverte 4) et l'écrire.
+- [x] **Task 2 — `runBounded`** (AC: 3, 4)
+  - [x] Le worker consulte le signal **avant de prendre l'item suivant**.
+  - [x] Troisième issue par item : `fulfilled` / `rejected` / **jamais démarré**. Ne pas la maquiller en rejet.
+  - [x] L'ordre des résultats reste celui des items — un test le verrouille.
+- [x] **Task 3 — Canal de récap global** (AC: 5, 9)
+  - [x] Provider monté **au-dessus** du router dans `main.tsx`, à côté d'`AuthProvider`.
+  - [x] Réutiliser le composant `Toast` existant (`role="status"`, région montée en permanence) — **ne pas** en écrire un second.
+  - [x] Amender `project-context.md` (portée du renversement).
+- [x] **Task 4 — Les trois surfaces** (AC: 6, 7)
+  - [x] `useBulkAddToSonglist` : signal déclenché au démontage, récap poussé dans le canal global.
+  - [x] `CatalogManage` (*Delete selected*, *Add to collection*) et `CatalogCollectionCompose` (*Remove selected*) : même traitement.
+  - [x] ⚠️ Vérifier `mountedRef` : le garde actuel (`useBulkAddToSonglist.ts:60`) devient partiellement redondant. **Le retirer ou le garder est une décision**, pas un oubli.
+- [x] **Task 5 — Tests** (AC: 3, 4, 7, 8)
+  - [x] Requête pendante bornée ; lot interrompu → récap correct ; items non démarrés comptés à part ; ordre préservé.
+  - [x] **Les suites 22.2/22.3/22.4 doivent passer sans modification** (AC8). Un test qui casse est un signal.
+  - [x] Baseline front à **mesurer** avant de commencer (557 au dernier relevé — le vérifier).
+  - [x] **Vérifier les gardes par mutation**, avec **témoin neutre**. Trois fois cette semaine la mutation a attrapé un test qui passait pour une mauvaise raison, dont un que la relecture avait laissé filer.
 - [ ] **Task 6 — Validation** (AC: 10)
-  - [ ] `npm test`, `npx tsc -b`, `npm run lint`. `git diff --name-only` : aucun fichier backend.
+  - [x] `npm test`, `npx tsc -b`, `npm run lint`. `git diff --name-only` : aucun fichier backend.
   - [ ] **Contrôle navigateur** : lancer un ajout groupé, quitter la page pendant le lot, constater le récap. La QA navigateur a trouvé ce que les couches vertes rataient **5 épics d'affilée** ; cette story est visible à l'écran.
 
 ## Dev Notes
@@ -129,11 +129,57 @@ Il n'est pas dans `AbortSignal`, il est dans **ce qu'on raconte**. Annuler ne d�
 
 ### Agent Model Used
 
+claude-opus-5[1m] (dev-story)
+
 ### Debug Log References
+
+**Baseline front mesurée** : 557 / 61 suites. Après : **575 / 63** (+18). Backend **inchangé à 572** — cette story ne touche pas le back. `tsc` et les deux lints propres.
+
+**AC8 tenue, avec une exception justifiée.** Un seul test existant a bougé : `forwards a GET url and init to fetch unchanged`, qui affirmait que `init` est transmis **strictement** tel quel — or il porte désormais un `signal`. Son intention (« une méthode sûre passe sans machinerie CSRF ») est préservée en vérifiant les champs de l'appelant **et** le signal, plutôt qu'en relâchant l'assertion. Les suites 22.2 / 22.3 / 22.4 passent sans modification.
+
+**⚠️ Trois de mes propres tests étaient faux, et la mutation les a démasqués :**
+1. Mon mock de `fetch` **ignorait le signal** alors que le vrai `fetch` rejette — le test attendait une promesse qui ne venait jamais et accusait le code à tort.
+2. Mon test « un second lot remplace le premier » ne levait **qu'un seul** message : il passait contre n'importe quelle implémentation.
+3. Le plus instructif : mes deux tests du hook plaçaient `useBulkAddToSonglist` dans le composant **parent** et simulaient le départ en changeant ce qu'il *rend*. Le composant n'étant jamais démonté, le `useEffect` de nettoyage ne tournait pas — **le test mesurait un abandon qui n'avait pas lieu**. Détecté parce que les 8 items partaient quand même.
+
+**Mon harnais de mutation était cassé, lui aussi.** Il comptait les échecs via `grep "Tests: N failed"` — or une mutation qui casse la **compilation** TypeScript ne produit pas cette ligne, et il rapportait alors `0`, indistinguable de « garde non couvert ». Trois gardes ont été déclarés « survivants » à tort. Refait avec des mutations qui compilent et une détection explicite du « suite ne compile pas ».
+
+| mutation (recompilable) | tests qui meurent |
+|---|---|
+| garde d'annulation de la file retiré | **3** |
+| `abortRef.abort()` retiré du démontage | **1** |
+| minuteur de timeout jamais armé | **1** |
+| **`skipped` recompté en `failed`** | **0 — NON COUVERT, cf. ci-dessous** |
+| *(témoin neutre)* | *0, comme attendu* |
 
 ### Completion Notes List
 
+- **Le signal pilote LA FILE, pas les requêtes — c'est le point de conception de la story.** Le passer aux `fetch` annulerait des appels côté client alors que le serveur a peut-être déjà écrit : on retrouverait des écritures dont personne ne peut rendre compte, exactement le bug à supprimer. Donc les requêtes **en vol vont au bout** et sont rapportées honnêtement ; seules celles **jamais démarrées** sont abandonnées — et elles, elles n'ont rien écrit. C'est la décision A, et l'implémentation l'a rendue littérale.
+- **`BatchSkippedError` plutôt qu'un troisième statut** : le tableau garde le type `PromiseSettledResult`, donc zéro remous de typage pour les trois consommateurs, tout en restant **distinguable par type** — le motif déjà idiomatique du projet (`SongConflictError`, `CatalogNotFoundError`).
+- **Le renversement de la décision « pas de toast global » est borné et écrit.** `GlobalToastProvider` est monté au-dessus du router, réutilise le composant `Toast` existant (même région live), et `project-context.md` est amendé avec la portée : **les lots seulement**, les toasts de page ne bougent pas.
+- **`apiFetch` : le chemin 401 reste délibérément non borné** (AC2). Il est suivi d'un rechargement complet ; le borner ferait rejeter une promesse dont la page ne verra jamais le résultat, et réintroduirait l'erreur de données trompeuse supprimée en 5.1. Le minuteur est en revanche **libéré** sur ce chemin — un test vérifie qu'il ne fuit pas.
+- **Timeout à 30 s, volontairement généreux** : il doit protéger de la requête qui ne répond **jamais**, pas arbitrer la lenteur. Un faux abandon ressemblerait à un échec pour l'utilisateur.
+- **`AbortSignal.any()` écarté** : jsdom ne l'implémente pas, les tests auraient exercé un chemin différent du navigateur — précisément le genre d'écart qui mord ce projet. Composition écrite à la main.
+- **`handleDeleteSelected` passait par `Promise.allSettled`** : ni borné ni annulable. Converti à `runBounded` pour que les trois surfaces partagent le même régime (AC6).
+- **⚠️ TROU CONNU ET ASSUMÉ, à traiter en review** : aucun test n'assère que `skipped` est classé **dans `skipped` et non dans `failed`** au niveau du hook. La mutation le confirme (0 test ne meurt). `BatchSkippedError` est bien couvert dans `runBounded`, et le message utilisateur l'est dans `describeAbandonedBatch` — c'est la **classification intermédiaire** qui n'est pas verrouillée. Non comblé ici parce que `run()` ne rend son récap que monté, donc l'assertion demande un scénario monté-mais-annulé qui n'existe pas naturellement. À combler, pas à oublier.
+- **⚠️ QA NAVIGATEUR NON FAITE** (Task 6, case laissée décochée). C'est le gate de northwood, et la rétro Epic 22 rappelle que la QA navigateur trouve ce que trois couches vertes ratent — **cinq épics d'affilée**. Cette story est visible à l'écran : lancer un ajout groupé, quitter la page pendant le lot, constater le récap.
+
 ### File List
+
+- **NEW** `src/contexts/GlobalToastContext.ts` — contexte + hook (scindé du composant : règle ESLint `react-refresh/only-export-components`).
+- **NEW** `src/contexts/GlobalToastProvider.tsx` — provider, réutilise `<Toast>`.
+- **NEW** `src/__tests__/GlobalToastProvider.test.tsx` — 5 tests.
+- **NEW** `src/__tests__/useBulkAddToSonglist.test.tsx` — 4 tests.
+- **UPDATE** `src/services/apiFetch.ts` — `REQUEST_TIMEOUT_MS`, `RequestAbortedError`, composition du signal, rejeu CSRF borné.
+- **UPDATE** `src/utils/runBounded.ts` — `signal` optionnel, `BatchSkippedError`, garde dans la boucle.
+- **UPDATE** `src/hooks/useBulkAddToSonglist.ts` — contrôleur par lot, seau `skipped`, récap global au démontage, `describeAbandonedBatch`.
+- **UPDATE** `src/pages/CatalogManage.tsx` — *Delete selected* (converti à `runBounded`) et *Add to collection*.
+- **UPDATE** `src/pages/CatalogCollectionCompose.tsx` — *Remove selected*.
+- **UPDATE** `src/main.tsx` — provider au-dessus du router.
+- **UPDATE** `src/__tests__/apiFetch.test.ts`, `src/utils/runBounded.test.ts` — nouveaux tests + 1 test existant réaligné (justifié).
+- **UPDATE** `_bmad-output/project-context.md` — amendement AC9.
+
+Aucun fichier backend (AC10).
 
 ## Change Log
 

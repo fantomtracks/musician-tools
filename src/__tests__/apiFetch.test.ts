@@ -1,4 +1,4 @@
-import { apiFetch } from '../services/apiFetch';
+import { apiFetch, REQUEST_TIMEOUT_MS } from '../services/apiFetch';
 import { clearCsrfToken } from '../services/csrf';
 import { RateLimitError } from '../services/rateLimit';
 
@@ -98,7 +98,15 @@ describe('apiFetch — 401 interceptor', () => {
 
     await apiFetch('/api/sessions', init);
 
-    expect(fetchMock).toHaveBeenCalledWith('/api/sessions', init);
+    // Depuis la story 24.2, init n'est plus transmis STRICTEMENT tel quel : apiFetch y attache
+    // un signal (borne de durée + annulation). L'intention du test est inchangée — une méthode
+    // sûre passe sans machinerie CSRF — donc on vérifie les champs de l'appelant ET le signal,
+    // au lieu de relâcher l'assertion en `expect.anything()`.
+    const [url, passed] = fetchMock.mock.calls[0];
+    expect(url).toBe('/api/sessions');
+    expect(passed.credentials).toBe('include');
+    expect(passed.signal).toBeInstanceOf(AbortSignal);
+    expect(passed.signal.aborted).toBe(false);
   });
 });
 
@@ -157,5 +165,99 @@ describe('apiFetch — CSRF injection (story 7.3)', () => {
 
     expect(res).toBe(authzRejected);
     expect(fetchMock).toHaveBeenCalledTimes(2); // token + single mutation, no retry
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Story 24.2 — bornes de durée et annulation
+// ---------------------------------------------------------------------------
+// Aucun appel n'était borné ni annulable : une requête qui ne répond jamais
+// laissait une fonctionnalité morte jusqu'au rechargement, et un lot abandonné
+// continuait d'écrire en silence.
+
+describe('apiFetch — annulation et timeout (story 24.2)', () => {
+  const originalFetch = global.fetch;
+  afterEach(() => { global.fetch = originalFetch; jest.useRealTimers(); });
+
+  test('une requête qui ne répond jamais est bornée, et l\'erreur dit que c\'est un timeout', async () => {
+    jest.useFakeTimers();
+    // Le vrai fetch REJETTE quand son signal s'abaisse. Un mock qui ignore le signal ne
+    // reproduit pas le navigateur — et le test attendrait alors une promesse qui ne vient
+    // jamais, en accusant le code à tort.
+    global.fetch = jest.fn((_input, init?: RequestInit) => new Promise((_resolve, reject) => {
+      init?.signal?.addEventListener('abort', () => reject(new DOMException('Aborted', 'AbortError')));
+    })) as unknown as typeof fetch;
+
+    const promise = apiFetch('/api/songs');
+    const assertion = expect(promise).rejects.toMatchObject({
+      name: 'RequestAbortedError',
+      timedOut: true,
+    });
+    jest.advanceTimersByTime(REQUEST_TIMEOUT_MS + 10);
+    await assertion;
+  });
+
+  test('une requête normale n\'est PAS annulée par le timeout', async () => {
+    jest.useFakeTimers();
+    global.fetch = jest.fn().mockResolvedValue({ status: 200, ok: true }) as unknown as typeof fetch;
+
+    const res = await apiFetch('/api/songs');
+    expect((res as unknown as { status: number }).status).toBe(200);
+    // Le minuteur ne doit pas rester armé derrière une requête aboutie.
+    expect(jest.getTimerCount()).toBe(0);
+  });
+
+  test('une annulation par l\'appelant rejette avec l\'erreur typée, timedOut à false', async () => {
+    const controller = new AbortController();
+    global.fetch = jest.fn((_input, init?: RequestInit) => new Promise((_resolve, reject) => {
+      init?.signal?.addEventListener('abort', () => reject(new DOMException('Aborted', 'AbortError')));
+    })) as unknown as typeof fetch;
+
+    const promise = apiFetch('/api/songs', { signal: controller.signal });
+    controller.abort();
+
+    // Distinguable d'un échec réseau : c'est toute la valeur du type.
+    await expect(promise).rejects.toMatchObject({ name: 'RequestAbortedError', timedOut: false });
+  });
+
+  test('le signal de l\'appelant atteint AUSSI le rejeu CSRF', async () => {
+    // Le rejeu est un SECOND fetch : l'oublier laissait une requête non annulable,
+    // précisément sur le chemin des écritures.
+    const controller = new AbortController();
+    const csrfRejected = { status: 403, ok: false, headers: { get: (h: string) => (h === 'X-CSRF-Token-Invalid' ? '1' : null) } };
+    const fetchMock = jest.fn()
+      .mockResolvedValueOnce({ ok: true, json: async () => ({ csrfToken: 'stale' }) })
+      .mockResolvedValueOnce(csrfRejected)
+      .mockResolvedValueOnce({ ok: true, json: async () => ({ csrfToken: 'fresh' }) })
+      .mockResolvedValueOnce({ status: 200, ok: true });
+    global.fetch = fetchMock as unknown as typeof fetch;
+    clearCsrfToken();
+
+    await apiFetch('/api/topics/1', { method: 'DELETE', signal: controller.signal });
+
+    const retryInit = fetchMock.mock.calls[3][1];
+    expect(retryInit.signal).toBeDefined();
+    expect(retryInit.signal.aborted).toBe(false);
+  });
+
+  test('le chemin 401 reste DÉLIBÉRÉMENT non borné — il est suivi d\'un rechargement', async () => {
+    // Décision AC2 : la promesse du 401 ne se règle jamais parce que la page navigue
+    // vers /login. Un timeout qui la ferait rejeter réintroduirait exactement l'erreur
+    // de données trompeuse que la story 5.1 avait supprimée.
+    jest.useFakeTimers();
+    localStorage.setItem('user', JSON.stringify({ uid: 'u1' }));
+    Object.defineProperty(window, 'location', {
+      configurable: true, value: { pathname: '/songs', assign: jest.fn() },
+    });
+    global.fetch = jest.fn().mockResolvedValue({ status: 401, ok: false }) as unknown as typeof fetch;
+
+    let rejected = false;
+    apiFetch('/api/songs').catch(() => { rejected = true; });
+    await Promise.resolve();
+    jest.advanceTimersByTime(REQUEST_TIMEOUT_MS * 3);
+    await Promise.resolve();
+
+    expect(rejected).toBe(false);
+    expect(jest.getTimerCount()).toBe(0); // le minuteur est libéré, il ne fuit pas
   });
 });
