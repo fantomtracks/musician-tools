@@ -1,4 +1,4 @@
-import { apiFetch, REQUEST_TIMEOUT_MS } from '../services/apiFetch';
+import { apiFetch, REQUEST_TIMEOUT_MS, RequestAbortedError } from '../services/apiFetch';
 import { clearCsrfToken } from '../services/csrf';
 import { RateLimitError } from '../services/rateLimit';
 
@@ -189,10 +189,8 @@ describe('apiFetch — annulation et timeout (story 24.2)', () => {
     })) as unknown as typeof fetch;
 
     const promise = apiFetch('/api/songs');
-    const assertion = expect(promise).rejects.toMatchObject({
-      name: 'RequestAbortedError',
-      timedOut: true,
-    });
+    // `name` reste 'AbortError' (contrat corrigé en review) ; le type porte le détail.
+    const assertion = expect(promise).rejects.toMatchObject({ name: 'AbortError', timedOut: true });
     jest.advanceTimersByTime(REQUEST_TIMEOUT_MS + 10);
     await assertion;
   });
@@ -217,7 +215,7 @@ describe('apiFetch — annulation et timeout (story 24.2)', () => {
     controller.abort();
 
     // Distinguable d'un échec réseau : c'est toute la valeur du type.
-    await expect(promise).rejects.toMatchObject({ name: 'RequestAbortedError', timedOut: false });
+    await expect(promise).rejects.toMatchObject({ name: 'AbortError', timedOut: false });
   });
 
   test('le signal de l\'appelant atteint AUSSI le rejeu CSRF', async () => {
@@ -259,5 +257,57 @@ describe('apiFetch — annulation et timeout (story 24.2)', () => {
 
     expect(rejected).toBe(false);
     expect(jest.getTimerCount()).toBe(0); // le minuteur est libéré, il ne fuit pas
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Correctifs des 2 bloquants de la code review (story 24.2)
+// ---------------------------------------------------------------------------
+
+describe('apiFetch — compatibilité des gardes AbortError existants', () => {
+  const originalFetch = global.fetch;
+  afterEach(() => { global.fetch = originalFetch; jest.useRealTimers(); clearCsrfToken(); });
+
+  test('BLOQUANT 1 — l\'erreur d\'annulation reste reconnue par `err.name === "AbortError"`', async () => {
+    // 8 endroits dans src/pages ignorent une requête SUPPLANTÉE avec ce test exact
+    // (recherche, filtre, pagination). Un nom nouveau les tue toutes en silence, et la page
+    // Catalog affiche alors un « Something went wrong. » permanent sur une simple recherche.
+    const controller = new AbortController();
+    global.fetch = jest.fn((_i, init?: RequestInit) => new Promise((_r, reject) => {
+      init?.signal?.addEventListener('abort', () => reject(new DOMException('Aborted', 'AbortError')));
+    })) as unknown as typeof fetch;
+
+    const promise = apiFetch('/api/songs', { signal: controller.signal });
+    controller.abort();
+
+    const err = await promise.catch(e => e);
+    expect(err.name).toBe('AbortError');            // les 8 gardes continuent de fonctionner
+    expect(err).toBeInstanceOf(RequestAbortedError); // et le typage reste disponible
+    expect(err.timedOut).toBe(false);
+  });
+
+  test('une VRAIE erreur réseau n\'est pas maquillée en annulation', async () => {
+    // Classer d'après l'état du signal plutôt que d'après l'erreur relabellisait un échec
+    // réseau tombant dans le même tick qu'un abandon.
+    const controller = new AbortController();
+    global.fetch = jest.fn(async () => { controller.abort(); throw new TypeError('Failed to fetch'); }) as unknown as typeof fetch;
+
+    const err = await apiFetch('/api/songs', { signal: controller.signal }).catch(e => e);
+    expect(err).toBeInstanceOf(TypeError);
+    expect(err).not.toBeInstanceOf(RequestAbortedError);
+  });
+
+  test('BLOQUANT 2 — une écriture dont le jeton CSRF ne répond jamais est BORNÉE', async () => {
+    // csrf.ts fait un fetch SANS signal, et apiFetch l'attend avant le sien : tous les
+    // POST/PUT/PATCH/DELETE pouvaient donc pendre indéfiniment — soit exactement ce que
+    // cette story existe pour supprimer, sur le chemin qui compte le plus.
+    jest.useFakeTimers();
+    clearCsrfToken();
+    global.fetch = jest.fn(() => new Promise(() => {})) as unknown as typeof fetch; // le jeton ne vient jamais
+
+    const promise = apiFetch('/api/topics/1', { method: 'DELETE' });
+    const assertion = expect(promise).rejects.toMatchObject({ name: 'AbortError', timedOut: true });
+    jest.advanceTimersByTime(REQUEST_TIMEOUT_MS + 10);
+    await assertion;
   });
 });

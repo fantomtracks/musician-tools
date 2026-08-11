@@ -30,9 +30,29 @@ export class RequestAbortedError extends Error {
     super(timedOut
       ? 'The request took too long and was cancelled.'
       : 'The request was cancelled.');
-    this.name = 'RequestAbortedError';
+    // ⚠️ `name` STAYS 'AbortError'. Eight guards across src/pages do
+    // `if (err?.name === 'AbortError') return;` to ignore a SUPERSEDED request — the user typed
+    // in the search box, changed a filter, paginated. A first version of this class named itself
+    // 'RequestAbortedError' and silently killed all eight: on the Catalog page a plain search
+    // then left a PERMANENT "Something went wrong." panel, results loaded but hidden. Caught in
+    // code review, demonstrated end-to-end. `instanceof RequestAbortedError` still works for
+    // anyone who wants the richer type, so nothing is lost by keeping the conventional name.
+    this.name = 'AbortError';
     this.timedOut = timedOut;
   }
+}
+
+// Stop WAITING on a promise when the deadline fires, without cancelling the promise itself.
+// Needed for getCsrfToken(): it dedups concurrent cold-start calls behind ONE shared in-flight
+// request, so passing a signal down into it would let a single caller's timeout kill the token
+// fetch for every other caller. Here only our own wait is interrupted.
+function abortableWait<T>(promise: Promise<T>, signal: AbortSignal): Promise<T> {
+  if (signal.aborted) return Promise.reject(new DOMException('Aborted', 'AbortError'));
+  return new Promise<T>((resolve, reject) => {
+    const onAbort = () => reject(new DOMException('Aborted', 'AbortError'));
+    signal.addEventListener('abort', onAbort, { once: true });
+    promise.then(resolve, reject).finally(() => signal.removeEventListener('abort', onAbort));
+  });
 }
 
 // Merge the caller's signal with our timeout into ONE signal handed to fetch. Written by hand
@@ -77,13 +97,15 @@ export async function apiFetch(input: RequestInfo | URL, init?: RequestInit): Pr
   let res: Response;
   try {
     if (MUTATING_METHODS.has(method)) {
-      const token = await getCsrfToken();
+      // Bounded too: csrf.ts fetches without a signal, so an unanswered token request used
+      // to hang EVERY mutating call — the write path, where it hurts most.
+      const token = await abortableWait(getCsrfToken(), deadline.signal);
       res = await fetch(input, withCsrfHeader(bounded, token));
       // Retry ONLY on a CSRF rejection (token rotated, e.g. session changed), which
       // the server flags with X-CSRF-Token-Invalid. A bare 403 is a legitimate
       // authorization failure (non-owner, system topic) and must not be replayed.
       if (res.status === 403 && res.headers.get('X-CSRF-Token-Invalid')) {
-        const fresh = await getCsrfToken(true);
+        const fresh = await abortableWait(getCsrfToken(true), deadline.signal);
         res = await fetch(input, withCsrfHeader(bounded, fresh));
       }
     } else {
@@ -93,7 +115,12 @@ export async function apiFetch(input: RequestInfo | URL, init?: RequestInit): Pr
     deadline.release();
     // Translate the DOMException. A raw AbortError is indistinguishable from a network failure
     // at the call site — which is what made an abandoned batch impossible to report honestly.
-    if (deadline.signal.aborted) throw new RequestAbortedError(deadline.wasTimeout());
+    // Judged on the ERROR, not on the signal's state: a genuine network failure landing in the
+    // same tick as an abort was being relabelled as a cancellation.
+    const isAbort = error instanceof DOMException
+      ? error.name === 'AbortError'
+      : (error as Error)?.name === 'AbortError';
+    if (isAbort && deadline.signal.aborted) throw new RequestAbortedError(deadline.wasTimeout());
     throw error;
   }
   // Released on every path from here on, including the 401 that never settles.

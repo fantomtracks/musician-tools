@@ -8,7 +8,7 @@ baseline_commit: 5b1abd7fe6c530e6dca3cac20d968bb4e67daf28
 
 # Story 24.2: Un lot abandonné ne doit plus écrire en silence — `AbortSignal`, timeout, et un récap qui survit à la page
 
-Status: changes-requested
+Status: review
 
 <!-- Note: Validation is optional. Run validate-create-story for quality check before dev-story. -->
 
@@ -109,7 +109,14 @@ _Code review du 2026-08-11, **les 4 couches ont rendu**. Verdict : **NE PAS MERG
 
 **AC7 déclassée en UNPROVEN par l'Auditor**, à raison : le test de requête pendante s'arrête à `apiFetch` ; rien ne prouve que le **lot** se libère, que les boutons se réactivent, ni qu'un récap est produit — or l'AC exige explicitement de ne pas l'établir par relecture.
 
-_Rien n'est corrigé à ce stade : la session s'est arrêtée ici. Les 2 bloquants sont à traiter avant tout merge._
+**✅ LES 2 BLOQUANTS SONT CORRIGÉS (2026-08-11).**
+
+- **Bloquant 1** — `RequestAbortedError` garde désormais `name = 'AbortError'`. Les 8 gardes des pages continuent de fonctionner, et `instanceof RequestAbortedError` reste disponible pour qui veut le détail : on ne perd rien en gardant le nom conventionnel. Au passage, le classement se fait sur **l'erreur** et non sur l'état du signal — un échec réseau tombant dans le même tick qu'un abandon n'est plus maquillé en annulation.
+- **Bloquant 2** — l'attente du jeton CSRF est bornée par `abortableWait()`. ⚠️ **Pas** en passant le signal à `getCsrfToken()` : il déduplique les appels concurrents derrière **une** requête partagée, donc le timeout d'un seul appelant aurait tué le jeton de tous les autres. On interrompt uniquement **notre attente**, jamais la requête partagée.
+
+Front **575 → 578**. Mutations : `name` remis à `RequestAbortedError` ⇒ 1 test meurt ; attente du jeton dé-bornée ⇒ 1 test meurt. Deux de mes tests antérieurs assertaient `name: 'RequestAbortedError'` — réalignés sur le contrat corrigé, ce qui est le sens même du correctif.
+
+**⚠️ RESTENT OUVERTS, non traités ici** : les constats 3, 4, 5 (vérification de montage après la boucle, couverture nulle des 3 surfaces, lot tout-en-échec silencieux), les points jaunes, et **la QA navigateur**.
 
 ## Dev Notes
 
