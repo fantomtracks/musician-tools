@@ -120,7 +120,8 @@ _Versions = état actuel du projet (aucune contrainte de montée de version docu
 
 **Pièges d'environnement**
 - `NODE_ENV` non défini ⇒ défaut `production` (db.js, models/index.js) — en local, toujours exporter `NODE_ENV=development`
-- ENV requis : `DATABASE_URL_DEV` / `DATABASE_URL_PROD`, `JWT_SECRET` ; la config dev exige SSL Postgres même en docker local (`rejectUnauthorized: false`)
+- ENV requis **au boot** (`requireEnv`, `server.js`) : `SESSION_SECRET`, `RESEND_API_KEY`, `EMAIL_FROM`, `APP_BASE_URL` — plus le `DATABASE_URL_*` de l'environnement résolu (`db.js` refuse de démarrer sans, en nommant la variable). ⚠️ **`JWT_SECRET` n'est PAS requis** — cette ligne l'affirmait à tort : la variable n'est lue nulle part et `jsonwebtoken` n'est pas une dépendance (l'app est passée aux sessions par cookie en 7.1). Supprimée du `.env.example` le 2026-08-11, avec `ADMIN_UID` et `SLACK_WEBHOOK_URL`, mortes elles aussi.
+- `NODE_ENV` est **obligatoire** depuis la story 24.1 : plus de repli `|| 'production'`, le processus refuse de démarrer sans. Le SSL du bloc `development` est désormais conditionnel (`DB_ENABLE_SSL === 'true'` — comparaison stricte, la chaîne `'false'` l'activait avant)
 - Postgres local sur le port 5433 (pas 5432) — cf. docker-compose
 
 **Pièges métier (itération journal/heatmap/sujets)**

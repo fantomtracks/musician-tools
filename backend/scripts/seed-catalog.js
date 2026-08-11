@@ -28,18 +28,22 @@
 // purpose — the attach phase needs them MORE than the seed phase did, because it writes
 // into the users' personal Songs rather than into a shared pool.
 //
-// ⚠️ THE GUARD KEYS ON THE RESOLVED DATABASE HOST, NOT ON NODE_ENV — and that is not
-// a stylistic choice, it is a measured one. With NODE_ENV unset, db.js computes
-// `env = 'production'` BEFORE config.js has loaded .env, so the connection is built
-// from DATABASE_URL_PROD — the real production database. config.js then loads .env,
-// which fills NODE_ENV with 'development'. Anything reading process.env.NODE_ENV
-// afterwards reports "development" while the socket points at PROD. Verified:
+// ⚠️ THE GUARD KEYS ON THE RESOLVED DATABASE HOST, NOT ON NODE_ENV. Writing is REFUSED
+// unless the resolved host is local, or --allow-remote is passed explicitly. A distracted
+// `node scripts/seed-catalog.js --apply` cannot write to a remote database.
+//
+// HISTORY — why the criterion is the host and not NODE_ENV. Until story 24.1, db.js computed
+// `env = NODE_ENV || 'production'` BEFORE config.js had loaded .env, so a shell without
+// NODE_ENV built its connection from DATABASE_URL_PROD while every later reader saw the
+// 'development' that dotenv had just written. Measured at the time:
 //     NODE_ENV at startup : (unset)
 //     NODE_ENV after load : development
 //     actual connection   : aws-1-…-pooler.supabase.com:5432/postgres
-// So: writing is REFUSED unless the resolved host is local, or --allow-remote is
-// passed explicitly. A distracted `node scripts/seed-catalog.js --apply` cannot write
-// to a remote database.
+//
+// THAT ROOT CAUSE IS FIXED (story 24.1): config/env.js loads .env BEFORE resolving the
+// environment, and refuses to start when NODE_ENV is absent instead of defaulting to
+// production. This guard is now DEFENCE IN DEPTH rather than the only line of defence — it
+// still catches a wrong URL, which NODE_ENV never could. Do not remove it.
 //
 // Entries are created as DRAFTS (publishedAt = null, decision A): a seeded entry only
 // carries title + artist, and if it were published a user clicking "Refresh" would have
@@ -1620,7 +1624,14 @@ async function main(argv) {
   console.log(`${label('Base')}: ${target}${isLocalHost(host) ? '  (locale)' : '  ⚠️ DISTANTE'}`);
   console.log(`${label('NODE_ENV')}: au démarrage ${NODE_ENV_AT_STARTUP === undefined ? '(non défini)' : `« ${NODE_ENV_AT_STARTUP} »`}, après chargement « ${process.env.NODE_ENV} »`);
   if (NODE_ENV_AT_STARTUP !== process.env.NODE_ENV) {
-    console.log('                ⚠️ .env a modifié NODE_ENV APRÈS le choix de la connexion — ne vous fiez pas à cette valeur, fiez-vous à la base ci-dessus.');
+    // Story 24.1 turned this from a WARNING into a note of fact. It used to say ".env changed
+    // NODE_ENV AFTER the connection was chosen", which was true and dangerous: db.js read
+    // NODE_ENV before anything loaded .env, so a bare shell connected to PRODUCTION while the
+    // screen said development. `config/env.js` now loads .env BEFORE the environment is resolved,
+    // so the value below is the one the connection was actually built from. Left visible because
+    // it still tells the operator where the value came from — and the database line above remains
+    // the thing to trust.
+    console.log('                ℹ️ NODE_ENV vient du .env, pas du shell — et il est désormais lu AVANT le choix de la connexion (story 24.1).');
   }
   console.log(`${label('Phase')}: ${opts.phase}${{ attach: '  (rattachement des Songs existantes)', alias: '  (alias + correction orthographique)', enrich: '  (enrichissement des fiches brouillon)', publish: '  (publication en un passage)' }[opts.phase] || '  (création des entrées Catalog)'}`);
   if (opts.phase === 'seed') console.log(`${label('Fichier')}: ${opts.file}`);
@@ -1633,8 +1644,9 @@ async function main(argv) {
     console.error(
       `\nREFUS : écriture demandée sur une base DISTANTE (${target}).\n` +
       "Si c'est bien la cible voulue, relancez avec --allow-remote.\n" +
-      'Pour viser la base locale, exportez NODE_ENV=development — sans lui, la connexion\n' +
-      'est construite depuis DATABASE_URL_PROD avant même que .env soit lu.'
+      'Pour viser la base locale, exportez NODE_ENV=development (ou laissez le .env le fournir).\n' +
+      'La cible ci-dessus vient de la variable DATABASE_URL_* de cet environnement — c\'est elle\n' +
+      'quil faut corriger, pas NODE_ENV.'
     );
     process.exitCode = 1;
     await Promise.resolve(db.sequelize.close()).catch(() => {});

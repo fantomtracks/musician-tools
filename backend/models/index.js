@@ -5,7 +5,10 @@ const path = require('path');
 const Sequelize = require('sequelize');
 const basename = path.basename(__filename);
 
-const env = process.env.NODE_ENV || 'production';
+// Single point of decision — see backend/config/env.js. This used to duplicate
+// `process.env.NODE_ENV || 'production'` from db.js, so the same bug had to be fixed twice or not
+// at all (story 24.1).
+const { env } = require('../config/env');
 const config = require('../config/config')[env];
 
 const db = {};

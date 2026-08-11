@@ -10,7 +10,13 @@ var pgSession = require('connect-pg-simple')(session);
 var pg = require('pg');
 const logger = require('./logger');
 const requireEnv = require('./config/requireEnv');
-const env = process.env.NODE_ENV || 'production';
+// Third and last copy of `process.env.NODE_ENV || 'production'` removed (story 24.1). It only
+// worked because an earlier require happened to pull in the module that loads `.env` — accidental
+// ordering, not design. Going through ./config/env also guarantees NODE_ENV is DEFINED and valid
+// before the security decisions further down read it directly: the session cookie `secure` flag
+// (~l.105), the production branch (~l.111) and the CORS origin (~l.132). Without that guarantee a
+// process could serve PRODUCTION data with the development security posture.
+const { env } = require('./config/env');
 const config = require('./config/config')[env];
 const PORT = process.env.PORT || 3001;
 const { sequelize } = require('./models');
