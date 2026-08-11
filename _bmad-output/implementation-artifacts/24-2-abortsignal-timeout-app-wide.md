@@ -8,7 +8,7 @@ baseline_commit: 5b1abd7fe6c530e6dca3cac20d968bb4e67daf28
 
 # Story 24.2: Un lot abandonné ne doit plus écrire en silence — `AbortSignal`, timeout, et un récap qui survit à la page
 
-Status: review
+Status: changes-requested
 
 <!-- Note: Validation is optional. Run validate-create-story for quality check before dev-story. -->
 
@@ -90,6 +90,26 @@ C'est un finding **perte de données**, et l'**action item n°1 de la rétro Epi
 - [ ] **Task 6 — Validation** (AC: 10)
   - [x] `npm test`, `npx tsc -b`, `npm run lint`. `git diff --name-only` : aucun fichier backend.
   - [ ] **Contrôle navigateur** : lancer un ajout groupé, quitter la page pendant le lot, constater le récap. La QA navigateur a trouvé ce que les couches vertes rataient **5 épics d'affilée** ; cette story est visible à l'écran.
+
+### Review Findings
+
+_Code review du 2026-08-11, **les 4 couches ont rendu**. Verdict : **NE PAS MERGER EN L'ÉTAT** — deux régressions introduites par cette story, dont une visible par l'utilisateur._
+
+**🔴 BLOQUANT 1 — `RequestAbortedError` casse les 8 gardes `AbortError` de l'application.** Vérifié : `grep` trouve **8** occurrences de `err?.name === 'AbortError'` dans `src/pages` (`CatalogEntry:43`, `CatalogManage:163/177/235`, `CatalogCollectionCompose:140/164`, `Catalog:147`, `CatalogCollection:70`). Ces gardes servent à **ignorer une requête supplantée** (l'utilisateur tape dans la recherche, change de filtre, pagine). En renommant l'erreur, aucun ne matche plus. La couche Verification Gap l'a **démontré** en conditions réelles : sur la page Catalog, taper une recherche laisse un panneau « Something went wrong. » **permanent** — les résultats corrects sont chargés mais masqués, et `error` n'est jamais réinitialisé hors de l'effet. Aucun test ne l'attrape parce que les suites de pages mockent `catalogService`, donc `apiFetch` n'y tourne jamais. **Correctif** : ne typer que le vrai abandon (`error instanceof DOMException && error.name === 'AbortError'`) **et** préserver la compatibilité — soit en gardant `name = 'AbortError'`, soit en migrant les 8 gardes d'un bloc.
+
+**🔴 BLOQUANT 2 — la borne de durée ne couvre pas `getCsrfToken()`, donc le chemin d'écriture reste non borné.** `csrf.ts:21` fait un `fetch` **sans signal**, et `apiFetch` l'`await` avant le sien. Si `/api/csrf-token` ne répond jamais, `apiFetch` ne se règle jamais, le minuteur avorte un contrôleur que personne n'écoute, et `deadline.release()` n'est jamais atteint — minuteur **et** écouteur fuités. C'est **exactement** le scénario que la story existe pour supprimer, et il subsiste sur **tous** les POST/PUT/PATCH/DELETE, donc sur les quatre lots. Mes deux tests passaient à côté : l'un est un GET (branche CSRF jamais prise), l'autre résout le jeton immédiatement.
+
+**🟠 GRAVE 3 — la vérification de montage est passée APRÈS la boucle de classification**, donc `onSongKnown?.()` s'exécute désormais sur un composant démonté (`useBulkAddToSonglist:93/101`) — sur `Catalog.tsx:57` c'est `addToCache`, donc un `setState`. React 19 ne prévient plus : silencieux. Le comptage doit rester avant la vérification, les callbacks non.
+
+**🟠 GRAVE 4 — le trou de couverture que j'avais annoncé est TROIS FOIS plus large que je ne l'ai écrit.** Mes Completion Notes le limitaient au hook. Mutations recompilables passées par l'Auditor : inverser `skipped` en `failed` tue **0** test dans le hook (comme annoncé), **0/22** dans `CatalogManage`, **0/14** dans `CatalogCollectionCompose`. **Aucune surface** ne verrouille la distinction que l'AC3 existe pour établir. Et les trois recaps de page (`showGlobalToast`) ne sont couverts par **rien** — supprimer le bloc entier laisse la suite verte.
+
+**🟠 GRAVE 5 — un lot abandonné dont TOUT a échoué ne dit rien.** Les trois pages gardent sur le succès (`if (landed)`, `if (removed.length)`) alors que le hook, lui, parle aussi quand `failed > 0`. Les items en échec ont peut-être touché le serveur : c'est précisément le « sous-ensemble inconnu » à supprimer.
+
+**🟡 Autres retenus** : « 1 **were** not started » (pluriel faux dans les 3 messages de page, alors que `describeAbandonedBatch` le gère) · **deux régions live identiques** une fois le provider monté, superposées au même pixel, et `getByRole('status', { name: 'Notification' })` devient ambigu pour toute page enveloppée · `Toast.tsx:15` **dit toujours** « deliberately NO global toast provider » — le fichier renversé n'a pas été touché · **aucun test ne protège la décision centrale** (le signal ne doit jamais atteindre les requêtes) : le rebrancher plus tard laisserait les 575 tests verts · `describeAbandonedBatch` rend `« ... : . »` sur un récap vide · `batchAbortRef` partagé par 3 lots dans `CatalogManage`, jamais remis à `null`.
+
+**AC7 déclassée en UNPROVEN par l'Auditor**, à raison : le test de requête pendante s'arrête à `apiFetch` ; rien ne prouve que le **lot** se libère, que les boutons se réactivent, ni qu'un récap est produit — or l'AC exige explicitement de ne pas l'établir par relecture.
+
+_Rien n'est corrigé à ce stade : la session s'est arrêtée ici. Les 2 bloquants sont à traiter avant tout merge._
 
 ## Dev Notes
 
