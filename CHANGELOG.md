@@ -12,6 +12,13 @@ project adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+### Fixed
+- **Publishing a Catalog entry no longer tells everyone their song changed.** Publishing an entry from the curator screen used to light the "a new version is available" banner for everyone holding that song, for a change nobody had made. The banner now appears only when there is something real to see.
+- **Emptying the first page of the Catalog admin list no longer dead-ends.** Deleting every entry shown on page 1 left a screen whose only button did nothing; the list now refreshes itself.
+
+### Internal
+- **Local tooling can no longer target the production database by accident.** The environment is resolved once, from a single place, before anything reads it — and a process started without one refuses to run instead of quietly assuming production. `NODE_ENV=development` also reaches the local database again, which it had not been able to do.
+
 ## [2.1.0] — 2026-08-10
 
 ### Added

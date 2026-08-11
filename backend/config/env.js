@@ -10,15 +10,34 @@
 // So: dotenv FIRST, then read. Anything that reads NODE_ENV before requiring this module
 // reintroduces the bug.
 //
-// Loading `.env` unconditionally is safe on the deployed path: the container has no `.env` file, so
-// it is a silent no-op, and dotenv NEVER overrides a variable already present in the real
-// environment — which is what `both.Dockerfile` (ENV NODE_ENV=production), docker-compose and
-// `Makefile:163` rely on.
-require('dotenv').config();
+// Loading `.env` unconditionally is safe on the deployed path because dotenv NEVER overrides a
+// variable already present in the real environment — which is what `both.Dockerfile`
+// (ENV NODE_ENV=production), docker-compose and `Makefile:163` rely on.
+//
+// ⚠️ The first version of this comment also claimed "the container has no .env file". That was
+// FALSE: `both.Dockerfile` does `COPY ./backend .` and the repo had no `.dockerignore`, so
+// `backend/.env` was being baked into the image. Harmless while config.js skipped dotenv in
+// production — not harmless once the load became unconditional. Found in code review; a
+// `.dockerignore` now keeps secrets out of the image, which is what makes this premise true.
+//
+// The path is resolved from THIS file, not from process.cwd(): `node backend/server.js` run from
+// the repo root, and sequelize-cli invoked through `.sequelizerc`, do not share a working
+// directory. Resolving against cwd would silently find no `.env` and then throw "NODE_ENV is not
+// set" — the right error for the wrong reason.
+const path = require('path');
+const dotenvResult = require('dotenv').config({ path: path.resolve(__dirname, '..', '.env') });
+
+// A missing .env is normal (the deployed container has none). A malformed one is not, and must not
+// masquerade as "NODE_ENV is not set".
+if (dotenvResult.error && dotenvResult.error.code !== 'ENOENT') {
+  throw dotenvResult.error;
+}
 
 const VALID_ENVIRONMENTS = ['development', 'test', 'staging', 'production'];
 
-const raw = process.env.NODE_ENV;
+// Trimmed: a trailing space or newline from a .env line or a Fly secret would otherwise be
+// rejected with `unknown value: "production "`, a message where the value looks right at a glance.
+const raw = typeof process.env.NODE_ENV === 'string' ? process.env.NODE_ENV.trim() : process.env.NODE_ENV;
 
 // No silent fallback. The old one was `|| 'production'`, which made the DANGEROUS case the quiet
 // one — a bare shell reached production while everything on screen said development. A missing

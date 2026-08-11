@@ -1,0 +1,15 @@
+# Secrets must never enter the image. `both.Dockerfile` does `COPY ./backend .`, which was
+# shipping backend/.env into /app/.env — inert while config.js skipped dotenv in production,
+# NOT inert since story 24.1 made the load unconditional. Found by code review, 2026-08-11.
+**/.env
+**/.env.*
+!**/.env.example
+
+node_modules
+**/node_modules
+.git
+backups
+logs
+**/*.log
+_bmad-output
+.claude

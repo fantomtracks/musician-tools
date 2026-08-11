@@ -151,15 +151,29 @@ describe('AC9 — les décisions de sécurité lisent le MÊME environnement que
   // by reading `process.env.NODE_ENV` DIRECTLY. Before this story, db.js could resolve
   // 'production' by fallback while those three read the 'development' that dotenv had just
   // written — production data served with the development security posture.
-  test('après résolution, process.env.NODE_ENV vaut exactement l\'environnement retenu', () => {
-    const mod = freshEnv({}, () => {
-      process.env.NODE_ENV = 'production';
-      return { parsed: {} };
-    });
-    // What server.js:105 / :132 will read is what the database layer resolved. No divergence
-    // possible, because there is no second source of truth left.
-    expect(process.env.NODE_ENV).toBe(mod.env);
-    expect(process.env.NODE_ENV === 'production').toBe(true);
+  test('server.js résout son environnement AVANT de décider quoi que ce soit de sécurité', () => {
+    // The first version of this test asserted `process.env.NODE_ENV === mod.env`. Code review
+    // caught it: `env` IS `process.env.NODE_ENV`, so the assertion was a tautology that no
+    // implementation could fail. What actually needs pinning is the ORDER inside server.js — the
+    // require of config/env must come before the three lines that branch on NODE_ENV, otherwise a
+    // process without NODE_ENV would reach them.
+    const source = require('fs').readFileSync(require.resolve('../server.js'), 'utf8').split('\n');
+    const requireLine = source.findIndex(l => !l.trim().startsWith('//') && /require\(['"]\.\/config\/env['"]\)/.test(l));
+    expect(requireLine).toBeGreaterThan(-1);
+
+    const securityLines = source
+      .map((line, index) => ({ line, index }))
+      .filter(({ line }) => !line.trim().startsWith('//') && /process\.env\.NODE_ENV/.test(line));
+    expect(securityLines.length).toBeGreaterThan(0); // cookie secure / CORS / production branch
+
+    for (const { line, index } of securityLines) {
+      // Every direct read must sit AFTER the require that can throw. Move the require down and
+      // this dies — which the tautology never would have.
+      expect({ line: line.trim().slice(0, 60), index }).toEqual(
+        expect.objectContaining({ index: expect.any(Number) })
+      );
+      expect(index).toBeGreaterThan(requireLine);
+    }
   });
 
   test('un démarrage sans NODE_ENV ne peut plus atteindre les décisions de sécurité', () => {
@@ -197,6 +211,16 @@ describe('AC3 — la décision d\'environnement n\'existe qu\'à UN endroit', ()
     delete process.env.NODE_ENV;
     process.env.DATABASE_URL_DEV = 'postgres://dev-marker/db';
     jest.doMock('dotenv', () => ({ config: () => { process.env.NODE_ENV = 'development'; return { parsed: {} }; } }));
+    // db.js calls sequelize.authenticate() at module load. Without this stub the suite opened a
+    // real TCP/DNS attempt to a host that does not exist and left the handle dangling — flagged in
+    // code review, and the kind of thing that makes a suite slow and flaky for no coverage.
+    jest.doMock('sequelize', () => {
+      const actual = jest.requireActual('sequelize');
+      class QuietSequelize extends actual.Sequelize {
+        authenticate() { return Promise.resolve(); }
+      }
+      return { ...actual, Sequelize: QuietSequelize };
+    });
     const sequelize = require('../db');
     expect(sequelize.config.host).toBe('dev-marker');
   });
