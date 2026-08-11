@@ -478,6 +478,21 @@ Les deux points ci-dessous ont été **découverts en exécutant réellement** l
 >
 > **Périmètre de la story** : charger `dotenv` avant toute lecture de `NODE_ENV` (ou refuser de démarrer s'il est absent), rendre le SSL conditionnel en `development` comme il l'est déjà en `test`/`staging`, comparer `DB_ENABLE_SSL` explicitement (`=== 'true'`), et trancher le `sslmode` de `DATABASE_URL_PROD`. [`backend/db.js`, `backend/models/index.js`, `backend/config/config.js`, `.env`]
 
+## Constat d'environnement (2026-08-11) — « la prod » depuis ton poste n'est PAS « la prod » que voit l'application
+
+- **[À SAVOIR — même famille que le constat dev ≠ dump prod ci-dessous] `DATABASE_URL_PROD` ne pointe pas sur le même point d'entrée en local et sur Fly.** Mesuré le 2026-08-11 en lisant le secret réel (`fly ssh console -a musician-tools -C "printenv DATABASE_URL_PROD"`) :
+
+  | | Hôte |
+  |---|---|
+  | `backend/.env` (local) | `aws-1-eu-west-1.**pooler**.supabase.com:5432/postgres` |
+  | Secret Fly (application déployée) | `db.<projet>.supabase.**co**:5432/postgres` |
+
+  Le poste de dev passe par le **pooler** de Supabase (Supavisor), l'application attaque la **base en direct**. Même donnée, deux chemins.
+
+  **Ce que ça explique rétroactivement** : l'échec TLS `self-signed certificate in certificate chain` qui a bloqué l'exécution du seed en prod (Epic 23) venait du **pooler**, pas de la base — d'où le fait que l'application déployée n'a jamais rencontré ce problème. On avait attribué l'écart au seul `?sslmode=require` de l'URL locale ; la cause réelle est **`sslmode` + un endpoint différent**. Le `sslmode` local est corrigé (`no-verify`, 2026-08-11) ; le secret Fly, lui, **ne porte aucun `?sslmode=`**, donc `config.js` décide et c'est correct — **rien à changer côté Fly**.
+
+  **Ce qui reste à savoir** : le pooler a ses propres comportements (en mode transaction il ne conserve pas l'état de session), donc un script qui marche en local contre `DATABASE_URL_PROD` ne prouve pas qu'il se comportera pareil depuis le conteneur, et réciproquement. À garder en tête pour tout futur outil ponctuel visant la production. Pas de correctif à faire : c'est une différence à connaître, pas un bug. [`backend/.env`, secrets Fly, `backend/config/config.js`]
+
 ## Constat d'environnement (dev de l'Epic 23, 2026-08-10)
 
 - **[À SAVOIR — invalide tout raisonnement « testé en local donc bon en prod »] La base de dev n'est PAS un dump fidèle de la prod.** Mesuré pendant la review 23.3 : l'export prod du 2026-07-25 contient `Jamiroquoi,Runaway` à la **ligne 35** — c'est la source même d'un des 9 alias — et la base de dev n'a **aucune** chanson correspondant à `runaway` ou `jamiro` ; les volumes divergent également (**87** lignes d'export contre **91** Songs en dev). Elle a donc dérivé dans les deux sens : des lignes de prod manquent, des lignes de QA manuelle se sont ajoutées. Conséquence pratique : « zéro cas en local » ne prouve rien sur la prod, et toute mesure qui doit décider d'une action en production doit être refaite sur un dump frais (`make db-backup-prod` → `make db-restore`). C'est le garde « alias morts » ajouté en review 23.3 qui a rendu l'écart visible tout seul. [`backups/`, `Makefile`, base de dev locale]
