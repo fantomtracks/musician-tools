@@ -2165,3 +2165,61 @@ afin que le seed ne soit jamais un pari.
 
 **And** le rapport est archivé dans `_bmad-output/implementation-artifacts/` ; ⚠️ `make db-restore` exige un client **pg17** (cf. `deferred-work`, section db-restore)
 `[Makefile (existant), _bmad-output/implementation-artifacts/epic-23-seed-report-*.md]`
+
+---
+
+## Epic 24: Dette technique — socle d'environnement et flux best-effort
+
+_Ajouté 2026-08-11 — issu de la **revue `deferred-work` du 2026-08-11** (action item n°4 de la rétro Epic 23), qui rattrapait deux epics de retard. Epic « dette technique » dans la lignée de l'**Epic 11** (close) : réduire la dette du socle plutôt qu'ajouter de la feature. Décision northwood à la revue : **« on solde la dette d'abord »**, pas de nouvelle epic produit tant que ces deux items sont ouverts._
+
+**Objectif :** supprimer deux mécanismes qui **échouent en silence** — un environnement qui se résout dans le mauvais ordre et fait viser la production sans le dire, et des requêtes que rien n'annule ni ne borne, qui écrivent après que l'utilisateur a quitté la page.
+
+**Ce qui distingue ces deux items du reste du `deferred-work` :** ils ne dégradent pas l'expérience, ils **mentent**. Le premier affiche « development » en écrivant en production ; le second rapporte un lot abandonné alors que les écritures ont abouti. Tous les autres items ouverts (7 items a11y transverses) ont été **gardés-avec-raison** à la même revue, précisément parce qu'aucun ne perd de donnée.
+
+### Story 24.1: Socle d'environnement — une seule vérité pour `NODE_ENV`, un SSL qui suit la cible
+
+As a mainteneur,
+I want que l'environnement se détermine **une seule fois, avant toute lecture**, et que le SSL suive la base réellement visée,
+So that aucun outil lancé à la main ne puisse viser la production en croyant être en dev — et que la consigne officielle du projet marche vraiment.
+
+**Mesuré, pas supposé :** le piège s'est déclenché **trois fois** pendant l'Epic 23, et une fois seule une erreur de certificat TLS a empêché **82 écritures dans le Catalog partagé de production** (story 23.1).
+
+**Acceptance Criteria:**
+
+**Given** un processus démarré sans `NODE_ENV` dans l'environnement réel
+**When** il résout sa configuration de base de données
+**Then** il ne se connecte **jamais** à la production silencieusement — il échoue en nommant l'environnement attendu, ou retombe sur un défaut **non-production**
+
+**And** la logique d'environnement n'existe plus qu'à **un seul endroit** (aujourd'hui `db.js:2` et `models/index.js:8` la dupliquent)
+
+**Given** la consigne officielle du projet `NODE_ENV=development`
+**When** un script se connecte à la base locale
+**Then** il y arrive réellement — le SSL du bloc `development` devient conditionnel, comme il l'est déjà en `test`/`staging`
+
+**And** `DB_ENABLE_SSL=false` **désactive** le SSL (la chaîne `'false'` est truthy aujourd'hui : seule une variable vidée le désactive)
+
+**Given** le chemin de déploiement (`both.Dockerfile` pose `NODE_ENV=production`) et la cible de migration `Makefile:163`
+**When** la correction est appliquée
+**Then** la configuration résolue en production est **inchangée**, et `config.js` reste chargeable par `sequelize-cli` (`.sequelizerc`)
+
+⚠️ **Rayon d'action élargi au cadrage :** 7 fichiers backend lisent `NODE_ENV`, dont 3 qui décident de la **sécurité** — flag `secure` du cookie de session (`server.js:105`), origine CORS (`:132`), branche production (`:111`). Un démarrage sans `NODE_ENV` sert donc de la donnée de **production** avec la posture de sécurité du **dev**.
+`[backend/db.js, backend/models/index.js, backend/config/config.js, backend/server.js, both.Dockerfile, Makefile, .sequelizerc]`
+
+### Story 24.2: `AbortSignal` + timeout app-wide — un lot abandonné ne doit plus écrire en silence
+
+As a utilisateur,
+I want que quitter une page annule ce qu'elle était en train d'écrire, ou qu'on me le raconte au retour,
+So that je ne retrouve jamais dans ma songlist un sous-ensemble inconnu de ce que j'avais coché.
+
+**Vérifié le 2026-08-11 :** `src/services/apiFetch.ts` ne contient **aucune** occurrence de `signal`. Aucun appel de service n'est annulable ni borné dans le temps.
+
+**Acceptance Criteria:**
+
+**Given** un lot d'ajouts en cours et un utilisateur qui quitte la page (le bouton Précédent n'est pas couvert par le backdrop de la modale)
+**When** le composant est démonté
+**Then** soit le reste du lot est **annulé**, soit il aboutit et l'utilisateur **l'apprend** — jamais des écritures qui réussissent sans laisser de trace visible
+
+**And** une requête qui ne répond jamais ne laisse plus une fonctionnalité morte jusqu'au rechargement (timeout)
+
+⚠️ **Décision produit à trancher dans la story** : annuler le reste du lot, ou le laisser finir et le raconter au retour.
+`[src/services/apiFetch.ts, src/utils/runBounded.ts, src/hooks/useBulkAddToSonglist.ts]`
