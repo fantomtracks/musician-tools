@@ -303,6 +303,13 @@ export default function CatalogManage() {
     if (remainingOnPage === 0 && page > 1) {
       // Page emptied on a non-first page → step back so we never land on a blank page.
       patchParams({ page: page - 1 <= 1 ? null : String(page - 1) });
+    } else if (remainingOnPage === 0) {
+      // Page 1 emptied: there is no page to step back to, and the local splice would leave an
+      // empty page whose "Back to first page" button patches `page` to null while it is ALREADY
+      // 1 — the effect deps never change, so it never re-runs and the screen is stuck until a
+      // search or a reload. Ask the server instead: on a multi-page catalog the entries from
+      // page 2 shift up, and on a truly empty one the empty state is the honest answer.
+      setRefetchToken(t => t + 1);
     } else {
       setData(prev => prev
         ? { ...prev, items: prev.items.filter(i => !removedSet.has(i.uid)), total: Math.max(0, prev.total - removed.length) }
