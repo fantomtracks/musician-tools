@@ -1,5 +1,9 @@
 ---
-baseline_commit: 614b23c0130f4a84e8bec838f5927cc17f65bb25
+baseline_commit: 5b1abd7fe6c530e6dca3cac20d968bb4e67daf28
+# Corrigé au moment de la review : la story a été CRÉÉE à 614b23c, mais le travail a démarré
+# après le merge d'Epic 24 et la release 2.1.1. Garder l'ancien baseline aurait produit un diff
+# de review mêlant du travail sans rapport — et l'Acceptance Auditor s'en sert pour reconstruire
+# le diff, donc il aurait audité autre chose que cette story.
 ---
 
 # Story 24.2: Un lot abandonné ne doit plus écrire en silence — `AbortSignal`, timeout, et un récap qui survit à la page
