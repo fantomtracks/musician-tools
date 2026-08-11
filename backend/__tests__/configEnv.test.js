@@ -146,6 +146,57 @@ describe('config/config — le SSL suit la cible (AC4, AC6)', () => {
   });
 });
 
+describe('URL de base absente : un message utile, pas une pile Sequelize', () => {
+  // Constat de la review de 24.1, reporté puis observé EN VRAI en démarrant l'image de
+  // production sans secrets : `The "url" argument must be of type string. Received undefined`,
+  // une pile Sequelize qui ne nomme ni la variable ni l'environnement. Le projet refuse de
+  // démarrer avec un message soigné quand NODE_ENV manque, puis se vautre trois lignes plus
+  // loin quand c'est l'URL — la même exigence doit valoir pour les deux.
+  const loadDb = (vars) => {
+    freshEnv(vars);
+    jest.doMock('sequelize', () => {
+      const actual = jest.requireActual('sequelize');
+      class QuietSequelize extends actual.Sequelize {
+        authenticate() { return Promise.resolve(); }
+      }
+      return { ...actual, Sequelize: QuietSequelize };
+    });
+    return require('../db');
+  };
+
+  test('db.js refuse de construire une connexion sur une URL absente', () => {
+    expect(() => loadDb({ NODE_ENV: 'production' })).toThrow(/DATABASE_URL_PROD/);
+  });
+
+  test('le message nomme aussi l\'environnement résolu', () => {
+    let message = '';
+    try { loadDb({ NODE_ENV: 'staging' }); } catch (error) { message = error.message; }
+    expect(message).toMatch(/staging/);
+    expect(message).toMatch(/DATABASE_URL_REMOTE/);
+  });
+
+  test('une URL présente laisse passer', () => {
+    const sequelize = loadDb({ NODE_ENV: 'production', DATABASE_URL_PROD: 'postgres://ok/db' });
+    expect(sequelize.config.host).toBe('ok');
+  });
+
+  // ANTI-DÉRIVE : la table de correspondance env → variable vit dans db.js pour le message,
+  // alors que la vraie source est config.js. Ce test empêche les deux de diverger — sinon on
+  // recrée la duplication que la story 24.1 a justement supprimée.
+  test('la table du message couvre les 4 environnements et correspond à config.js', () => {
+    const { DATABASE_URL_VAR } = loadDb({ NODE_ENV: 'test', DATABASE_URL_DEV: 'postgres://x/y' });
+    const { VALID_ENVIRONMENTS } = require('../config/env');
+    expect(Object.keys(DATABASE_URL_VAR).sort()).toEqual([...VALID_ENVIRONMENTS].sort());
+
+    for (const environment of VALID_ENVIRONMENTS) {
+      const marker = `postgres://marker-${environment}/db`;
+      freshEnv({ NODE_ENV: environment, [DATABASE_URL_VAR[environment]]: marker });
+      // Si config.js lisait une AUTRE variable pour cet environnement, url serait undefined.
+      expect(require('../config/config')[environment].url).toBe(marker);
+    }
+  });
+});
+
 describe('AC9 — les décisions de sécurité lisent le MÊME environnement que la base', () => {
   // server.js decides the session cookie `secure` flag, the CORS origin and the production branch
   // by reading `process.env.NODE_ENV` DIRECTLY. Before this story, db.js could resolve
