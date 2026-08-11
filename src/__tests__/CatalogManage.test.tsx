@@ -106,12 +106,38 @@ test('select-all then delete removes every displayed entry', async () => {
   expect(screen.getByText('2 entries selected')).toBeInTheDocument();
   fireEvent.click(screen.getByRole('button', { name: 'Delete selected' }));
   const dialog = await screen.findByRole('dialog');
+  // Emptying page 1 now refetches instead of splicing locally, so the mock has to answer what a
+  // real server would answer once both entries are gone. Leaving it returning the deleted rows
+  // would make this test assert the OLD behaviour rather than the intent ("they disappear").
+  cat.listCatalog.mockResolvedValue({ items: [], total: 0, page: 1, limit: 24 });
   fireEvent.click(within(dialog).getByRole('button', { name: 'Delete' }));
 
   await waitFor(() => expect(cat.deleteCatalogEntry).toHaveBeenCalledWith('c1'));
   expect(cat.deleteCatalogEntry).toHaveBeenCalledWith('c2');
   await waitFor(() => expect(screen.queryByText('Zombie')).toBeNull());
   expect(screen.queryByText('Creep')).toBeNull();
+});
+
+// Emptying page 1 of a MULTI-page catalog used to be a dead end: the step-back was guarded by
+// `page > 1`, so page 1 fell into the local-splice branch — items:[] with no refetch. The
+// resulting "This page is empty" screen offers "Back to first page", which patches page to null
+// while page is ALREADY 1: the effect deps never change and it never re-runs. Stuck until a
+// search or a reload. Pre-existing (19.5), not caused by 22.1.
+test('emptying page 1 of a multi-page catalog refetches instead of freezing on an empty page', async () => {
+  cat.listCatalog.mockResolvedValue({ ...twoEntries, total: 26 }); // 26 > limit 24 → several pages
+  renderManage();
+  await screen.findByText('Zombie');
+  const callsBeforeDelete = cat.listCatalog.mock.calls.length;
+
+  fireEvent.click(screen.getByLabelText('Select all'));
+  fireEvent.click(screen.getByRole('button', { name: 'Delete selected' }));
+  const dialog = await screen.findByRole('dialog');
+  fireEvent.click(within(dialog).getByRole('button', { name: 'Delete' }));
+
+  await waitFor(() => expect(cat.deleteCatalogEntry).toHaveBeenCalledWith('c2'));
+  // The whole point: page 1 must ask the server again, so the entries that shifted up from
+  // page 2 appear. Without the refetch the user is left on a page nothing can refresh.
+  await waitFor(() => expect(cat.listCatalog.mock.calls.length).toBeGreaterThan(callsBeforeDelete));
 });
 
 test('Cancel in the confirm dialog deletes nothing', async () => {

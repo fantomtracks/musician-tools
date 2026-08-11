@@ -9,6 +9,7 @@ jest.mock('../models', () => ({
   Song: {
     create: jest.fn(),
     findOne: jest.fn(),
+    update: jest.fn(),
   },
   User: {
     findByPk: jest.fn(),
@@ -429,6 +430,71 @@ describe('catalogcontroller', () => {
     await controller.publishCatalogEntry({ params: { uid: UID } }, res, mockNext());
     expect(entry.update.mock.calls[0][0].publishedAt).toBeInstanceOf(Date);
     expect(res.json).toHaveBeenCalled();
+  });
+
+  // Publishing MOVES updatedAt, which makes the drift true, and the fiche becoming published
+  // makes getSong emit the provenance: the amber banner would appear for a change nobody made.
+  // Measured in story 23.6: publishing 75 fiches without re-stamping took the drift from 0 to 75.
+  // The seed script's --phase=publish already does this; the manual button did not.
+  test('publishCatalogEntry re-stamps the marker on ALL the songs of the fiche, so nobody sees a false banner', async () => {
+    const freshUpdatedAt = new Date('2026-08-11T10:00:00.000Z');
+    const entry = {
+      uid: UID,
+      title: 'Zombie',
+      artist: 'The Cranberries',
+      publishedAt: null,
+      update: jest.fn(async (u) => ({ uid: UID, ...u, updatedAt: freshUpdatedAt })),
+    };
+    CatalogSong.findByPk.mockResolvedValue(entry);
+    Song.update.mockResolvedValue([3]);
+
+    await controller.publishCatalogEntry({ params: { uid: UID } }, mockRes(), mockNext());
+
+    expect(Song.update).toHaveBeenCalledTimes(1);
+    const [values, options] = Song.update.mock.calls[0];
+    // The timestamp OUR write produced, not the stale one the entry carried.
+    expect(values).toEqual({ sourceCatalogSyncedAt: freshUpdatedAt });
+    // sourceCatalogUid, NOT uid: a fiche can have several songs attached, and re-syncing only
+    // the first would leave the others showing a banner nobody could explain.
+    expect(options.where).toEqual({ sourceCatalogUid: UID });
+    // Provenance bookkeeping, not an edit of someone's song: Songs.updatedAt must not move.
+    expect(options.silent).toBe(true);
+  });
+
+  test('publishCatalogEntry does NOT re-stamp an already-published entry — that drift is legitimate', async () => {
+    const entry = {
+      uid: UID,
+      title: 'Zombie',
+      publishedAt: '2026-01-01T00:00:00.000Z',
+      update: jest.fn(async (u) => ({ uid: UID, ...u, updatedAt: new Date() })),
+    };
+    CatalogSong.findByPk.mockResolvedValue(entry);
+
+    await controller.publishCatalogEntry({ params: { uid: UID } }, mockRes(), mockNext());
+
+    // Re-stamping here would silence a curator's real key/bpm correction — the one case where
+    // the banner is EARNED.
+    expect(Song.update).not.toHaveBeenCalled();
+  });
+
+  test('publishCatalogEntry still answers 200 when the re-stamp fails — the publish DID happen', async () => {
+    const entry = {
+      uid: UID,
+      title: 'Zombie',
+      publishedAt: null,
+      update: jest.fn(async (u) => ({ uid: UID, ...u, updatedAt: new Date() })),
+    };
+    CatalogSong.findByPk.mockResolvedValue(entry);
+    Song.update.mockRejectedValue(new Error('db down'));
+    const res = mockRes();
+    const next = mockNext();
+
+    await controller.publishCatalogEntry({ params: { uid: UID } }, res, next);
+
+    // A 500 would read as "nothing happened" and invite a retry that cannot repair anything:
+    // the entry is published, so the re-stamp branch is never reached again.
+    expect(res.json).toHaveBeenCalled();
+    expect(next).not.toHaveBeenCalled();
   });
 
   test('publishCatalogEntry -> 409 when a published entry owns the canonical key', async () => {

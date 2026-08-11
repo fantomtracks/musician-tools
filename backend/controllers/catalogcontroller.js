@@ -197,7 +197,37 @@ const publishCatalogEntry = async (req, res, next) => {
     if (!normalizeText(entry.title)) {
       return next(createError(400, 'Title is required'));
     }
+    const wasDraft = !entry.publishedAt;
     const updated = await entry.update({ publishedAt: entry.publishedAt || new Date() });
+
+    // Publishing MOVES `updatedAt`, so the drift (`catalog.updatedAt > syncedAt`) becomes true,
+    // and the fiche becoming published makes getSong emit the provenance: the amber banner would
+    // appear for a change nobody made. Re-stamp the marker so it does not. Measured in story 23.6:
+    // publishing 75 fiches without this took the drift from 0 to 75.
+    // Only on the draft → published transition: on an ALREADY published entry the drift is
+    // legitimate (the curator changed a key or a tempo) and silencing it would hide the one case
+    // where the banner is earned.
+    if (wasDraft) {
+      try {
+        await Song.update(
+          { sourceCatalogSyncedAt: updated.updatedAt },
+          {
+            // `sourceCatalogUid`, not `uid`: a fiche can have several songs attached, and
+            // re-syncing only the first would leave the others with an unexplainable banner.
+            where: { sourceCatalogUid: updated.uid },
+            // Provenance bookkeeping, not an edit of someone's song.
+            silent: true,
+          }
+        );
+      } catch (syncError) {
+        // The publish itself succeeded. Answering 500 would read as "nothing happened" and invite
+        // a retry that cannot repair anything — the entry is published, so this branch is never
+        // reached again. Log loudly instead: the holders of this song will see a banner they did
+        // not earn, and that needs a human, not a stack trace swallowed into a generic 500.
+        logger.error('Catalog entry published but source_catalog_synced_at NOT re-stamped — holders will see a false update banner:', updated.uid, syncError);
+      }
+    }
+
     res.json(updated);
   } catch (error) {
     if (await respondDuplicateCatalogEntry(res, error, entry && entry.title, entry && entry.artist, req.params.uid).catch(() => false)) {
