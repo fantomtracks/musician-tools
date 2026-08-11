@@ -1,7 +1,8 @@
-import { StrictMode } from 'react';
-import { render, screen, fireEvent, waitFor } from '@testing-library/react';
+import { StrictMode, useState } from 'react';
+import { render, screen, fireEvent, waitFor, act } from '@testing-library/react';
 import { MemoryRouter, Routes, Route } from 'react-router-dom';
 import CatalogCollectionCompose from '../pages/CatalogCollectionCompose';
+import { GlobalToastProvider } from '../contexts/GlobalToastProvider';
 import { useAuth } from '../contexts/AuthContext';
 import { catalogService, CollectionNotFoundError } from '../services/catalogService';
 
@@ -269,4 +270,52 @@ test('emptying the selection while the dialog is open closes it instead of no-op
 
   await waitFor(() => expect(screen.queryByRole('dialog')).toBeNull());
   expect(cat.removeSongFromCollection).not.toHaveBeenCalled();
+});
+
+// ---------------------------------------------------------------------------
+// Story 24.2 — constat 4 : le CÂBLAGE du récap abandonné sur cette surface
+// ---------------------------------------------------------------------------
+// Même patron que CatalogManage : le formateur partagé est couvert ailleurs, mais rien ne
+// vérifiait que CETTE page l'appelle. La QA navigateur ne peut pas y suppléer (backend local
+// trop rapide sans throttle, Vite dev inutilisable avec).
+
+function ComposePage() {
+  const [onPage, setOnPage] = useState(true);
+  return (
+    <>
+      {onPage ? <CatalogCollectionCompose /> : <div>page quittée</div>}
+      <button onClick={() => setOnPage(false)}>quitter</button>
+    </>
+  );
+}
+
+const renderAbandonableCompose = () => render(
+  <StrictMode>
+    <GlobalToastProvider>
+      <MemoryRouter initialEntries={['/catalog/manage/collections/col1']}>
+        <Routes>
+          <Route path="/catalog/manage/collections/:uid" element={<ComposePage />} />
+        </Routes>
+      </MemoryRouter>
+    </GlobalToastProvider>
+  </StrictMode>
+);
+
+test('un retrait groupé abandonné annonce quand même ce qui a été retiré', async () => {
+  const resolvers: Array<() => void> = [];
+  cat.getCollection.mockResolvedValue(twoMembers);
+  cat.removeSongFromCollection.mockImplementation(() => new Promise<void>(res => { resolvers.push(() => res()); }));
+
+  renderAbandonableCompose();
+  await screen.findByText('Rock 90s');
+  await removeBoth();
+  await waitFor(() => expect(cat.removeSongFromCollection).toHaveBeenCalled());
+
+  fireEvent.click(screen.getByRole('button', { name: 'quitter' }));
+  await act(async () => { resolvers.forEach(r => r()); await Promise.resolve(); });
+
+  expect(screen.getByText('page quittée')).toBeInTheDocument();
+  await waitFor(() => expect(
+    screen.getByText(/You left while songs were being removed from the collection/)
+  ).toBeInTheDocument());
 });

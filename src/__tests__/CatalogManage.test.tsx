@@ -441,3 +441,23 @@ test('un lot de suppression abandonné annonce quand même ce qui a été suppri
   expect(screen.getByText('page quittée')).toBeInTheDocument();
   await waitFor(() => expect(screen.getByText(/You left while entries were being deleted/)).toBeInTheDocument());
 });
+
+test('un ajout groupé à une collection, abandonné, annonce quand même ce qui a été ajouté', async () => {
+  // Troisième et dernière surface (constat 4 de la review).
+  const resolvers: Array<() => void> = [];
+  cat.listCollections.mockResolvedValue(twoCollections);
+  cat.addSongToCollection.mockImplementation(() => new Promise(res => { resolvers.push(() => res('added')); }));
+
+  renderAbandonable();
+  await screen.findByText('Zombie');
+  await addBothTo('Beginner classics');
+  await waitFor(() => expect(cat.addSongToCollection).toHaveBeenCalled());
+
+  fireEvent.click(screen.getByRole('button', { name: 'quitter' }));
+  await act(async () => { resolvers.forEach(r => r()); await Promise.resolve(); });
+
+  expect(screen.getByText('page quittée')).toBeInTheDocument();
+  await waitFor(() => expect(
+    screen.getByText(/You left while entries were being added to the collection/)
+  ).toBeInTheDocument());
+});
