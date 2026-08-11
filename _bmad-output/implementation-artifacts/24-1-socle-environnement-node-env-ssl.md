@@ -4,7 +4,7 @@ baseline_commit: c15c3ccb235c0ef14de09d963acd3e395d1a696b
 
 # Story 24.1: Socle d'environnement — une seule vérité pour `NODE_ENV`, un SSL qui suit la cible
 
-Status: ready-for-dev
+Status: review
 
 <!-- Note: Validation is optional. Run validate-create-story for quality check before dev-story. -->
 
@@ -68,29 +68,29 @@ Conséquence exacte quand `NODE_ENV` n'est pas défini au démarrage : `db.js` s
 
 ## Tasks / Subtasks
 
-- [ ] **Task 1 — Point d'entrée unique de l'environnement** (AC: 1, 3)
-  - [ ] Charger `dotenv` **avant** toute lecture de `NODE_ENV`, en tête du premier module chargé. Vérifier l'ordre réel de chargement (`server.js` → `models/index.js` → `db.js` → `config/config.js`) plutôt que le supposer.
-  - [ ] Supprimer la duplication `NODE_ENV || 'production'` entre `db.js` et `models/index.js`.
-  - [ ] ⚠️ Garder `config.js` chargeable par `sequelize-cli` (`.sequelizerc`), sans effet de bord au `require`.
-- [ ] **Task 2 — Trancher le défaut** (AC: 2)
-  - [ ] Appliquer la décision C (fail-fast recommandé) et **écrire la raison** dans les Completion Notes.
-  - [ ] Le message doit nommer ce qui est attendu et ce qui a été trouvé — pas un `throw` nu.
-- [ ] **Task 3 — SSL qui suit la cible** (AC: 4, 5)
-  - [ ] Bloc `development` : SSL conditionnel, aligné sur `test`/`staging`.
-  - [ ] `DB_ENABLE_SSL` comparé explicitement ; table de vérité (absent / `''` / `'false'` / `'0'` / `'true'`) testée.
-- [ ] **Task 4 — Non-régression du chemin prod** (AC: 6, 7)
-  - [ ] Test comparant la configuration **résolue** en `production` avant/après (url, pool, logging), sans `.env`.
-  - [ ] Vérifier la cible Makefile de migration prod **sans l'exécuter** contre la prod (lecture + `--help`/dry equivalent), ou l'exécuter contre une base locale restaurée.
-- [ ] **Task 5 — Cohérence des décisions de sécurité** (AC: 9)
-  - [ ] Test qu'un démarrage ne peut pas donner base = prod et cookie non-`secure` simultanément.
-- [ ] **Task 6 — `sslmode`** (AC: 8)
-  - [ ] Trancher, documenter, et **écrire la consigne** pour les secrets Fly. Ne rien committer de secret.
-- [ ] **Task 7 — Tests** (AC: 1, 2, 5, 6)
-  - [ ] Suite backend, `jest.mock` des modèles selon la convention. Baseline à **mesurer** avant de commencer (546 au dernier relevé — le vérifier, pas le recopier).
-  - [ ] **Vérifier les gardes par mutation**, en visant par motif unique ou par index de ligne, avec un **témoin neutre**. C'est la convention depuis 23.2, et elle a attrapé trois faux positifs depuis.
-- [ ] **Task 8 — Validation** (AC: 10)
-  - [ ] `cd backend && npm test` + `npm run lint`. `git diff --name-only` : aucun modèle, migration, contrôleur, route ni front.
-  - [ ] **Exécuter réellement** le dry-run du script de seed avec `NODE_ENV=development` (AC4). Un test vert ne dit rien de ce que fait un binaire au démarrage — c'est la leçon la plus chère de l'Epic 23.
+- [x] **Task 1 — Point d'entrée unique de l'environnement** (AC: 1, 3)
+  - [x] Charger `dotenv` **avant** toute lecture de `NODE_ENV`, en tête du premier module chargé. Vérifier l'ordre réel de chargement (`server.js` → `models/index.js` → `db.js` → `config/config.js`) plutôt que le supposer.
+  - [x] Supprimer la duplication `NODE_ENV || 'production'` entre `db.js` et `models/index.js`.
+  - [x] ⚠️ Garder `config.js` chargeable par `sequelize-cli` (`.sequelizerc`), sans effet de bord au `require`.
+- [x] **Task 2 — Trancher le défaut** (AC: 2)
+  - [x] Appliquer la décision C (fail-fast recommandé) et **écrire la raison** dans les Completion Notes.
+  - [x] Le message doit nommer ce qui est attendu et ce qui a été trouvé — pas un `throw` nu.
+- [x] **Task 3 — SSL qui suit la cible** (AC: 4, 5)
+  - [x] Bloc `development` : SSL conditionnel, aligné sur `test`/`staging`.
+  - [x] `DB_ENABLE_SSL` comparé explicitement ; table de vérité (absent / `''` / `'false'` / `'0'` / `'true'`) testée.
+- [x] **Task 4 — Non-régression du chemin prod** (AC: 6, 7)
+  - [x] Test comparant la configuration **résolue** en `production` avant/après (url, pool, logging), sans `.env`.
+  - [x] Vérifier la cible Makefile de migration prod **sans l'exécuter** contre la prod (lecture + `--help`/dry equivalent), ou l'exécuter contre une base locale restaurée.
+- [x] **Task 5 — Cohérence des décisions de sécurité** (AC: 9)
+  - [x] Test qu'un démarrage ne peut pas donner base = prod et cookie non-`secure` simultanément.
+- [x] **Task 6 — `sslmode`** (AC: 8)
+  - [x] Trancher, documenter, et **écrire la consigne** pour les secrets Fly. Ne rien committer de secret.
+- [x] **Task 7 — Tests** (AC: 1, 2, 5, 6)
+  - [x] Suite backend, `jest.mock` des modèles selon la convention. Baseline à **mesurer** avant de commencer (546 au dernier relevé — le vérifier, pas le recopier).
+  - [x] **Vérifier les gardes par mutation**, en visant par motif unique ou par index de ligne, avec un **témoin neutre**. C'est la convention depuis 23.2, et elle a attrapé trois faux positifs depuis.
+- [x] **Task 8 — Validation** (AC: 10)
+  - [x] `cd backend && npm test` + `npm run lint`. `git diff --name-only` : aucun modèle, migration, contrôleur, route ni front.
+  - [x] **Exécuter réellement** le dry-run du script de seed avec `NODE_ENV=development` (AC4). Un test vert ne dit rien de ce que fait un binaire au démarrage — c'est la leçon la plus chère de l'Epic 23.
 
 ## Dev Notes
 
@@ -145,14 +145,75 @@ Il n'est pas dans la logique, il est dans **l'ordre de chargement**. `db.js:2` s
 
 ### Agent Model Used
 
+claude-opus-5[1m] (dev-story)
+
 ### Debug Log References
+
+**Baseline backend mesurée avant de commencer** : **546 tests / 25 suites**. Après : **568 / 26** (+22). Front **inchangé à 557** — cette story ne touche pas le front. `tsc` et les deux lints propres.
+
+**AC4 — la preuve qui compte, en exécution réelle.** La consigne officielle du projet, telle quelle :
+
+```
+$ NODE_ENV=development node scripts/seed-catalog.js --phase=seed
+Base            : localhost:5433/musician_tools  (locale)
+NODE_ENV        : au démarrage « development », après chargement « development »
+Mode            : dry-run (aucune écriture)
+info: Connection to the DB has been established successfully.
+…
+Relancez avec --apply pour écrire.
+```
+
+Avant cette story, la **même** commande mourait sur `SequelizeConnectionError: The server does not support SSL connections`. Le contournement `DB_ENABLE_SSL= NODE_ENV=test` utilisé pendant toute l'Epic 23 n'est plus nécessaire.
+
+**AC2 — la commande exacte de l'incident 23.1, rejouée.** `env -u NODE_ENV node scripts/seed-catalog.js --phase=seed` vise désormais **`localhost:5433` (locale)**. Avant, elle visait la base de **production** en affichant « development ». Le `.env` fournit `NODE_ENV=development`, il est lu **avant** le choix de la connexion, donc il n'y a plus de divergence à exploiter.
+
+**Le vrai fail-fast, vérifié séparément** (ni environnement réel, ni `.env` — lancé depuis un `cwd` sans `.env`) :
+
+```
+Error: NODE_ENV is not set, and there is no safe default.
+Expected one of: development, test, staging, production.
+```
+
+**Les 5 gardes vérifiés par mutation**, avec **témoin neutre** resté vert :
+
+| mutation | tests qui meurent |
+|---|---|
+| fail-fast `NODE_ENV` absent retiré | 2 |
+| validation d'une valeur inconnue retirée | 1 |
+| `DB_ENABLE_SSL` redevient truthy | 3 |
+| `dotenv` chargé APRÈS la lecture de `NODE_ENV` | 3 |
+| *(témoin : commentaire modifié)* | *0, comme attendu* |
+
+⚠️ **Au premier passage, la mutation du fail-fast tuait 0 test.** Le garde n'était couvert par rien : en le retirant, `raw` restait `undefined` et c'est la **validation suivante** qui levait — avec un message contenant lui aussi « NODE_ENV », donc mon `toThrow(/NODE_ENV/)` passait pour la mauvaise raison. Assertion resserrée sur `/is not set/`, message propre au cas absent. **Troisième fois dans ce projet que la mutation attrape un test qui passe pour une mauvaise raison ; la relecture ne l'avait pas vu.**
 
 ### Completion Notes List
 
+- **Décision C tranchée : FAIL-FAST.** `config/env.js` refuse de démarrer si `NODE_ENV` est absent, avec un message qui nomme les 4 valeurs acceptées et dit pourquoi il ne devine pas. Raison : « défaut = production » est **le pire défaut possible** — il rend le cas *dangereux* silencieux. Ce n'était faisable que parce que `both.Dockerfile:25` pose `ENV NODE_ENV=production` ; vérifié aussi pour `docker-compose.yml:44` (dev) et `Makefile:163` (migration prod). **Aucun chemin de déploiement ou de migration ne dépend du fallback.**
+- **`dotenv` est chargé inconditionnellement**, alors que `config.js` ne le faisait que hors production. Sûr : le conteneur n'a pas de `.env` (no-op silencieux), et dotenv **n'écrase jamais** une variable déjà posée — propriété **vérifiée par un test** dont le faux `dotenv` reproduit ce contrat, et non supposée. Effet de bord voulu : le piège n°3 du cadrage (prod inatteignable en local) disparaît au passage.
+- **Il y avait une TROISIÈME copie du fallback, absente du cadrage** : `server.js:13`. Elle ne « marchait » que parce qu'un `require` plus haut (`./routes/index`) chargeait `.env` par accident — un ordre subi, pas choisi. Retirée. C'est aussi ce qui **ferme l'AC9** : `env.js` levant sur un `NODE_ENV` absent, `server.js` ne peut plus atteindre ses décisions de sécurité (cookie `secure`, CORS, branche production) avec une valeur indéfinie. **L'état incohérent est devenu inatteignable**, il n'est pas seulement testé.
+- **`db.js` reste la connexion « de service » et `models/index.js` la source de vérité** (project-context inchangé). Les deux tirent leur `env` du même module ; plus aucune ligne ne recalcule `NODE_ENV || …`.
+- **Le bloc `development` passe au SSL conditionnel**, aligné sur `test`/`staging`. Par défaut (`DB_ENABLE_SSL` absent), plus de SSL : le Postgres du `docker-compose` ne le parle pas. Un dev qui vise une base distante pose `DB_ENABLE_SSL=true`.
+- **`DB_ENABLE_SSL` comparé strictement à `'true'`.** Table de vérité testée, y compris `'TRUE'` → **false** : pas de tolérance accidentelle. Le `.env` du projet contient littéralement `DB_ENABLE_SSL=false`, qui **activait** le SSL jusqu'ici.
+- **Correction d'un message que ma propre modification a rendu FAUX.** `seed-catalog.js:1623` avertissait que « `.env` a modifié `NODE_ENV` **APRÈS** le choix de la connexion ». C'était vrai et dangereux ; ça ne l'est plus, puisque c'est exactement ce que cette story corrige. Laissé visible mais retourné en **note de fait** (d'où vient la valeur), l'avertissement étant devenu mensonger. Hors File List du cadrage, assumé : réparer ce qu'on invalide fait partie du changement.
+- **AC8 — `sslmode` : TRANCHÉ, mais rien n'est appliqué ici, c'est hors dépôt.** Recommandation : mettre **`sslmode=no-verify`** dans `DATABASE_URL_PROD` (secret Fly **et** `.env` local). Raison : pg 8.16 **vérifie** le certificat en mode `require`, ce qui prime sur le `rejectUnauthorized: false` déclaré dans `config.js` ; Supabase présente un auto-signé. `no-verify` rend **effectif ce que la config dit déjà vouloir** (chiffré, non vérifié) au lieu de laisser deux sources se contredire. ⚠️ **Action pour northwood**, pas pour cette story — aucun secret n'entre dans le dépôt.
+- **Non couvert et assumé** : aucun test ne démarre `server.js` en entier (il ouvrirait un port et une connexion). L'AC9 est verrouillée par l'invariant « une seule source de vérité + refus de démarrer », pas par un boot complet.
+
 ### File List
+
+- **NEW** `backend/config/env.js` — point de décision unique : charge `.env`, résout et **valide** l'environnement, expose `sslEnabled`.
+- **NEW** `backend/__tests__/configEnv.test.js` — 22 tests (ordre de chargement, fail-fast, table de vérité SSL, non-régression prod, cohérence sécurité, absence de duplication).
+- **UPDATE** `backend/config/config.js` — `dotenv` déplacé dans `./env` ; SSL conditionnel en `development` ; `sslEnabled` remplace les trois lectures brutes de `DB_ENABLE_SSL`.
+- **UPDATE** `backend/db.js` — plus de calcul local de `NODE_ENV`.
+- **UPDATE** `backend/models/index.js` — idem (la duplication disparaît).
+- **UPDATE** `backend/server.js` — troisième copie du fallback retirée (trouvée pendant le dev).
+- **UPDATE** `backend/scripts/seed-catalog.js` — avertissement devenu faux corrigé en note de fait.
+- **UPDATE** `_bmad-output/implementation-artifacts/sprint-status.yaml` — suivi.
+
+Aucun modèle, aucune migration, aucun contrôleur, aucune route, aucun fichier front (AC10, vérifié par `git diff --name-only`).
 
 ## Change Log
 
 | Date | Version | Description | Author |
 |------|---------|-------------|--------|
+| 2026-08-11 | 0.2 | Implémentée (dev-story). Point de décision unique `config/env.js` : `dotenv` chargé AVANT toute lecture de `NODE_ENV`, **fail-fast** sur valeur absente ou inconnue (décision C tranchée — « défaut = production » rend le cas dangereux silencieux ; faisable car Dockerfile, docker-compose et Makefile:163 posent tous la variable). SSL conditionnel en `development`, `DB_ENABLE_SSL` comparé strictement. **Une TROISIÈME copie du fallback trouvée pendant le dev** (`server.js:13`), absente du cadrage — sa suppression ferme l'AC9 : l'état incohérent « base = prod, cookie non sécurisé » devient **inatteignable**. AC4 et AC2 vérifiées en **exécution réelle** : `NODE_ENV=development` atteint enfin la base locale, et la commande exacte de l'incident 23.1 vise `localhost` au lieu de la prod. Backend 546 → 568. 5 gardes vérifiés par mutation, témoin neutre vert — dont un qui **ne tuait aucun test au premier passage** (assertion trop lâche, resserrée). AC8 (`sslmode`) tranchée mais **hors dépôt** : consigne écrite pour northwood. | northwood |
 | 2026-08-11 | 0.1 | Story créée (create-story), promue à la revue `deferred-work` du même jour. **Découverte de cadrage qui élargit l'enjeu** : 7 fichiers backend lisent `NODE_ENV`, dont 3 qui décident de la sécurité (cookie `secure`, CORS, trust proxy) — un démarrage sans `NODE_ENV` sert donc de la donnée de **production** avec la posture de sécurité du **dev**, ce que `deferred-work` ne disait pas. **Découverte qui rend le correctif faisable** : `both.Dockerfile:25` pose `NODE_ENV=production`, donc le fail-fast ne casserait pas le déploiement — vérifié, pas supposé. Deux items de `deferred-work` corrigés au passage : « `NODE_ENV=production` rend la prod inatteignable » n'est vrai qu'en **local**, et `Makefile:163` marche aujourd'hui par contournement (URL passée en ligne de commande), pas par correction. | northwood |

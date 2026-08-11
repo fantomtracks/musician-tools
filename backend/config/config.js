@@ -1,9 +1,9 @@
 //This file loads the configuration for the current environment, it is designed this way to comply with the sequelize-cli
 const logger = require('../logger');
-if (process.env.NODE_ENV !== 'production') {
-  logger.info('loading .env file');
-  require('dotenv').config();
-}
+// `.env` is loaded by ./env, which MUST be required before anything reads NODE_ENV — that
+// ordering is the whole point of story 24.1. Requiring it here also validates the environment
+// for sequelize-cli, which loads this file through .sequelizerc.
+const { sslEnabled } = require('./env');
 
 module.exports = {
   development: {
@@ -13,7 +13,10 @@ module.exports = {
     connectionoptions: {
       dialect: 'postgres',
       dialectOptions: {
-        ssl: {
+        // Conditional, like test/staging. It used to be hardcoded, so `NODE_ENV=development` —
+        // the project's own official instruction — could not reach the docker-compose Postgres,
+        // which does not speak SSL. An official instruction that does not work is worse than none.
+        ssl: sslEnabled && {
           require: true,
           rejectUnauthorized: false,
         },
@@ -36,9 +39,9 @@ module.exports = {
     dialect: 'postgres',
     connectionoptions: {
       dialect: 'postgres',
-      ssl: process.env.DB_ENABLE_SSL,
+      ssl: sslEnabled,
       dialectOptions: {
-        ssl: process.env.DB_ENABLE_SSL && {
+        ssl: sslEnabled && {
           require: true,
           rejectUnauthorized: false,
         },
@@ -60,9 +63,9 @@ module.exports = {
     dialect: 'postgres',
     connectionoptions: {
       dialect: 'postgres',
-      ssl: process.env.DB_ENABLE_SSL,
+      ssl: sslEnabled,
       dialectOptions: {
-        ssl: process.env.DB_ENABLE_SSL && {
+        ssl: sslEnabled && {
           require: true,
           rejectUnauthorized: false,
         },

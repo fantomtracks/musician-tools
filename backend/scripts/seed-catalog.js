@@ -1620,7 +1620,14 @@ async function main(argv) {
   console.log(`${label('Base')}: ${target}${isLocalHost(host) ? '  (locale)' : '  ⚠️ DISTANTE'}`);
   console.log(`${label('NODE_ENV')}: au démarrage ${NODE_ENV_AT_STARTUP === undefined ? '(non défini)' : `« ${NODE_ENV_AT_STARTUP} »`}, après chargement « ${process.env.NODE_ENV} »`);
   if (NODE_ENV_AT_STARTUP !== process.env.NODE_ENV) {
-    console.log('                ⚠️ .env a modifié NODE_ENV APRÈS le choix de la connexion — ne vous fiez pas à cette valeur, fiez-vous à la base ci-dessus.');
+    // Story 24.1 turned this from a WARNING into a note of fact. It used to say ".env changed
+    // NODE_ENV AFTER the connection was chosen", which was true and dangerous: db.js read
+    // NODE_ENV before anything loaded .env, so a bare shell connected to PRODUCTION while the
+    // screen said development. `config/env.js` now loads .env BEFORE the environment is resolved,
+    // so the value below is the one the connection was actually built from. Left visible because
+    // it still tells the operator where the value came from — and the database line above remains
+    // the thing to trust.
+    console.log('                ℹ️ NODE_ENV vient du .env, pas du shell — et il est désormais lu AVANT le choix de la connexion (story 24.1).');
   }
   console.log(`${label('Phase')}: ${opts.phase}${{ attach: '  (rattachement des Songs existantes)', alias: '  (alias + correction orthographique)', enrich: '  (enrichissement des fiches brouillon)', publish: '  (publication en un passage)' }[opts.phase] || '  (création des entrées Catalog)'}`);
   if (opts.phase === 'seed') console.log(`${label('Fichier')}: ${opts.file}`);
