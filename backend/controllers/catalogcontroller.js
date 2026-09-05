@@ -838,6 +838,59 @@ const listMusicBrainzArtistRecordings = async (req, res) => {
   }
 };
 
+// POST /api/catalog/musicbrainz-import — lookup the recording (best effort) and
+// write a personal Song. A failed lookup still imports the list-row fallbacks.
+const importMusicBrainzRecording = async (req, res, next) => {
+  let fill;
+  try {
+    const userId = req.session && req.session.user;
+    if (!userId) {
+      return next(createError(401, 'Unauthorized'));
+    }
+    const body = req.body || {};
+    const mbid = typeof body.mbid === 'string' ? body.mbid : '';
+    const lookup = await musicbrainzService.lookupRecording(mbid).catch(() => null);
+    fill = musicbrainzService.applyRecordingFill({
+      title: body.title,
+      artist: body.artist,
+      album: body.album,
+      durationSeconds: body.durationSeconds,
+    }, lookup);
+    const title = normalizeText(fill.title);
+    if (!title) {
+      return next(createError(400, 'Title is required'));
+    }
+    const artist = normalizeText(fill.artist);
+    const album = normalizeText(fill.album);
+    const song = await Song.create({
+      userUid: userId,
+      title,
+      artist: artist !== undefined ? artist : null,
+      album: album !== undefined ? album : null,
+      durationSeconds: normalizeDurationSeconds(fill.durationSeconds) ?? null,
+      language: normalizeLanguage(fill.language) ?? null,
+      genre: fill.genre || null,
+      streamingLinks: fill.streamingLinks || null,
+    });
+    res.status(201).json(song);
+  } catch (error) {
+    if (error && error.name === 'SequelizeUniqueConstraintError') {
+      const existing = await findExistingUserSong(
+        req.session.user,
+        fill && fill.title,
+        fill && fill.artist,
+      ).catch(() => null);
+      return res.status(409).json({
+        error: 'duplicate_song',
+        message: 'A song with this title and artist already exists',
+        song: existing,
+      });
+    }
+    logger.error('Error importing MusicBrainz recording:', error);
+    next(createError(500, 'Error importing song'));
+  }
+};
+
 module.exports = {
   createCatalogEntry,
   updateCatalogEntry,
@@ -849,6 +902,7 @@ module.exports = {
   getCatalogExists,
   searchMusicBrainz,
   listMusicBrainzArtistRecordings,
+  importMusicBrainzRecording,
   addToSonglist,
   // Story 20.1 — Collections
   createCollection,

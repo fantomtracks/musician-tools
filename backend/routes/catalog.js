@@ -29,6 +29,7 @@ router.get('/exists', authsess, requireCurator, catalogController.getCatalogExis
 // songlist, not the Catalog).
 router.get('/musicbrainz-search', authsess, catalogController.searchMusicBrainz);
 router.get('/musicbrainz-artists/:mbid/recordings', authsess, catalogController.listMusicBrainzArtistRecordings);
+router.post('/musicbrainz-import', authsess, catalogController.importMusicBrainzRecording);
 
 // Story 20.1 — Collections (curated themed groupings). ALL registered BEFORE /:uid so
 // "collections" is never captured as a catalog-entry uid. Writes = curator (403);

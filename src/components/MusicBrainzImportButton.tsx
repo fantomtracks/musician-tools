@@ -1,7 +1,8 @@
 import { useEffect, useRef, useState } from 'react';
 import { Link } from 'react-router-dom';
-import { songService, SongConflictError } from '../services/songService';
-import type { CreateSongDTO, Song } from '../services/songService';
+import { SongConflictError } from '../services/songService';
+import type { Song } from '../services/songService';
+import { catalogService } from '../services/catalogService';
 import type { MusicBrainzHit } from '../services/catalogService';
 
 const HIT = 'min-h-[44px] inline-flex items-center justify-center gap-2 px-4 py-2 rounded-lg font-medium transition-colors';
@@ -43,12 +44,7 @@ export default function MusicBrainzImportButton({
     setSaving(true);
     setFailed(false);
     try {
-      const song = await songService.createSong({
-        title: hit.title,
-        artist: hit.artist ?? '',
-        album: hit.album ?? undefined,
-        durationSeconds: hit.durationSeconds ?? undefined,
-      } as CreateSongDTO);
+      const song = await catalogService.importMusicBrainzRecording(hit);
       if (!mountedRef.current) return;
       setFlashing(true);
       flashTimer.current = setTimeout(() => { if (mountedRef.current) setFlashing(false); }, 900);

@@ -7,6 +7,11 @@ const {
   mapArtists,
   mapRecordings,
   mapPopularRecordings,
+  mapRecordingLookup,
+  mapGenreNames,
+  mapLanguageCodes,
+  applyRecordingFill,
+  lookupRecording,
   searchArtists,
   searchRecordings,
   searchArtistsAndRecordings,
@@ -22,9 +27,19 @@ describe('musicbrainzService mapping', () => {
     expect(escapeLucene('foo:bar +baz')).toBe('foo\\:bar \\+baz');
   });
 
-  test('artistQuery and recordingQuery target the right Lucene fields', () => {
-    expect(artistQuery('cranberries')).toBe('artist:(cranberries)');
+  test('artistQuery phrases multi-word names so "The" does not match every band', () => {
+    expect(artistQuery('cranberries')).toBe('artist:cranberries');
+    expect(artistQuery('The Cranberries')).toBe('artist:"The Cranberries" OR artist:Cranberries');
+  });
+
+  test('recordingQuery treats extra words as an artist, not as more title tokens', () => {
     expect(recordingQuery('zombie')).toBe('recording:(zombie)');
+    expect(recordingQuery('Linger Cranberries')).toBe(
+      '(recording:(Linger) AND artist:Cranberries) OR recording:(Linger Cranberries)',
+    );
+    expect(recordingQuery('Linger The Cranberries')).toBe(
+      '(recording:(Linger The) AND artist:Cranberries) OR (recording:(Linger) AND artist:"The Cranberries") OR recording:(Linger The Cranberries)',
+    );
   });
 
   test('mapArtists maps name and mbid', () => {
@@ -59,6 +74,60 @@ describe('musicbrainzService mapping', () => {
       { mbid: 'r1', title: 'Zombie', artist: 'The Cranberries', album: 'No Need to Argue', durationSeconds: 308 },
       { mbid: 'r2', title: 'Linger', artist: 'The Cranberries', album: null, durationSeconds: 274 },
     ]);
+  });
+
+  test('mapRecordingLookup maps genre, lyrics language, album, duration, and streaming links', () => {
+    const mapped = mapRecordingLookup({
+      id: 'r1',
+      title: 'Zombie',
+      length: 308000,
+      'artist-credit': [{ artist: { name: 'The Cranberries', genres: [{ name: 'dream pop', count: 4 }] } }],
+      releases: [{ title: 'No Need to Argue', status: 'Official' }],
+      genres: [
+        { name: 'alternative rock', count: 15 },
+        { name: 'rock', count: 8 },
+        { name: 'melancholy', count: 1 },
+      ],
+      relations: [
+        { work: { languages: ['eng'] } },
+        { url: { resource: 'https://open.spotify.com/track/abc' } },
+        { url: { resource: 'https://example.com/not-a-stream' } },
+      ],
+    });
+    expect(mapped).toEqual({
+      mbid: 'r1',
+      title: 'Zombie',
+      artist: 'The Cranberries',
+      album: 'No Need to Argue',
+      durationSeconds: 308,
+      genre: ['Alternative', 'Rock'],
+      language: ['English'],
+      streamingLinks: [{ label: 'Spotify', url: 'https://open.spotify.com/track/abc' }],
+    });
+  });
+
+  test('mapGenreNames and mapLanguageCodes drop unknowns and fold onto catalog options', () => {
+    expect(mapGenreNames(['alternative rock', 'sad', 'rock', 'ROCK'])).toEqual(['Alternative', 'Rock']);
+    expect(mapLanguageCodes(['eng', 'zxx', 'fra', 'xyz'])).toEqual(['English', 'French']);
+  });
+
+  test('applyRecordingFill prefers lookup fields and keeps list-row fallbacks', () => {
+    expect(applyRecordingFill(
+      { title: 'Linger', artist: 'The Cranberries', album: 'NNTTA', durationSeconds: 274 },
+      { title: 'Linger', artist: 'The Cranberries', album: 'Everybody Else', durationSeconds: 274, genre: ['Rock'], language: ['English'] },
+    )).toEqual({
+      title: 'Linger',
+      artist: 'The Cranberries',
+      album: 'Everybody Else',
+      durationSeconds: 274,
+      genre: ['Rock'],
+      language: ['English'],
+      streamingLinks: null,
+    });
+    expect(applyRecordingFill({ title: 'Linger', artist: 'X' }, null)).toEqual({
+      title: 'Linger', artist: 'X', album: null, durationSeconds: null,
+      genre: null, language: null, streamingLinks: null,
+    });
   });
 
   test('mapPopularRecordings keeps listen-count order, maps fields, and folds duplicate titles', () => {
@@ -126,7 +195,7 @@ describe('musicbrainzService fetches', () => {
     expect(parsed.searchParams.get('fmt')).toBe('json');
     expect(parsed.searchParams.get('limit')).toBe('8');
     expect(parsed.searchParams.get('offset')).toBe('8');
-    expect(parsed.searchParams.get('query')).toBe('artist:(cranberries)');
+    expect(parsed.searchParams.get('query')).toBe('artist:cranberries');
     expect(opts.headers['User-Agent']).toBe(USER_AGENT);
   });
 
@@ -228,5 +297,30 @@ describe('musicbrainzService fetches', () => {
     await searchArtists('zombie');
     await searchArtists('zombie');
     expect(global.fetch).toHaveBeenCalledTimes(1);
+  });
+
+  test('lookupRecording hits /recording/:mbid with genres, works, and urls', async () => {
+    const recMbid = '5f843af3-5d20-433c-9cf7-4413c92073bc';
+    global.fetch.mockResolvedValue({
+      ok: true,
+      json: async () => ({
+        id: recMbid,
+        title: 'Zombie',
+        length: 1000,
+        genres: [{ name: 'rock', count: 1 }],
+        relations: [{ work: { languages: ['eng'] } }],
+      }),
+    });
+    const mapped = await lookupRecording(recMbid);
+    expect(mapped.genre).toEqual(['Rock']);
+    expect(mapped.language).toEqual(['English']);
+    const url = global.fetch.mock.calls[0][0];
+    expect(new URL(url).pathname).toBe(`/ws/2/recording/${recMbid}`);
+    expect(url).toContain('inc=genres+tags+releases+artist-credits+work-rels+url-rels');
+  });
+
+  test('lookupRecording with a non-MBID does not fetch', async () => {
+    await expect(lookupRecording('mb-1')).resolves.toBeNull();
+    expect(global.fetch).not.toHaveBeenCalled();
   });
 });

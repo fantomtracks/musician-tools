@@ -21,6 +21,20 @@ jest.mock('../services/musicbrainzService', () => ({
   searchArtists: jest.fn(),
   searchRecordings: jest.fn(),
   listPopularRecordingsByArtist: jest.fn(),
+  lookupRecording: jest.fn(),
+  applyRecordingFill: (fallback, lookup) => {
+    const src = lookup && !Array.isArray(lookup) ? lookup : {};
+    const base = fallback && typeof fallback === 'object' ? fallback : {};
+    return {
+      title: src.title || base.title || null,
+      artist: src.artist || base.artist || null,
+      album: src.album || base.album || null,
+      durationSeconds: src.durationSeconds ?? base.durationSeconds ?? null,
+      genre: src.genre || null,
+      language: src.language || null,
+      streamingLinks: src.streamingLinks || null,
+    };
+  },
   emptyPage: (offset = 0) => ({ items: [], total: 0, offset, limit: 8 }),
 }));
 
@@ -702,5 +716,56 @@ describe('catalogcontroller', () => {
     await controller.listMusicBrainzArtistRecordings({ params: { mbid: 'a1' } }, res, mockNext());
 
     expect(res.json.mock.calls[0][0].items).toEqual([hit]);
+  });
+
+  test('importMusicBrainzRecording writes a songlist entry with lookup fill', async () => {
+    musicbrainzService.lookupRecording.mockResolvedValue({
+      title: 'Zombie',
+      artist: 'The Cranberries',
+      album: 'No Need to Argue',
+      durationSeconds: 308,
+      genre: ['Alternative', 'Rock'],
+      language: ['English'],
+      streamingLinks: [{ label: 'Spotify', url: 'https://open.spotify.com/track/x' }],
+    });
+    Song.create.mockResolvedValue({ uid: 's1', title: 'Zombie' });
+    const res = mockRes();
+
+    await controller.importMusicBrainzRecording({
+      session: { user: 'u1' },
+      body: { mbid: '5f843af3-5d20-433c-9cf7-4413c92073bc', title: 'Zombie' },
+    }, res, mockNext());
+
+    expect(Song.create).toHaveBeenCalledWith(expect.objectContaining({
+      userUid: 'u1',
+      title: 'Zombie',
+      artist: 'The Cranberries',
+      album: 'No Need to Argue',
+      durationSeconds: 308,
+      genre: ['Alternative', 'Rock'],
+      language: ['English'],
+      streamingLinks: [{ label: 'Spotify', url: 'https://open.spotify.com/track/x' }],
+    }));
+    expect(res.status).toHaveBeenCalledWith(201);
+  });
+
+  test('importMusicBrainzRecording still writes fallbacks when lookup fails', async () => {
+    musicbrainzService.lookupRecording.mockResolvedValue(null);
+    Song.create.mockResolvedValue({ uid: 's1', title: 'Linger' });
+    const res = mockRes();
+
+    await controller.importMusicBrainzRecording({
+      session: { user: 'u1' },
+      body: { mbid: 'not-a-mbid', title: 'Linger', artist: 'The Cranberries', album: 'NNTTA', durationSeconds: 274 },
+    }, res, mockNext());
+
+    expect(Song.create).toHaveBeenCalledWith(expect.objectContaining({
+      title: 'Linger',
+      artist: 'The Cranberries',
+      album: 'NNTTA',
+      durationSeconds: 274,
+      genre: null,
+      language: null,
+    }));
   });
 });

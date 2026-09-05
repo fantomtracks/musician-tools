@@ -62,6 +62,10 @@ export default function Catalog() {
   const hasQuery = !!(search.trim() || key || mode || timeSignature || genre);
 
   const [searchInput, setSearchInput] = useState(search);
+  // The URL-sync effect must not overwrite the box while the user is still
+  // typing: debounce writes ?search=Linger, then a continued "Linger Cranberries"
+  // would snap back to Linger and the MusicBrainz query never follows the edit.
+  const lastPushedSearch = useRef(search);
   const [data, setData] = useState<CatalogListResponse | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(false);
@@ -83,6 +87,7 @@ export default function Catalog() {
   const [mbTrackLoadingMore, setMbTrackLoadingMore] = useState(false);
   const [mbView, setMbView] = useState<MbView>({ kind: 'search' });
   const [mbError, setMbError] = useState(false);
+  const [mbLoading, setMbLoading] = useState(false);
   const [mbDrillLoading, setMbDrillLoading] = useState(false);
 
   // Story 22.4: reader-side selection. Ephemeral (no persistKey) and "within-page" like
@@ -158,12 +163,21 @@ export default function Catalog() {
   };
 
   // Keep the text input in sync when the URL changes out-of-band (back button).
-  useEffect(() => { setSearchInput(search); }, [search]);
+  // Skip when we just pushed this value ourselves — otherwise a mid-edit
+  // ?search= commit wipes the characters the user has already typed next.
+  useEffect(() => {
+    if (search === lastPushedSearch.current) return;
+    lastPushedSearch.current = search;
+    setSearchInput(search);
+  }, [search]);
 
   // Debounce the text input into the URL (the source of truth). Reset to page 1.
   useEffect(() => {
     if (searchInput === search) return;
-    const t = setTimeout(() => patchParams({ search: searchInput || null, page: null }), DEBOUNCE_MS);
+    const t = setTimeout(() => {
+      lastPushedSearch.current = searchInput;
+      patchParams({ search: searchInput || null, page: null });
+    }, DEBOUNCE_MS);
     return () => clearTimeout(t);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [searchInput]);
@@ -198,18 +212,20 @@ export default function Catalog() {
     setMbArtistLoadingMore(false);
     setMbRecordingLoadingMore(false);
     setMbTrackLoadingMore(false);
+    setMbArtists(null);
+    setMbRecordings(null);
+    setMbArtistMeta(MB_EMPTY_META);
+    setMbRecordingMeta(MB_EMPTY_META);
     if (!q) {
-      setMbArtists(null);
-      setMbRecordings(null);
-      setMbArtistMeta(MB_EMPTY_META);
-      setMbRecordingMeta(MB_EMPTY_META);
       setMbError(false);
+      setMbLoading(false);
       return;
     }
+    setMbLoading(true);
+    setMbError(false);
     const timer = setTimeout(() => {
       const ctrl = new AbortController();
       mbAbortRef.current = ctrl;
-      setMbError(false);
       catalogService.searchMusicBrainz(q, ctrl.signal)
         .then(res => {
           if (ctrl.signal.aborted) return;
@@ -219,12 +235,12 @@ export default function Catalog() {
           setMbRecordings(recordings.items ?? []);
           setMbArtistMeta(mbMetaFrom(artists));
           setMbRecordingMeta(mbMetaFrom(recordings));
+          setMbLoading(false);
         })
         .catch(err => {
           if (err?.name === 'AbortError') return;
           setMbError(true);
-          setMbArtists(null);
-          setMbRecordings(null);
+          setMbLoading(false);
         });
     }, MB_DEBOUNCE_MS);
     return () => {
@@ -447,8 +463,8 @@ export default function Catalog() {
         </div>
       )}
 
-      {search.trim() && (mbError || mbView.kind !== 'search' || (mbArtists && mbArtists.length > 0) || (mbRecordings && mbRecordings.length > 0)) && (
-        <section className="mt-8" aria-labelledby="musicbrainz-heading">
+      {search.trim() && (mbLoading || mbError || mbDrillLoading || mbView.kind !== 'search' || (mbArtists && mbArtists.length > 0) || (mbRecordings && mbRecordings.length > 0)) && (
+        <section className="mt-8" aria-labelledby="musicbrainz-heading" aria-busy={mbLoading || mbDrillLoading}>
           <div className="flex items-center justify-between gap-3 mb-2">
             <h2 id="musicbrainz-heading" className="text-lg font-medium text-gray-800 dark:text-gray-200">
               {mbView.kind === 'artist' && `Popular songs by ${mbView.name}`}
@@ -465,11 +481,11 @@ export default function Catalog() {
             <p className="text-sm text-gray-500 dark:text-gray-400">Couldn’t reach MusicBrainz.</p>
           )}
 
-          {!mbError && mbDrillLoading && (
-            <p className="text-sm text-gray-500 dark:text-gray-400">Loading…</p>
+          {!mbError && (mbLoading || mbDrillLoading) && (
+            <ListSkeleton rows={4} />
           )}
 
-          {!mbError && !mbDrillLoading && mbView.kind === 'search' && (
+          {!mbError && !mbLoading && !mbDrillLoading && mbView.kind === 'search' && (
             <>
               {mbArtists && mbArtists.length > 0 && (
                 <div className="mb-4">

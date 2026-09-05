@@ -217,6 +217,31 @@ export const catalogService = {
     return response.json();
   },
 
+  // Import a MusicBrainz recording into the user's Songlist. The server looks
+  // the MBID up (genre / language / links) and falls back to the list-row fields.
+  async importMusicBrainzRecording(hit: MusicBrainzHit): Promise<Song> {
+    const response = await apiFetch(`${API_BASE}/catalog/musicbrainz-import`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      credentials: 'include',
+      body: JSON.stringify({
+        mbid: hit.mbid,
+        title: hit.title,
+        artist: hit.artist ?? null,
+        album: hit.album ?? null,
+        durationSeconds: hit.durationSeconds ?? null,
+      }),
+    });
+    if (response.status === 409) {
+      const body = await response.json().catch(() => ({} as { song?: Song }));
+      throw new SongConflictError(body.song ?? undefined);
+    }
+    if (!response.ok) {
+      throw new Error('Failed to import MusicBrainz recording');
+    }
+    return response.json();
+  },
+
   // The distinct filterable values across the whole Catalog (for the facet pills).
   async getFacets(signal?: AbortSignal, includeDrafts = false): Promise<CatalogFacets> {
     const qs = includeDrafts ? '?includeDrafts=1' : '';

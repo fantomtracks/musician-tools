@@ -40,6 +40,25 @@ test('typing a search debounces into a fetch and switches the title to Results (
   await screen.findByText('Results (1)');
 });
 
+test('continuing to type after the URL commits keeps the new query', async () => {
+  svc.listCatalog.mockResolvedValue(resp([]));
+  svc.searchMusicBrainz.mockResolvedValue({ artists: mbPage([]), recordings: mbPage([]) });
+  render(<MemoryRouter initialEntries={['/catalog']}><Catalog /></MemoryRouter>);
+  await waitFor(() => expect(svc.listCatalog).toHaveBeenCalled());
+
+  const box = screen.getByLabelText('Search the catalog');
+  fireEvent.change(box, { target: { value: 'Linger' } });
+  await waitFor(() => expect(svc.listCatalog).toHaveBeenCalledWith(
+    expect.objectContaining({ search: 'Linger' }),
+    expect.anything(),
+  ));
+
+  fireEvent.change(box, { target: { value: 'Linger Cranberries' } });
+  expect(box).toHaveValue('Linger Cranberries');
+  await waitFor(() => expect(svc.searchMusicBrainz).toHaveBeenCalledWith('Linger Cranberries', expect.anything()));
+  expect(box).toHaveValue('Linger Cranberries');
+});
+
 test('empty results show the no-match message when a query is active', async () => {
   svc.listCatalog.mockResolvedValue(resp([]));
   render(<MemoryRouter initialEntries={['/catalog?search=zzz']}><Catalog /></MemoryRouter>);
@@ -284,11 +303,13 @@ test('a catalog hit keeps Add to my songlist; MusicBrainz shows artists and song
 
   await screen.findByText('Zombie');
   expect(screen.getByRole('button', { name: /^Add "Zombie" to my songlist$/ })).toBeInTheDocument();
-  expect(await screen.findByRole('heading', { name: 'From MusicBrainz' })).toBeInTheDocument();
-  expect(screen.getByRole('heading', { name: 'Artists' })).toBeInTheDocument();
+  const mbSection = (await screen.findByRole('heading', { name: 'From MusicBrainz' })).closest('section');
+  expect(mbSection).toHaveAttribute('aria-busy', 'true');
+  expect(await screen.findByRole('heading', { name: 'Artists' })).toBeInTheDocument();
   expect(screen.getByRole('heading', { name: 'Songs' })).toBeInTheDocument();
   expect(screen.getByRole('button', { name: 'Show popular songs by The Cranberries' })).toHaveTextContent('Show songs');
   expect(screen.getByRole('button', { name: /^Import "Linger" to my songlist$/ })).toBeInTheDocument();
+  expect(mbSection).toHaveAttribute('aria-busy', 'false');
   expect(svc.searchMusicBrainz).toHaveBeenCalledWith('cranberries', expect.anything());
 });
 
@@ -317,21 +338,24 @@ test('Load more artists and songs request the next MusicBrainz page', async () =
   expect(await screen.findByText('Dreams')).toBeInTheDocument();
 });
 
-test('clicking an artist loads that artist’s popular songs with Import', async () => {
+test('clicking an artist shows a loader then that artist’s popular songs with Import', async () => {
   svc.listCatalog.mockResolvedValue(resp([], 0));
   svc.searchMusicBrainz.mockResolvedValue({
     artists: mbPage([{ mbid: 'art-1', name: 'The Cranberries' }]),
     recordings: mbPage([]),
   });
-  svc.listMusicBrainzArtistRecordings.mockResolvedValue(mbPage([
-    { mbid: 't1', title: 'Zombie', artist: 'The Cranberries', album: 'No Need to Argue', durationSeconds: 308 },
-  ]));
+  let finishTracks!: (value: ReturnType<typeof mbPage<{ mbid: string; title: string; artist: string; album: string; durationSeconds: number }>>) => void;
+  svc.listMusicBrainzArtistRecordings.mockImplementation(() => new Promise(resolve => { finishTracks = resolve; }));
   render(<MemoryRouter initialEntries={['/catalog?search=cranberries']}><Catalog /></MemoryRouter>);
 
   fireEvent.click(await screen.findByRole('button', { name: 'Show popular songs by The Cranberries' }));
-  await waitFor(() => expect(svc.listMusicBrainzArtistRecordings).toHaveBeenCalledWith('art-1', expect.anything(), 0));
-  expect(await screen.findByRole('heading', { name: 'Popular songs by The Cranberries' })).toBeInTheDocument();
+  const drill = (await screen.findByRole('heading', { name: 'Popular songs by The Cranberries' })).closest('section');
+  expect(drill).toHaveAttribute('aria-busy', 'true');
+  finishTracks!(mbPage([
+    { mbid: 't1', title: 'Zombie', artist: 'The Cranberries', album: 'No Need to Argue', durationSeconds: 308 },
+  ]));
   expect(await screen.findByRole('button', { name: /^Import "Zombie" to my songlist$/ })).toBeInTheDocument();
+  expect(drill).toHaveAttribute('aria-busy', 'false');
 });
 
 test('Load more songs inside an artist requests the next page', async () => {

@@ -1,4 +1,5 @@
 import { catalogService, CatalogNotFoundError, CatalogConflictError, CollectionNotFoundError } from '../services/catalogService';
+import { SongConflictError } from '../services/songService';
 import { clearCsrfToken } from '../services/csrf';
 
 // apiFetch does a CSRF round-trip before a mutation (story 7.3): /csrf-token then
@@ -249,6 +250,7 @@ describe('catalogService.addSongToCollection', () => {
 
 describe('catalogService.searchMusicBrainz', () => {
   const originalFetch = global.fetch;
+  beforeEach(() => { clearCsrfToken(); });
   afterEach(() => { global.fetch = originalFetch; });
 
   test('GETs /api/catalog/musicbrainz-search?q= and returns paged artists + recordings', async () => {
@@ -304,5 +306,32 @@ describe('catalogService.searchMusicBrainz', () => {
     expect(page.items[0].title).toBe('Dreams');
     expect(page.offset).toBe(8);
     expect(fetchMock.mock.calls[0][0] as string).toBe('/api/catalog/musicbrainz-artists/a1/recordings?offset=8');
+  });
+
+  test('importMusicBrainzRecording POSTs the hit and returns the created song', async () => {
+    const fetchMock = mockFetchWithCsrf({
+      ok: true,
+      status: 201,
+      json: async () => ({ uid: 's1', title: 'Zombie', genre: ['Rock'] }),
+    });
+    global.fetch = fetchMock as unknown as typeof fetch;
+    const song = await catalogService.importMusicBrainzRecording({
+      mbid: 'r1', title: 'Zombie', artist: 'The Cranberries', album: 'NNTTA', durationSeconds: 308,
+    });
+    expect(song.genre).toEqual(['Rock']);
+    expect(fetchMock).toHaveBeenCalledWith(
+      '/api/catalog/musicbrainz-import',
+      expect.objectContaining({ method: 'POST', credentials: 'include' }),
+    );
+  });
+
+  test('importMusicBrainzRecording throws SongConflictError on 409', async () => {
+    global.fetch = mockFetchWithCsrf({
+      ok: false,
+      status: 409,
+      json: async () => ({ song: { uid: 's-dup', title: 'Zombie' } }),
+    }) as unknown as typeof fetch;
+    await expect(catalogService.importMusicBrainzRecording({ mbid: 'r1', title: 'Zombie' }))
+      .rejects.toBeInstanceOf(SongConflictError);
   });
 });

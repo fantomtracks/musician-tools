@@ -31,12 +31,41 @@ function escapeLucene(input) {
   return String(input).replace(/([+\-!(){}[\]^"~*?:\\/|&])/g, '\\$1');
 }
 
-function artistQuery(raw) {
-  return `artist:(${escapeLucene(raw.trim())})`;
+// Lucene phrase so "The Cranberries" does not become artist:The (every "The …" band).
+function lucenePhrase(raw) {
+  return `"${String(raw).replace(/\\/g, '\\\\').replace(/"/g, '\\"')}"`;
 }
 
+function artistQuery(raw) {
+  const q = raw.trim();
+  const phrase = `artist:${lucenePhrase(q)}`;
+  const stripped = q.replace(/^(the|a|an)\s+/i, '').trim();
+  // Bare token so "cranberries" still hits "The Cranberries". Multi-word keeps
+  // the phrase as the primary clause so "The" cannot explode the result set.
+  if (!q.includes(' ')) return `artist:${escapeLucene(q)}`;
+  if (stripped && stripped.toLowerCase() !== q.toLowerCase()) {
+    return `${phrase} OR artist:${escapeLucene(stripped)}`;
+  }
+  return phrase;
+}
+
+// Users type "Linger Cranberries" meaning title + artist. Locking the whole
+// string to recording:(…) only matches titles that contain every word
+// ("Linger (Bluegrass Rendition of the Cranberries)"), not Linger by The Cranberries.
 function recordingQuery(raw) {
-  return `recording:(${escapeLucene(raw.trim())})`;
+  const q = raw.trim();
+  const parts = q.split(/\s+/).filter(Boolean);
+  if (parts.length === 1) return `recording:(${escapeLucene(parts[0])})`;
+  const clauses = [];
+  const title1 = parts.slice(0, -1).join(' ');
+  clauses.push(`(recording:(${escapeLucene(title1)}) AND artist:${escapeLucene(parts[parts.length - 1])})`);
+  if (parts.length >= 3) {
+    const title2 = parts.slice(0, -2).join(' ');
+    const artist2 = parts.slice(-2).join(' ');
+    clauses.push(`(recording:(${escapeLucene(title2)}) AND artist:${lucenePhrase(artist2)})`);
+  }
+  clauses.push(`recording:(${escapeLucene(q)})`);
+  return clauses.join(' OR ');
 }
 
 function artistFromCredit(credits) {
@@ -95,6 +124,172 @@ function mapPopularRecordings(payload) {
     });
   }
   return items;
+}
+
+// Same vocabulary as songMetadataService / songFieldOptions — MB genre names
+// (and tags) fold onto the Catalog/Songlist list, unknown names are dropped.
+const GENRE_MAPPING = {
+  rock: 'Rock', 'hard rock': 'Hard Rock', 'alternative rock': 'Alternative',
+  alternative: 'Alternative', indie: 'Indie', 'indie rock': 'Indie', punk: 'Punk',
+  'progressive rock': 'Progressive', progressive: 'Progressive', metal: 'Metal',
+  rap: 'Rap', 'hip-hop': 'Hip-Hop', 'hip hop': 'Hip-Hop', trap: 'Trap',
+  electronic: 'Electronic', edm: 'EDM', techno: 'Techno', house: 'House',
+  'drum and bass': 'Drum & Bass', 'drum & bass': 'Drum & Bass', ambient: 'Ambient',
+  disco: 'Disco', pop: 'Pop', folk: 'Folk', funk: 'Funk', jazz: 'Jazz',
+  blues: 'Blues', country: 'Country', reggae: 'Reggae', ska: 'Ska',
+  classical: 'Classical', gospel: 'Gospel', 'r&b': 'R&B / Soul', soul: 'R&B / Soul',
+  latin: 'Latin', world: 'World', acoustic: 'Acoustic', soundtrack: 'Soundtrack',
+  'k-pop': 'K-Pop', kpop: 'K-Pop', 'singer-songwriter': 'Singer-Songwriter',
+};
+
+function mapGenreNames(names) {
+  if (!Array.isArray(names)) return null;
+  const out = [];
+  const seen = new Set();
+  for (const raw of names) {
+    const lower = String(raw || '').toLowerCase().trim();
+    if (!lower) continue;
+    let mapped = GENRE_MAPPING[lower];
+    if (!mapped) {
+      for (const [key, value] of Object.entries(GENRE_MAPPING)) {
+        if (lower.includes(key)) { mapped = value; break; }
+      }
+    }
+    if (!mapped || seen.has(mapped)) continue;
+    seen.add(mapped);
+    out.push(mapped);
+    if (out.length >= 5) break;
+  }
+  return out.length ? out : null;
+}
+
+function collectGenreNames(payload) {
+  const names = [];
+  const add = (list) => {
+    if (!Array.isArray(list)) return;
+    const sorted = [...list].sort((a, b) => (Number(b.count) || 0) - (Number(a.count) || 0));
+    for (const row of sorted) {
+      const name = row && (row.name || row.tag);
+      if (name) names.push(String(name));
+    }
+  };
+  add(payload && payload.genres);
+  if (names.length === 0 && payload && Array.isArray(payload['artist-credit'])) {
+    for (const credit of payload['artist-credit']) add(credit && credit.artist && credit.artist.genres);
+  }
+  if (names.length === 0) add(payload && payload.tags);
+  return names;
+}
+
+// ISO 639-3 (MusicBrainz work.languages) → Catalog/Songlist languageOptions.
+const LANGUAGE_ISO = {
+  afr: 'Afrikaans', sqi: 'Albanian', amh: 'Amharic', ara: 'Arabic', hye: 'Armenian',
+  aze: 'Azerbaijani', eus: 'Basque', bel: 'Belarusian', ben: 'Bengali', bos: 'Bosnian',
+  bul: 'Bulgarian', mya: 'Burmese', cat: 'Catalan', yue: 'Chinese (Cantonese)',
+  cmn: 'Chinese (Mandarin)', zho: 'Chinese (Mandarin)', hrv: 'Croatian', ces: 'Czech',
+  dan: 'Danish', nld: 'Dutch', eng: 'English', est: 'Estonian', fas: 'Farsi',
+  fin: 'Finnish', fra: 'French', glg: 'Galician', kat: 'Georgian', deu: 'German',
+  ell: 'Greek', guj: 'Gujarati', hat: 'Haitian Creole', hau: 'Hausa', heb: 'Hebrew',
+  hin: 'Hindi', hun: 'Hungarian', isl: 'Icelandic', ibo: 'Igbo', ind: 'Indonesian',
+  gle: 'Irish', ita: 'Italian', jpn: 'Japanese', jav: 'Javanese', kan: 'Kannada',
+  kaz: 'Kazakh', khm: 'Khmer', kin: 'Kinyarwanda', kor: 'Korean', kur: 'Kurdish',
+  lao: 'Lao', lav: 'Latvian', lit: 'Lithuanian', mkd: 'Macedonian', msa: 'Malay',
+  mal: 'Malayalam', mlt: 'Maltese', mri: 'Maori', mar: 'Marathi', mon: 'Mongolian',
+  nep: 'Nepali', nor: 'Norwegian', nob: 'Norwegian', nno: 'Norwegian', ori: 'Odia',
+  pus: 'Pashto', pol: 'Polish', por: 'Portuguese', pan: 'Punjabi', que: 'Quechua',
+  ron: 'Romanian', rus: 'Russian', srp: 'Serbian', sin: 'Sinhala', slk: 'Slovak',
+  slv: 'Slovenian', som: 'Somali', spa: 'Spanish', swa: 'Swahili', swe: 'Swedish',
+  tgl: 'Tagalog', tam: 'Tamil', tat: 'Tatar', tel: 'Telugu', tha: 'Thai',
+  tur: 'Turkish', ukr: 'Ukrainian', urd: 'Urdu', uzb: 'Uzbek', vie: 'Vietnamese',
+  cym: 'Welsh', wol: 'Wolof', xho: 'Xhosa', yor: 'Yoruba', zul: 'Zulu',
+};
+
+function mapLanguageCodes(codes) {
+  if (!Array.isArray(codes)) return null;
+  const out = [];
+  const seen = new Set();
+  for (const raw of codes) {
+    const code = String(raw || '').toLowerCase().trim();
+    if (!code || code === 'zxx' || code === 'mul') continue;
+    const name = LANGUAGE_ISO[code];
+    if (!name || seen.has(name)) continue;
+    seen.add(name);
+    out.push(name);
+  }
+  return out.length ? out : null;
+}
+
+function languagesFromRelations(relations) {
+  if (!Array.isArray(relations)) return [];
+  const codes = [];
+  for (const rel of relations) {
+    const work = rel && rel.work;
+    if (!work) continue;
+    const list = Array.isArray(work.languages) ? work.languages
+      : (work.language ? [work.language] : []);
+    for (const code of list) codes.push(code);
+  }
+  return codes;
+}
+
+const STREAM_HOSTS = [
+  ['spotify.com', 'Spotify'],
+  ['music.youtube.com', 'YouTube'],
+  ['youtu.be', 'YouTube'],
+  ['youtube.com', 'YouTube'],
+  ['music.apple.com', 'Apple Music'],
+  ['itunes.apple.com', 'Apple Music'],
+  ['deezer.com', 'Deezer'],
+  ['tidal.com', 'Tidal'],
+  ['soundcloud.com', 'SoundCloud'],
+  ['bandcamp.com', 'Bandcamp'],
+];
+
+function streamingFromRelations(relations) {
+  if (!Array.isArray(relations)) return null;
+  const items = [];
+  const seen = new Set();
+  for (const rel of relations) {
+    const href = rel && rel.url && rel.url.resource;
+    if (!href || seen.has(href)) continue;
+    let host = '';
+    try { host = new URL(href).hostname.toLowerCase(); } catch { continue; }
+    const pair = STREAM_HOSTS.find(([suffix]) => host === suffix || host.endsWith(`.${suffix}`));
+    if (!pair) continue;
+    seen.add(href);
+    items.push({ label: pair[1], url: href });
+  }
+  return items.length ? items : null;
+}
+
+function mapRecordingLookup(payload) {
+  if (!payload || typeof payload !== 'object') return null;
+  const title = payload.title ? String(payload.title).trim() : '';
+  const length = typeof payload.length === 'number' ? payload.length : null;
+  return {
+    mbid: payload.id ? String(payload.id) : null,
+    title: title || null,
+    artist: artistFromCredit(payload['artist-credit']),
+    album: albumFromReleases(payload.releases),
+    durationSeconds: length != null ? Math.round(length / 1000) : null,
+    genre: mapGenreNames(collectGenreNames(payload)),
+    language: mapLanguageCodes(languagesFromRelations(payload.relations)),
+    streamingLinks: streamingFromRelations(payload.relations),
+  };
+}
+
+function applyRecordingFill(fallback, lookup) {
+  const src = lookup && !Array.isArray(lookup) ? lookup : {};
+  const base = fallback && typeof fallback === 'object' ? fallback : {};
+  return {
+    title: src.title || base.title || null,
+    artist: src.artist || base.artist || null,
+    album: src.album || base.album || null,
+    durationSeconds: src.durationSeconds ?? base.durationSeconds ?? null,
+    genre: src.genre || null,
+    language: src.language || null,
+    streamingLinks: src.streamingLinks || null,
+  };
 }
 
 function emptyPage(offset = 0) {
@@ -258,14 +453,31 @@ async function listPopularRecordingsByArtist(artistMbid, offset = 0) {
   };
 }
 
+// Import-time lookup: genres, lyrics language (via work), album, duration, streaming URLs.
+// Failures return null so the importer can still write the list-row fallbacks.
+async function lookupRecording(recordingMbid) {
+  if (!isMbid(recordingMbid)) return null;
+  const url = `${MB_ROOT}/recording/${recordingMbid}?fmt=json&inc=genres+tags+releases+artist-credits+work-rels+url-rels`;
+  const mapped = await queued(`recording-lookup:${recordingMbid}`, async () => {
+    const body = await fetchJson(url, `lookup ${recordingMbid}`);
+    return body == null ? null : mapRecordingLookup(body);
+  });
+  return mapped && !Array.isArray(mapped) ? mapped : null;
+}
+
 module.exports = {
   searchArtists,
   searchRecordings,
   searchArtistsAndRecordings,
   listPopularRecordingsByArtist,
+  lookupRecording,
   mapArtists,
   mapRecordings,
   mapPopularRecordings,
+  mapRecordingLookup,
+  mapGenreNames,
+  mapLanguageCodes,
+  applyRecordingFill,
   artistQuery,
   recordingQuery,
   emptyPage,
