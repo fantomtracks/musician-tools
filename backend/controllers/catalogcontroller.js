@@ -6,6 +6,7 @@
 // Story 19.1 scope: curator write CRUD on catalog entries. Read (list/detail)
 // endpoints land in story 19.3; "Add to my songlist" in story 19.4.
 const { CatalogSong, Song, User, CatalogCollection, CatalogCollectionSong, Playlist, PlaylistSong } = require('../models');
+const musicbrainzService = require('../services/musicbrainzService');
 const { Op, fn, col, where: whereFn } = require('sequelize');
 const createError = require('http-errors');
 const logger = require('../logger');
@@ -768,6 +769,128 @@ const importCollectionToSonglist = async (req, res, next) => {
   }
 };
 
+async function dropPublishedCatalogHits(hits) {
+  const items = [];
+  for (const hit of hits) {
+    const existing = await findExistingByTitleArtist(hit.title, hit.artist).catch(() => null);
+    if (existing && existing.publishedAt != null) continue;
+    items.push(hit);
+  }
+  return items;
+}
+
+async function dropPublishedPage(page) {
+  return { ...page, items: await dropPublishedCatalogHits(page.items || []) };
+}
+
+function parseMbOffset(raw) {
+  const n = Number.parseInt(String(raw ?? '0'), 10);
+  if (!Number.isFinite(n) || n < 0) return 0;
+  return Math.min(n, 100000);
+}
+
+// GET /api/catalog/musicbrainz-search?q=[&kind=artists|recordings][&offset=]
+// First call (no kind) returns page 0 of both lists. kind + offset lazy-loads
+// one list. Empty q and failures return empty pages so Catalog browse stays up.
+const searchMusicBrainz = async (req, res) => {
+  const q = typeof req.query.q === 'string' ? req.query.q.trim() : '';
+  const kind = typeof req.query.kind === 'string' ? req.query.kind : '';
+  const offset = parseMbOffset(req.query?.offset);
+  if (!q) {
+    return res.json({
+      artists: musicbrainzService.emptyPage(0),
+      recordings: musicbrainzService.emptyPage(0),
+    });
+  }
+  try {
+    if (kind === 'artists') {
+      return res.json({ artists: await musicbrainzService.searchArtists(q, offset) });
+    }
+    if (kind === 'recordings') {
+      const page = await musicbrainzService.searchRecordings(q, offset);
+      return res.json({ recordings: await dropPublishedPage(page) });
+    }
+    const result = await musicbrainzService.searchArtistsAndRecordings(q);
+    res.json({
+      artists: result.artists,
+      recordings: await dropPublishedPage(result.recordings),
+    });
+  } catch (error) {
+    logger.error('Error searching MusicBrainz:', error);
+    res.json({
+      artists: musicbrainzService.emptyPage(0),
+      recordings: musicbrainzService.emptyPage(0),
+    });
+  }
+};
+
+// GET /api/catalog/musicbrainz-artists/:mbid/recordings — popular songs for a
+// clicked artist (ListenBrainz listen-count order). Drop rows that already
+// exist as a PUBLISHED catalog entry (same fold as uniqueness).
+const listMusicBrainzArtistRecordings = async (req, res) => {
+  const offset = parseMbOffset(req.query?.offset);
+  try {
+    const page = await musicbrainzService.listPopularRecordingsByArtist(req.params.mbid, offset);
+    res.json(await dropPublishedPage(page));
+  } catch (error) {
+    logger.error('Error listing popular MusicBrainz recordings:', error);
+    res.json(musicbrainzService.emptyPage(offset));
+  }
+};
+
+// POST /api/catalog/musicbrainz-import — lookup the recording (best effort) and
+// write a personal Song. A failed lookup still imports the list-row fallbacks.
+const importMusicBrainzRecording = async (req, res, next) => {
+  let fill;
+  try {
+    const userId = req.session && req.session.user;
+    if (!userId) {
+      return next(createError(401, 'Unauthorized'));
+    }
+    const body = req.body || {};
+    const mbid = typeof body.mbid === 'string' ? body.mbid : '';
+    const lookup = await musicbrainzService.lookupRecording(mbid).catch(() => null);
+    fill = musicbrainzService.applyRecordingFill({
+      title: body.title,
+      artist: body.artist,
+      album: body.album,
+      durationSeconds: body.durationSeconds,
+    }, lookup);
+    const title = normalizeText(fill.title);
+    if (!title) {
+      return next(createError(400, 'Title is required'));
+    }
+    const artist = normalizeText(fill.artist);
+    const album = normalizeText(fill.album);
+    const song = await Song.create({
+      userUid: userId,
+      title,
+      artist: artist !== undefined ? artist : null,
+      album: album !== undefined ? album : null,
+      durationSeconds: normalizeDurationSeconds(fill.durationSeconds) ?? null,
+      language: normalizeLanguage(fill.language) ?? null,
+      genre: fill.genre || null,
+      streamingLinks: fill.streamingLinks || null,
+    });
+    res.status(201).json(song);
+  } catch (error) {
+    if (error && error.name === 'SequelizeUniqueConstraintError') {
+      const existing = await findExistingUserSong(
+        req.session.user,
+        fill && fill.title,
+        fill && fill.artist,
+      ).catch(() => null);
+      return res.status(409).json({
+        error: 'duplicate_song',
+        message: 'A song with this title and artist already exists',
+        song: existing,
+      });
+    }
+    logger.error('Error importing MusicBrainz recording:', error);
+    next(createError(500, 'Error importing song'));
+  }
+};
+
 module.exports = {
   createCatalogEntry,
   updateCatalogEntry,
@@ -777,6 +900,9 @@ module.exports = {
   getCatalogFacets,
   getCatalogEntry,
   getCatalogExists,
+  searchMusicBrainz,
+  listMusicBrainzArtistRecordings,
+  importMusicBrainzRecording,
   addToSonglist,
   // Story 20.1 — Collections
   createCollection,

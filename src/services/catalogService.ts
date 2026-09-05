@@ -57,6 +57,42 @@ export type CatalogListParams = {
   includeDrafts?: boolean; // curator hub only (19.6) — honoured server-side iff isCurator
 };
 
+// A MusicBrainz recording that is NOT already a published Catalog entry. Import
+// writes the user's Songlist via POST /api/songs (not a Catalog fiche).
+export type MusicBrainzHit = {
+  mbid: string;
+  title: string;
+  artist?: string | null;
+  album?: string | null;
+  durationSeconds?: number | null;
+};
+
+export type MusicBrainzArtist = {
+  mbid: string;
+  name: string;
+};
+
+export type MusicBrainzPage<T> = {
+  items: T[];
+  total: number;
+  offset: number;
+  limit: number;
+};
+
+// Initial MusicBrainz search: first page of artists + matching songs. Later
+// pages lazy-load one list at a time (`kind` + `offset`).
+export type MusicBrainzSearchResponse = {
+  artists: MusicBrainzPage<MusicBrainzArtist>;
+  recordings: MusicBrainzPage<MusicBrainzHit>;
+};
+
+export const emptyMusicBrainzPage = <T,>(offset = 0, limit = 8): MusicBrainzPage<T> => ({
+  items: [],
+  total: 0,
+  offset,
+  limit,
+});
+
 // Thrown when a detail lookup 404s (deep-link to a removed/unknown entry). Lets the
 // page show a calm not-found instead of a generic error.
 export class CatalogNotFoundError extends Error {
@@ -137,6 +173,71 @@ export const catalogService = {
     });
     if (!response.ok) {
       throw new Error('Failed to load the catalog');
+    }
+    return response.json();
+  },
+
+  // MusicBrainz extras for a catalog text search (artists + songs). Empty `q`
+  // is a no-op on the server. `signal` aborts a superseded request. Pass
+  // `kind` + `offset` to lazy-load the next page of one list.
+  async searchMusicBrainz(
+    q: string,
+    signal?: AbortSignal,
+    opts?: { kind?: 'artists' | 'recordings'; offset?: number },
+  ): Promise<MusicBrainzSearchResponse> {
+    const qs = new URLSearchParams();
+    qs.set('q', q);
+    if (opts?.kind) qs.set('kind', opts.kind);
+    if (opts?.offset != null) qs.set('offset', String(opts.offset));
+    const response = await apiFetch(`${API_BASE}/catalog/musicbrainz-search?${qs.toString()}`, {
+      credentials: 'include',
+      signal,
+    });
+    if (!response.ok) {
+      throw new Error('Failed to search MusicBrainz');
+    }
+    return response.json();
+  },
+
+  async listMusicBrainzArtistRecordings(
+    mbid: string,
+    signal?: AbortSignal,
+    offset = 0,
+  ): Promise<MusicBrainzPage<MusicBrainzHit>> {
+    const qs = new URLSearchParams();
+    if (offset) qs.set('offset', String(offset));
+    const query = qs.toString();
+    const response = await apiFetch(
+      `${API_BASE}/catalog/musicbrainz-artists/${mbid}/recordings${query ? `?${query}` : ''}`,
+      { credentials: 'include', signal },
+    );
+    if (!response.ok) {
+      throw new Error('Failed to load MusicBrainz recordings');
+    }
+    return response.json();
+  },
+
+  // Import a MusicBrainz recording into the user's Songlist. The server looks
+  // the MBID up (genre / language / links) and falls back to the list-row fields.
+  async importMusicBrainzRecording(hit: MusicBrainzHit): Promise<Song> {
+    const response = await apiFetch(`${API_BASE}/catalog/musicbrainz-import`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      credentials: 'include',
+      body: JSON.stringify({
+        mbid: hit.mbid,
+        title: hit.title,
+        artist: hit.artist ?? null,
+        album: hit.album ?? null,
+        durationSeconds: hit.durationSeconds ?? null,
+      }),
+    });
+    if (response.status === 409) {
+      const body = await response.json().catch(() => ({} as { song?: Song }));
+      throw new SongConflictError(body.song ?? undefined);
+    }
+    if (!response.ok) {
+      throw new Error('Failed to import MusicBrainz recording');
     }
     return response.json();
   },
