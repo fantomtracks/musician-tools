@@ -246,3 +246,63 @@ describe('catalogService.addSongToCollection', () => {
     await expect(catalogService.addSongToCollection('col-1', 'song-1')).rejects.toThrow();
   });
 });
+
+describe('catalogService.searchMusicBrainz', () => {
+  const originalFetch = global.fetch;
+  afterEach(() => { global.fetch = originalFetch; });
+
+  test('GETs /api/catalog/musicbrainz-search?q= and returns paged artists + recordings', async () => {
+    const fetchMock = jest.fn().mockResolvedValue({
+      ok: true,
+      json: async () => ({
+        artists: { items: [{ mbid: 'a1', name: 'The Cranberries' }], total: 1, offset: 0, limit: 8 },
+        recordings: { items: [{ mbid: 't1', title: 'Linger', artist: 'The Cranberries' }], total: 1, offset: 0, limit: 8 },
+      }),
+    });
+    global.fetch = fetchMock as unknown as typeof fetch;
+    const res = await catalogService.searchMusicBrainz('linger');
+    expect(res.artists.items[0].name).toBe('The Cranberries');
+    expect(res.recordings.items[0].title).toBe('Linger');
+    expect(fetchMock.mock.calls[0][0] as string).toBe('/api/catalog/musicbrainz-search?q=linger');
+    expect(fetchMock.mock.calls[0][1]).toEqual(expect.objectContaining({ credentials: 'include' }));
+  });
+
+  test('searchMusicBrainz with kind+offset lazy-loads one list', async () => {
+    const fetchMock = jest.fn().mockResolvedValue({
+      ok: true,
+      json: async () => ({ artists: { items: [], total: 20, offset: 8, limit: 8 } }),
+    });
+    global.fetch = fetchMock as unknown as typeof fetch;
+    await catalogService.searchMusicBrainz('linger', undefined, { kind: 'artists', offset: 8 });
+    expect(fetchMock.mock.calls[0][0] as string).toBe('/api/catalog/musicbrainz-search?q=linger&kind=artists&offset=8');
+  });
+
+  test('throws on a non-OK response', async () => {
+    global.fetch = jest.fn().mockResolvedValue({ ok: false, status: 500, json: async () => ({}) }) as unknown as typeof fetch;
+    await expect(catalogService.searchMusicBrainz('zombie')).rejects.toThrow('Failed to search MusicBrainz');
+  });
+
+  test('listMusicBrainzArtistRecordings GETs /musicbrainz-artists/:mbid/recordings', async () => {
+    const fetchMock = jest.fn().mockResolvedValue({
+      ok: true,
+      json: async () => ({ items: [{ mbid: 't1', title: 'Zombie' }], total: 1, offset: 0, limit: 8 }),
+    });
+    global.fetch = fetchMock as unknown as typeof fetch;
+    const page = await catalogService.listMusicBrainzArtistRecordings('a1');
+    expect(page.items[0].title).toBe('Zombie');
+    expect(page.total).toBe(1);
+    expect(fetchMock.mock.calls[0][0] as string).toBe('/api/catalog/musicbrainz-artists/a1/recordings');
+  });
+
+  test('listMusicBrainzArtistRecordings appends offset for lazy load', async () => {
+    const fetchMock = jest.fn().mockResolvedValue({
+      ok: true,
+      json: async () => ({ items: [{ mbid: 't9', title: 'Dreams' }], total: 16, offset: 8, limit: 8 }),
+    });
+    global.fetch = fetchMock as unknown as typeof fetch;
+    const page = await catalogService.listMusicBrainzArtistRecordings('a1', undefined, 8);
+    expect(page.items[0].title).toBe('Dreams');
+    expect(page.offset).toBe(8);
+    expect(fetchMock.mock.calls[0][0] as string).toBe('/api/catalog/musicbrainz-artists/a1/recordings?offset=8');
+  });
+});

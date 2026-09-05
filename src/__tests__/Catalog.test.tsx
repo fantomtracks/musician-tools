@@ -12,11 +12,13 @@ jest.mock('../services/catalogService', () => {
 const svc = catalogService as jest.Mocked<typeof catalogService>;
 
 const resp = (items: Partial<CatalogSong>[], total = items.length) => ({ items: items as CatalogSong[], total, page: 1, limit: 24 });
+const mbPage = <T,>(items: T[], total = items.length, offset = 0, limit = 8) => ({ items, total, offset, limit });
 
 beforeEach(() => {
   jest.clearAllMocks();
   svc.getFacets.mockResolvedValue({ genre: [], key: [], mode: [], timeSignature: [] });
   svc.listCollections.mockResolvedValue([]); // no rail by default; rail tests override
+  svc.searchMusicBrainz.mockResolvedValue({ artists: mbPage([]), recordings: mbPage([]) });
 });
 
 test('renders the list with the "All songs" title (no query)', async () => {
@@ -96,7 +98,7 @@ import { songService } from '../services/songService';
 
 jest.mock('../services/songService', () => {
   const actual = jest.requireActual('../services/songService');
-  return { ...actual, songService: { getAllSongs: jest.fn().mockResolvedValue([]) } };
+  return { ...actual, songService: { getAllSongs: jest.fn().mockResolvedValue([]), createSong: jest.fn() } };
 });
 
 // Minimal Song shapes: the page only reads uid/title/artist from them.
@@ -266,4 +268,118 @@ test('22.4: a 409 that carries no song triggers a songlist reload so the row sto
   // The response could not tell us WHICH songs — the only way to stay honest is to
   // reload the songlist.
   await waitFor(() => expect(songService.getAllSongs).toHaveBeenCalledTimes(2));
+});
+
+// ---------------------------------------------------------------------------
+// MusicBrainz artist → popular songs
+// ---------------------------------------------------------------------------
+
+test('a catalog hit keeps Add to my songlist; MusicBrainz shows artists and songs with Import', async () => {
+  svc.listCatalog.mockResolvedValue(resp([{ uid: 'a', title: 'Zombie', artist: 'The Cranberries' }], 1));
+  svc.searchMusicBrainz.mockResolvedValue({
+    artists: mbPage([{ mbid: 'art-1', name: 'The Cranberries' }]),
+    recordings: mbPage([{ mbid: 'mb-1', title: 'Linger', artist: 'The Cranberries', album: null, durationSeconds: 274 }]),
+  });
+  render(<MemoryRouter initialEntries={['/catalog?search=cranberries']}><Catalog /></MemoryRouter>);
+
+  await screen.findByText('Zombie');
+  expect(screen.getByRole('button', { name: /^Add "Zombie" to my songlist$/ })).toBeInTheDocument();
+  expect(await screen.findByRole('heading', { name: 'From MusicBrainz' })).toBeInTheDocument();
+  expect(screen.getByRole('heading', { name: 'Artists' })).toBeInTheDocument();
+  expect(screen.getByRole('heading', { name: 'Songs' })).toBeInTheDocument();
+  expect(screen.getByRole('button', { name: 'Show popular songs by The Cranberries' })).toHaveTextContent('Show songs');
+  expect(screen.getByRole('button', { name: /^Import "Linger" to my songlist$/ })).toBeInTheDocument();
+  expect(svc.searchMusicBrainz).toHaveBeenCalledWith('cranberries', expect.anything());
+});
+
+test('Load more artists and songs request the next MusicBrainz page', async () => {
+  svc.listCatalog.mockResolvedValue(resp([], 0));
+  svc.searchMusicBrainz.mockImplementation(async (_q: string, _signal?: AbortSignal, opts?: { kind?: string; offset?: number }) => {
+    if (opts?.kind === 'artists') {
+      return { artists: mbPage([{ mbid: 'art-2', name: 'Cranberries Tribute' }], 20, 8), recordings: mbPage([]) };
+    }
+    if (opts?.kind === 'recordings') {
+      return { artists: mbPage([]), recordings: mbPage([{ mbid: 't2', title: 'Dreams', artist: 'The Cranberries' }], 15, 8) };
+    }
+    return {
+      artists: mbPage([{ mbid: 'art-1', name: 'The Cranberries' }], 20),
+      recordings: mbPage([{ mbid: 't1', title: 'Linger', artist: 'The Cranberries' }], 15),
+    };
+  });
+  render(<MemoryRouter initialEntries={['/catalog?search=cranberries']}><Catalog /></MemoryRouter>);
+
+  fireEvent.click(await screen.findByRole('button', { name: 'Load more artists' }));
+  await waitFor(() => expect(svc.searchMusicBrainz).toHaveBeenCalledWith('cranberries', undefined, { kind: 'artists', offset: 8 }));
+  expect(await screen.findByText('Cranberries Tribute')).toBeInTheDocument();
+
+  fireEvent.click(screen.getByRole('button', { name: 'Load more songs' }));
+  await waitFor(() => expect(svc.searchMusicBrainz).toHaveBeenCalledWith('cranberries', undefined, { kind: 'recordings', offset: 8 }));
+  expect(await screen.findByText('Dreams')).toBeInTheDocument();
+});
+
+test('clicking an artist loads that artist’s popular songs with Import', async () => {
+  svc.listCatalog.mockResolvedValue(resp([], 0));
+  svc.searchMusicBrainz.mockResolvedValue({
+    artists: mbPage([{ mbid: 'art-1', name: 'The Cranberries' }]),
+    recordings: mbPage([]),
+  });
+  svc.listMusicBrainzArtistRecordings.mockResolvedValue(mbPage([
+    { mbid: 't1', title: 'Zombie', artist: 'The Cranberries', album: 'No Need to Argue', durationSeconds: 308 },
+  ]));
+  render(<MemoryRouter initialEntries={['/catalog?search=cranberries']}><Catalog /></MemoryRouter>);
+
+  fireEvent.click(await screen.findByRole('button', { name: 'Show popular songs by The Cranberries' }));
+  await waitFor(() => expect(svc.listMusicBrainzArtistRecordings).toHaveBeenCalledWith('art-1', expect.anything(), 0));
+  expect(await screen.findByRole('heading', { name: 'Popular songs by The Cranberries' })).toBeInTheDocument();
+  expect(await screen.findByRole('button', { name: /^Import "Zombie" to my songlist$/ })).toBeInTheDocument();
+});
+
+test('Load more songs inside an artist requests the next page', async () => {
+  svc.listCatalog.mockResolvedValue(resp([], 0));
+  svc.searchMusicBrainz.mockResolvedValue({
+    artists: mbPage([{ mbid: 'art-1', name: 'The Cranberries' }]),
+    recordings: mbPage([]),
+  });
+  svc.listMusicBrainzArtistRecordings.mockImplementation(async (_mbid: string, _signal?: AbortSignal, offset = 0) => {
+    if (offset === 8) {
+      return mbPage([{ mbid: 't9', title: 'Dreams', artist: 'The Cranberries' }], 16, 8);
+    }
+    return mbPage([{ mbid: 't1', title: 'Zombie', artist: 'The Cranberries' }], 16, 0);
+  });
+  render(<MemoryRouter initialEntries={['/catalog?search=cranberries']}><Catalog /></MemoryRouter>);
+
+  fireEvent.click(await screen.findByRole('button', { name: 'Show popular songs by The Cranberries' }));
+  await screen.findByRole('button', { name: /^Import "Zombie" to my songlist$/ });
+  fireEvent.click(screen.getByRole('button', { name: 'Load more songs' }));
+  await waitFor(() => expect(svc.listMusicBrainzArtistRecordings).toHaveBeenCalledWith('art-1', undefined, 8));
+  expect(await screen.findByRole('button', { name: /^Import "Dreams" to my songlist$/ })).toBeInTheDocument();
+});
+
+test('a popular song already in the songlist is a badge, not Import', async () => {
+  (songService.getAllSongs as jest.Mock).mockResolvedValue([
+    asSong({ uid: 's-linger', title: 'Linger', artist: 'The Cranberries' }),
+  ]);
+  svc.listCatalog.mockResolvedValue(resp([], 0));
+  svc.searchMusicBrainz.mockResolvedValue({
+    artists: mbPage([{ mbid: 'art-1', name: 'The Cranberries' }]),
+    recordings: mbPage([]),
+  });
+  svc.listMusicBrainzArtistRecordings.mockResolvedValue(mbPage([
+    { mbid: 't1', title: 'Linger', artist: 'The Cranberries', album: 'No Need to Argue', durationSeconds: 274 },
+  ]));
+  render(<MemoryRouter initialEntries={['/catalog?search=cranberries']}><Catalog /></MemoryRouter>);
+
+  fireEvent.click(await screen.findByRole('button', { name: 'Show popular songs by The Cranberries' }));
+  await screen.findByRole('heading', { name: 'Popular songs by The Cranberries' });
+  expect(screen.queryByRole('button', { name: /^Import "Linger" to my songlist$/ })).toBeNull();
+  const already = await screen.findByText(/Already in your songlist/);
+  expect(already.closest('a')).toHaveAttribute('href', '/songs/s-linger');
+});
+
+test('no text search does not call MusicBrainz', async () => {
+  svc.listCatalog.mockResolvedValue(resp([{ uid: 'a', title: 'Zombie', artist: 'The Cranberries' }]));
+  render(<MemoryRouter initialEntries={['/catalog']}><Catalog /></MemoryRouter>);
+  await screen.findByText('Zombie');
+  expect(svc.searchMusicBrainz).not.toHaveBeenCalled();
+  expect(screen.queryByRole('heading', { name: 'From MusicBrainz' })).toBeNull();
 });

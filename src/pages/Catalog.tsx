@@ -1,8 +1,12 @@
-import { useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import { useSearchParams } from 'react-router-dom';
 import { catalogService } from '../services/catalogService';
-import type { CatalogListResponse, CatalogFacets, CatalogCollection } from '../services/catalogService';
+import type { CatalogListResponse, CatalogFacets, CatalogCollection, MusicBrainzHit, MusicBrainzArtist } from '../services/catalogService';
+import { emptyMusicBrainzPage } from '../services/catalogService';
 import CatalogList from '../components/CatalogList';
+import MusicBrainzList from '../components/MusicBrainzList';
+import MusicBrainzEntityList from '../components/MusicBrainzEntityList';
+import LazyLoadFooter from '../components/LazyLoadFooter';
 import CatalogFilters from '../components/CatalogFilters';
 import CollectionCard from '../components/CollectionCard';
 import { ListSkeleton } from '../components/ListSkeleton';
@@ -25,6 +29,24 @@ const asArr = (s: string): string[] => (s ? s.split(',').filter(Boolean) : []);
 // filters + page. No mirrored useState. Back-button restores the view for free.
 
 const DEBOUNCE_MS = 280;
+const MB_DEBOUNCE_MS = 500;
+const MB_EMPTY_META = { total: 0, nextOffset: 0 };
+
+type MbView =
+  | { kind: 'search' }
+  | { kind: 'artist'; mbid: string; name: string };
+
+type MbMeta = { total: number; nextOffset: number };
+
+function mbMetaFrom(page: { total?: number; offset?: number; limit?: number }): MbMeta {
+  return { total: page.total ?? 0, nextOffset: (page.offset ?? 0) + (page.limit ?? 8) };
+}
+
+function appendUnique<T extends { mbid: string }>(prev: T[] | null, next: T[]): T[] {
+  const seen = new Set((prev ?? []).map(item => item.mbid));
+  const extra = next.filter(item => item.mbid && !seen.has(item.mbid));
+  return extra.length ? [...(prev ?? []), ...extra] : (prev ?? []);
+}
 
 export default function Catalog() {
   const [searchParams, setSearchParams] = useSearchParams();
@@ -45,10 +67,23 @@ export default function Catalog() {
   const [error, setError] = useState(false);
   const [refetchToken, setRefetchToken] = useState(0); // bumped by Retry to force a refetch
   const abortRef = useRef<AbortController | null>(null);
+  const mbAbortRef = useRef<AbortController | null>(null);
   const { findExisting, addToCache, refresh: refreshSonglist } = useSonglistMatcher(); // client-side "already in songlist" flag (19.4)
   const [facets, setFacets] = useState<CatalogFacets>(EMPTY_FACETS);
   // Story 20.4: the Collections rail (shown above the list when there is no query).
   const [collections, setCollections] = useState<CatalogCollection[] | null>(null);
+  const [mbArtists, setMbArtists] = useState<MusicBrainzArtist[] | null>(null);
+  const [mbRecordings, setMbRecordings] = useState<MusicBrainzHit[] | null>(null);
+  const [mbArtistMeta, setMbArtistMeta] = useState<MbMeta>(MB_EMPTY_META);
+  const [mbRecordingMeta, setMbRecordingMeta] = useState<MbMeta>(MB_EMPTY_META);
+  const [mbArtistLoadingMore, setMbArtistLoadingMore] = useState(false);
+  const [mbRecordingLoadingMore, setMbRecordingLoadingMore] = useState(false);
+  const [mbTracks, setMbTracks] = useState<MusicBrainzHit[] | null>(null);
+  const [mbTrackMeta, setMbTrackMeta] = useState<MbMeta>(MB_EMPTY_META);
+  const [mbTrackLoadingMore, setMbTrackLoadingMore] = useState(false);
+  const [mbView, setMbView] = useState<MbView>({ kind: 'search' });
+  const [mbError, setMbError] = useState(false);
+  const [mbDrillLoading, setMbDrillLoading] = useState(false);
 
   // Story 22.4: reader-side selection. Ephemeral (no persistKey) and "within-page" like
   // the curator table — it SURVIVES pagination, which is why a Clear selection escape
@@ -150,6 +185,128 @@ export default function Catalog() {
       });
     return () => ctrl.abort();
   }, [search, key, mode, timeSignature, genre, page, refetchToken]);
+
+  // MusicBrainz extras only on a text search. Failures degrade — they never
+  // replace the catalog error UI. A new search resets the artist drill-down.
+  useEffect(() => {
+    mbAbortRef.current?.abort();
+    const q = search.trim();
+    setMbView({ kind: 'search' });
+    setMbTracks(null);
+    setMbTrackMeta(MB_EMPTY_META);
+    setMbDrillLoading(false);
+    setMbArtistLoadingMore(false);
+    setMbRecordingLoadingMore(false);
+    setMbTrackLoadingMore(false);
+    if (!q) {
+      setMbArtists(null);
+      setMbRecordings(null);
+      setMbArtistMeta(MB_EMPTY_META);
+      setMbRecordingMeta(MB_EMPTY_META);
+      setMbError(false);
+      return;
+    }
+    const timer = setTimeout(() => {
+      const ctrl = new AbortController();
+      mbAbortRef.current = ctrl;
+      setMbError(false);
+      catalogService.searchMusicBrainz(q, ctrl.signal)
+        .then(res => {
+          if (ctrl.signal.aborted) return;
+          const artists = res?.artists ?? emptyMusicBrainzPage<MusicBrainzArtist>();
+          const recordings = res?.recordings ?? emptyMusicBrainzPage<MusicBrainzHit>();
+          setMbArtists(artists.items ?? []);
+          setMbRecordings(recordings.items ?? []);
+          setMbArtistMeta(mbMetaFrom(artists));
+          setMbRecordingMeta(mbMetaFrom(recordings));
+        })
+        .catch(err => {
+          if (err?.name === 'AbortError') return;
+          setMbError(true);
+          setMbArtists(null);
+          setMbRecordings(null);
+        });
+    }, MB_DEBOUNCE_MS);
+    return () => {
+      clearTimeout(timer);
+      mbAbortRef.current?.abort();
+    };
+  }, [search]);
+
+  const openArtist = (mbid: string, name: string) => {
+    mbAbortRef.current?.abort();
+    const ctrl = new AbortController();
+    mbAbortRef.current = ctrl;
+    setMbView({ kind: 'artist', mbid, name });
+    setMbTracks(null);
+    setMbTrackMeta(MB_EMPTY_META);
+    setMbTrackLoadingMore(false);
+    setMbError(false);
+    setMbDrillLoading(true);
+    catalogService.listMusicBrainzArtistRecordings(mbid, ctrl.signal, 0)
+      .then(page => {
+        if (ctrl.signal.aborted) return;
+        setMbTracks(page.items ?? []);
+        setMbTrackMeta(mbMetaFrom(page));
+        setMbDrillLoading(false);
+      })
+      .catch(err => {
+        if (err?.name === 'AbortError') return;
+        setMbError(true);
+        setMbDrillLoading(false);
+      });
+  };
+
+  const backFromMb = () => {
+    mbAbortRef.current?.abort();
+    setMbError(false);
+    setMbDrillLoading(false);
+    setMbView({ kind: 'search' });
+    setMbTracks(null);
+    setMbTrackMeta(MB_EMPTY_META);
+    setMbTrackLoadingMore(false);
+  };
+
+  const loadMoreArtists = useCallback(() => {
+    const q = search.trim();
+    if (!q || mbArtistLoadingMore || mbArtistMeta.nextOffset >= mbArtistMeta.total) return;
+    setMbArtistLoadingMore(true);
+    catalogService.searchMusicBrainz(q, undefined, { kind: 'artists', offset: mbArtistMeta.nextOffset })
+      .then(res => {
+        const page = res?.artists ?? emptyMusicBrainzPage<MusicBrainzArtist>(mbArtistMeta.nextOffset);
+        setMbArtists(prev => appendUnique(prev, page.items ?? []));
+        setMbArtistMeta(mbMetaFrom(page));
+      })
+      .catch(() => {})
+      .finally(() => setMbArtistLoadingMore(false));
+  }, [search, mbArtistLoadingMore, mbArtistMeta.nextOffset, mbArtistMeta.total]);
+
+  const loadMoreRecordings = useCallback(() => {
+    const q = search.trim();
+    if (!q || mbRecordingLoadingMore || mbRecordingMeta.nextOffset >= mbRecordingMeta.total) return;
+    setMbRecordingLoadingMore(true);
+    catalogService.searchMusicBrainz(q, undefined, { kind: 'recordings', offset: mbRecordingMeta.nextOffset })
+      .then(res => {
+        const page = res?.recordings ?? emptyMusicBrainzPage<MusicBrainzHit>(mbRecordingMeta.nextOffset);
+        setMbRecordings(prev => appendUnique(prev, page.items ?? []));
+        setMbRecordingMeta(mbMetaFrom(page));
+      })
+      .catch(() => {})
+      .finally(() => setMbRecordingLoadingMore(false));
+  }, [search, mbRecordingLoadingMore, mbRecordingMeta.nextOffset, mbRecordingMeta.total]);
+
+  const loadMoreTracks = useCallback(() => {
+    if (mbView.kind !== 'artist' || mbTrackLoadingMore || mbTrackMeta.nextOffset >= mbTrackMeta.total) return;
+    const mbid = mbView.mbid;
+    setMbTrackLoadingMore(true);
+    catalogService.listMusicBrainzArtistRecordings(mbid, undefined, mbTrackMeta.nextOffset)
+      .then(page => {
+        setMbTracks(prev => appendUnique(prev, page.items ?? []));
+        setMbTrackMeta(mbMetaFrom(page));
+      })
+      .catch(() => {})
+      .finally(() => setMbTrackLoadingMore(false));
+  }, [mbView, mbTrackLoadingMore, mbTrackMeta.nextOffset, mbTrackMeta.total]);
 
   const total = data?.total ?? 0;
   const limit = data?.limit ?? 24;
@@ -288,6 +445,91 @@ export default function Catalog() {
             </>
           )}
         </div>
+      )}
+
+      {search.trim() && (mbError || mbView.kind !== 'search' || (mbArtists && mbArtists.length > 0) || (mbRecordings && mbRecordings.length > 0)) && (
+        <section className="mt-8" aria-labelledby="musicbrainz-heading">
+          <div className="flex items-center justify-between gap-3 mb-2">
+            <h2 id="musicbrainz-heading" className="text-lg font-medium text-gray-800 dark:text-gray-200">
+              {mbView.kind === 'artist' && `Popular songs by ${mbView.name}`}
+              {mbView.kind === 'search' && 'From MusicBrainz'}
+            </h2>
+            {mbView.kind !== 'search' && (
+              <button type="button" className="btn-secondary text-xs" onClick={backFromMb}>
+                Back
+              </button>
+            )}
+          </div>
+
+          {mbError && (
+            <p className="text-sm text-gray-500 dark:text-gray-400">Couldn’t reach MusicBrainz.</p>
+          )}
+
+          {!mbError && mbDrillLoading && (
+            <p className="text-sm text-gray-500 dark:text-gray-400">Loading…</p>
+          )}
+
+          {!mbError && !mbDrillLoading && mbView.kind === 'search' && (
+            <>
+              {mbArtists && mbArtists.length > 0 && (
+                <div className="mb-4">
+                  <h3 className="text-sm font-medium text-gray-600 dark:text-gray-300 mb-2">Artists</h3>
+                  <MusicBrainzEntityList
+                    items={mbArtists.map(a => ({ mbid: a.mbid, label: a.name }))}
+                    onPick={item => openArtist(item.mbid, item.label)}
+                    pickLabel={item => `Show popular songs by ${item.label}`}
+                    footer={
+                      <LazyLoadFooter
+                        hasMore={mbArtistMeta.nextOffset < mbArtistMeta.total}
+                        loading={mbArtistLoadingMore}
+                        onLoadMore={loadMoreArtists}
+                        label="Load more artists"
+                      />
+                    }
+                  />
+                </div>
+              )}
+              {mbRecordings && mbRecordings.length > 0 && (
+                <div>
+                  <h3 className="text-sm font-medium text-gray-600 dark:text-gray-300 mb-2">Songs</h3>
+                  <MusicBrainzList
+                    items={mbRecordings}
+                    existingFor={findExisting}
+                    onAdded={addToCache}
+                    footer={
+                      <LazyLoadFooter
+                        hasMore={mbRecordingMeta.nextOffset < mbRecordingMeta.total}
+                        loading={mbRecordingLoadingMore}
+                        onLoadMore={loadMoreRecordings}
+                        label="Load more songs"
+                      />
+                    }
+                  />
+                </div>
+              )}
+            </>
+          )}
+
+          {!mbError && !mbDrillLoading && mbView.kind === 'artist' && mbTracks && (
+            mbTracks.length > 0 ? (
+              <MusicBrainzList
+                items={mbTracks}
+                existingFor={findExisting}
+                onAdded={addToCache}
+                footer={
+                  <LazyLoadFooter
+                    hasMore={mbTrackMeta.nextOffset < mbTrackMeta.total}
+                    loading={mbTrackLoadingMore}
+                    onLoadMore={loadMoreTracks}
+                    label="Load more songs"
+                  />
+                }
+              />
+            ) : (
+              <p className="text-sm text-gray-500 dark:text-gray-400">No songs found.</p>
+            )
+          )}
+        </section>
       )}
 
       <ConfirmDialog

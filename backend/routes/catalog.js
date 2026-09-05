@@ -24,6 +24,11 @@ router.get('/facets', authsess, catalogController.getCatalogFacets);
 // Story 19.12 — EXACT (title, artist) dup-check (curator only: it reveals draft
 // existence). BEFORE /:uid so "exists" isn't captured as a uid param.
 router.get('/exists', authsess, requireCurator, catalogController.getCatalogExists);
+// MusicBrainz extras for Catalog browse. BEFORE /:uid so these paths are not
+// captured as a catalog-entry uid. authsess only (Import writes the user's
+// songlist, not the Catalog).
+router.get('/musicbrainz-search', authsess, catalogController.searchMusicBrainz);
+router.get('/musicbrainz-artists/:mbid/recordings', authsess, catalogController.listMusicBrainzArtistRecordings);
 
 // Story 20.1 — Collections (curated themed groupings). ALL registered BEFORE /:uid so
 // "collections" is never captured as a catalog-entry uid. Writes = curator (403);

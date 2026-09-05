@@ -16,8 +16,17 @@ jest.mock('../models', () => ({
   },
 }));
 
+jest.mock('../services/musicbrainzService', () => ({
+  searchArtistsAndRecordings: jest.fn(),
+  searchArtists: jest.fn(),
+  searchRecordings: jest.fn(),
+  listPopularRecordingsByArtist: jest.fn(),
+  emptyPage: (offset = 0) => ({ items: [], total: 0, offset, limit: 8 }),
+}));
+
 const { CatalogSong, Song, User } = require('../models');
 const { Op } = require('sequelize');
+const musicbrainzService = require('../services/musicbrainzService');
 const controller = require('../controllers/catalogcontroller');
 
 const UID = '11111111-1111-4111-8111-111111111111';
@@ -588,5 +597,110 @@ describe('catalogcontroller', () => {
     const next = mockNext();
     await controller.getCatalogExists({ query: { title: 'Zombie' } }, mockRes(), next);
     expect(next.mock.calls[0][0].status).toBe(500);
+  });
+
+  // --- MusicBrainz artist extras ---
+
+  test('searchMusicBrainz with an empty q returns empty pages without calling MusicBrainz', async () => {
+    const res = mockRes();
+    await controller.searchMusicBrainz({ query: { q: '   ' } }, res, mockNext());
+    expect(musicbrainzService.searchArtistsAndRecordings).not.toHaveBeenCalled();
+    expect(res.json.mock.calls[0][0].artists.items).toEqual([]);
+    expect(res.json.mock.calls[0][0].recordings.items).toEqual([]);
+  });
+
+  test('searchMusicBrainz returns paged artists and recordings, dropping published catalog matches from songs', async () => {
+    musicbrainzService.searchArtistsAndRecordings.mockResolvedValue({
+      artists: { items: [{ mbid: 'a1', name: 'The Cranberries' }], total: 1, offset: 0, limit: 8 },
+      recordings: {
+        items: [
+          { mbid: 'mb-1', title: 'Zombie', artist: 'The Cranberries', album: 'NNTTA', durationSeconds: 308 },
+          { mbid: 'mb-2', title: 'Linger', artist: 'The Cranberries', album: 'NNTTA', durationSeconds: 274 },
+        ],
+        total: 2, offset: 0, limit: 8,
+      },
+    });
+    CatalogSong.findOne
+      .mockResolvedValueOnce({ uid: 'c1', title: 'Zombie', publishedAt: '2026-01-01' })
+      .mockResolvedValueOnce(null);
+    const res = mockRes();
+    await controller.searchMusicBrainz({ query: { q: 'cranberries' } }, res, mockNext());
+    expect(musicbrainzService.searchArtistsAndRecordings).toHaveBeenCalledWith('cranberries');
+    expect(res.json.mock.calls[0][0].artists.items).toHaveLength(1);
+    expect(res.json.mock.calls[0][0].recordings.items).toEqual([
+      { mbid: 'mb-2', title: 'Linger', artist: 'The Cranberries', album: 'NNTTA', durationSeconds: 274 },
+    ]);
+  });
+
+  test('searchMusicBrainz with kind=artists loads one page at the given offset', async () => {
+    musicbrainzService.searchArtists.mockResolvedValue({
+      items: [{ mbid: 'a2', name: 'Cranberries Tribute' }], total: 20, offset: 8, limit: 8,
+    });
+    const res = mockRes();
+    await controller.searchMusicBrainz({ query: { q: 'cranberries', kind: 'artists', offset: '8' } }, res, mockNext());
+    expect(musicbrainzService.searchArtists).toHaveBeenCalledWith('cranberries', 8);
+    expect(musicbrainzService.searchArtistsAndRecordings).not.toHaveBeenCalled();
+    expect(res.json.mock.calls[0][0].artists.offset).toBe(8);
+  });
+
+  test('searchMusicBrainz returns empty pages when MusicBrainz throws (catalog browse stays up)', async () => {
+    musicbrainzService.searchArtistsAndRecordings.mockRejectedValue(new Error('503'));
+    const res = mockRes();
+    await controller.searchMusicBrainz({ query: { q: 'zombie' } }, res, mockNext());
+    expect(res.json.mock.calls[0][0].artists.items).toEqual([]);
+    expect(res.json.mock.calls[0][0].recordings.items).toEqual([]);
+  });
+
+  test('listMusicBrainzArtistRecordings drops a published catalog title+artist match', async () => {
+    musicbrainzService.listPopularRecordingsByArtist.mockResolvedValue({
+      items: [
+        { mbid: 'mb-1', title: 'Zombie', artist: 'The Cranberries', album: 'NNTTA', durationSeconds: 308 },
+        { mbid: 'mb-2', title: 'Linger', artist: 'The Cranberries', album: 'NNTTA', durationSeconds: 274 },
+      ],
+      total: 2, offset: 0, limit: 8,
+    });
+    CatalogSong.findOne
+      .mockResolvedValueOnce({ uid: 'c1', title: 'Zombie', publishedAt: '2026-01-01' })
+      .mockResolvedValueOnce(null);
+    const res = mockRes();
+
+    await controller.listMusicBrainzArtistRecordings({ params: { mbid: 'a1' } }, res, mockNext());
+
+    expect(musicbrainzService.listPopularRecordingsByArtist).toHaveBeenCalledWith('a1', 0);
+    expect(res.json.mock.calls[0][0].items).toEqual([
+      { mbid: 'mb-2', title: 'Linger', artist: 'The Cranberries', album: 'NNTTA', durationSeconds: 274 },
+    ]);
+    expect(res.json.mock.calls[0][0].total).toBe(2);
+  });
+
+  test('listMusicBrainzArtistRecordings forwards offset for lazy load', async () => {
+    musicbrainzService.listPopularRecordingsByArtist.mockResolvedValue({
+      items: [{ mbid: 'mb-9', title: 'Dreams', artist: 'The Cranberries', album: null, durationSeconds: 200 }],
+      total: 16, offset: 8, limit: 8,
+    });
+    CatalogSong.findOne.mockResolvedValue(null);
+    const res = mockRes();
+
+    await controller.listMusicBrainzArtistRecordings(
+      { params: { mbid: 'a1' }, query: { offset: '8' } },
+      res,
+      mockNext(),
+    );
+
+    expect(musicbrainzService.listPopularRecordingsByArtist).toHaveBeenCalledWith('a1', 8);
+    expect(res.json.mock.calls[0][0].offset).toBe(8);
+  });
+
+  test('listMusicBrainzArtistRecordings keeps a hit that only matches a DRAFT catalog entry', async () => {
+    const hit = { mbid: 'mb-1', title: 'Zombie', artist: 'The Cranberries', album: null, durationSeconds: 308 };
+    musicbrainzService.listPopularRecordingsByArtist.mockResolvedValue({
+      items: [hit], total: 1, offset: 0, limit: 8,
+    });
+    CatalogSong.findOne.mockResolvedValue({ uid: 'draft', publishedAt: null });
+    const res = mockRes();
+
+    await controller.listMusicBrainzArtistRecordings({ params: { mbid: 'a1' } }, res, mockNext());
+
+    expect(res.json.mock.calls[0][0].items).toEqual([hit]);
   });
 });
